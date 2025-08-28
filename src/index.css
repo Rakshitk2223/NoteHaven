@@ -1,0 +1,130 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NoteHaven Design System - Zen Garden Theme
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Zen Garden Color Palette */
+    --background: 40 33% 96%;  /* Antique White #F8F7F4 */
+    --foreground: 0 0% 24%;    /* Soft Charcoal #3D3D3D */
+
+    --card: 40 33% 96%;
+    --card-foreground: 0 0% 24%;
+
+    --popover: 40 33% 96%;
+    --popover-foreground: 0 0% 24%;
+
+    --primary: 213 34% 37%;     /* Deep Stone Blue #3D5A80 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 88%;      /* Light Gray #E0E0E0 */
+    --secondary-foreground: 0 0% 24%;
+
+    --muted: 0 0% 88%;
+    --muted-foreground: 0 0% 66%; /* Muted Gray #A9A9A9 */
+
+    --accent: 213 34% 37%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 88%;         /* Light Gray #E0E0E0 */
+    --input: 0 0% 88%;
+    --ring: 213 34% 37%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Dark mode maintains zen aesthetic with deeper tones */
+    --background: 213 20% 15%;
+    --foreground: 40 33% 90%;
+
+    --card: 213 20% 18%;
+    --card-foreground: 40 33% 90%;
+
+    --popover: 213 20% 18%;
+    --popover-foreground: 40 33% 90%;
+
+    --primary: 213 50% 65%;
+    --primary-foreground: 213 20% 15%;
+
+    --secondary: 213 15% 25%;
+    --secondary-foreground: 40 33% 90%;
+
+    --muted: 213 15% 25%;
+    --muted-foreground: 0 0% 60%;
+
+    --accent: 213 50% 65%;
+    --accent-foreground: 213 20% 15%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 213 15% 25%;
+    --input: 213 15% 25%;
+    --ring: 213 50% 65%;
+    
+    --sidebar-background: 213 20% 15%;
+    --sidebar-foreground: 40 33% 90%;
+    --sidebar-primary: 213 50% 65%;
+    --sidebar-primary-foreground: 213 20% 15%;
+    --sidebar-accent: 213 15% 25%;
+    --sidebar-accent-foreground: 40 33% 90%;
+    --sidebar-border: 213 15% 25%;
+    --sidebar-ring: 213 50% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+
+  /* Zen Garden specific styles */
+  .zen-card {
+    @apply bg-card border border-border rounded-lg shadow-sm;
+  }
+
+  .zen-shadow {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+
+  .zen-shadow-lg {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Smooth transitions for zen feel */
+  .zen-transition {
+    @apply transition-all duration-300 ease-in-out;
+  }
+}

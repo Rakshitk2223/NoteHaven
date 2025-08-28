@@ -1,0 +1,42 @@
+import { useState } from "react";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import AppSidebar from "@/components/AppSidebar";
+
+const SimpleTasks = () => {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="flex">
+        <AppSidebar 
+          isCollapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+        
+        <div className="flex-1 lg:ml-0">
+          <div className="p-6 border-b border-border">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold font-heading text-foreground">
+                Tasks
+              </h1>
+              <Button className="zen-transition hover:shadow-md">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Task
+              </Button>
+            </div>
+          </div>
+
+          <div className="p-6">
+            <div className="zen-card p-8 text-center">
+              <p className="text-muted-foreground mb-4">Authentication connected! Create your first task to get started.</p>
+              <p className="text-sm text-muted-foreground">This feature will be fully functional once you sign up and log in.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SimpleTasks;
