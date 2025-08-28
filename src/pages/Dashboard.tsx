@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -56,6 +56,14 @@ const Dashboard = () => {
     try {
       setLoading(true);
       
+      // Check if user is authenticated first
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      console.log('User authenticated:', user.id);
+      
       // Fetch all data in parallel
       const [
         tasksResult,
@@ -80,7 +88,7 @@ const Dashboard = () => {
       console.error('Error fetching dashboard data:', error);
       toast({
         title: "Error",
-        description: "Failed to load dashboard data",
+        description: error instanceof Error ? error.message : "Failed to load dashboard data",
         variant: "destructive"
       });
     } finally {
@@ -89,9 +97,13 @@ const Dashboard = () => {
   };
 
   const fetchPendingTasks = async (): Promise<Task[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
     const { data, error } = await supabase
       .from('tasks')
       .select('id, task_text, is_completed')
+      .eq('user_id', user.id)
       .eq('is_completed', false)
       .order('created_at', { ascending: false })
       .limit(5);
@@ -101,9 +113,13 @@ const Dashboard = () => {
   };
 
   const fetchRecentNotes = async (): Promise<Note[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
     const { data, error } = await supabase
       .from('notes')
       .select('id, title, updated_at')
+      .eq('user_id', user.id)
       .order('updated_at', { ascending: false })
       .limit(3);
 
@@ -112,9 +128,13 @@ const Dashboard = () => {
   };
 
   const fetchWatchingMedia = async (): Promise<MediaItem[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
     const { data, error } = await supabase
       .from('media_tracker')
       .select('id, title, type')
+      .eq('user_id', user.id)
       .eq('status', 'Watching')
       .order('updated_at', { ascending: false })
       .limit(4);
@@ -124,9 +144,13 @@ const Dashboard = () => {
   };
 
   const fetchFavoritePrompts = async (): Promise<Prompt[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
     const { data, error } = await supabase
       .from('prompts')
       .select('id, title, is_favorited')
+      .eq('user_id', user.id)
       .eq('is_favorited', true)
       .order('created_at', { ascending: false })
       .limit(4);
@@ -136,11 +160,14 @@ const Dashboard = () => {
   };
 
   const fetchStats = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
     const [tasksResult, notesResult, mediaResult, promptsResult] = await Promise.all([
-      supabase.from('tasks').select('is_completed'),
-      supabase.from('notes').select('id'),
-      supabase.from('media_tracker').select('id'),
-      supabase.from('prompts').select('id')
+      supabase.from('tasks').select('is_completed').eq('user_id', user.id),
+      supabase.from('notes').select('id').eq('user_id', user.id),
+      supabase.from('media_tracker').select('id').eq('user_id', user.id),
+      supabase.from('prompts').select('id').eq('user_id', user.id)
     ]);
 
     const tasks = tasksResult.data || [];
@@ -157,13 +184,17 @@ const Dashboard = () => {
 
   const handleTaskComplete = async (taskId: number) => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
       // Optimistic update
       setPendingTasks(prev => prev.filter(task => task.id !== taskId));
 
       const { error } = await supabase
         .from('tasks')
         .update({ is_completed: true })
-        .eq('id', taskId);
+        .eq('id', taskId)
+        .eq('user_id', user.id);
 
       if (error) throw error;
 

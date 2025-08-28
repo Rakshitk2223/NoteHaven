@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Plus, Edit, Trash2, Star, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,12 +25,14 @@ interface MediaItem {
   id: number;
   user_id: string;
   title: string;
-  type: 'Movie' | 'Series' | 'Anime' | 'Manga';
-  status: 'Watching' | 'Completed' | 'On Hold' | 'Plan to Watch';
+  // Accept exact literals for UI plus generic string to satisfy DB returns
+  type: 'Movie' | 'Series' | 'Anime' | 'Manga' | string;
+  status: 'Watching' | 'Completed' | 'On Hold' | 'Plan to Watch' | string;
   rating?: number;
   current_season?: number;
   current_episode?: number;
   created_at: string;
+  updated_at?: string; // added in migration; optional for backward compatibility
 }
 
 const MediaTracker = () => {
@@ -64,7 +66,8 @@ const MediaTracker = () => {
       let query = supabase
         .from('media_tracker')
         .select('*')
-        .order('created_at', { ascending: false });
+        // Prefer updated_at if present (after migration), fallback to created_at
+        .order('updated_at', { ascending: false });
 
       // Apply filters
       if (filterType !== 'All') {

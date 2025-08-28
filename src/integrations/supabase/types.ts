@@ -14,7 +14,129 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      prompts: {
+        Row: {
+          id: number
+          user_id: string
+          title: string | null
+          prompt_text: string | null
+          is_favorited: boolean | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          title?: string | null
+            prompt_text?: string | null
+          is_favorited?: boolean | null
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          title?: string | null
+          prompt_text?: string | null
+          is_favorited?: boolean | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      notes: {
+        Row: {
+          id: number
+          user_id: string
+          title: string | null
+          content: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          title?: string | null
+          content?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          title?: string | null
+          content?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      tasks: {
+        Row: {
+          id: number
+          user_id: string
+          task_text: string | null
+          is_completed: boolean | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          task_text?: string | null
+          is_completed?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          task_text?: string | null
+          is_completed?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      media_tracker: {
+        Row: {
+          id: number
+          user_id: string
+          title: string | null
+          type: string | null
+          status: string | null
+          rating: number | null
+          current_season: number | null
+          current_episode: number | null
+          image_url: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          title?: string | null
+          type?: string | null
+          status?: string | null
+          rating?: number | null
+          current_season?: number | null
+          current_episode?: number | null
+          image_url?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          title?: string | null
+          type?: string | null
+          status?: string | null
+          rating?: number | null
+          current_season?: number | null
+          current_episode?: number | null
+          image_url?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
