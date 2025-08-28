@@ -1,0 +1,334 @@
+import { useState, useEffect } from "react";
+import { Plus, Copy, Edit, Trash2, Check, Star } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import AppSidebar from "@/components/AppSidebar";
+import { supabase } from "@/integrations/supabase/client";
+
+interface Prompt {
+  id: number;
+  user_id: string;
+  title: string;
+  prompt_text: string;
+  is_favorited?: boolean;
+  created_at: string;
+}
+
+const Prompts = () => {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
+  const [formData, setFormData] = useState({ title: "", prompt_text: "" });
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  // Fetch prompts on component mount
+  useEffect(() => {
+    fetchPrompts();
+  }, []);
+
+  const fetchPrompts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const { data, error } = await supabase
+        .from('prompts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      setPrompts(data || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch prompts');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreatePrompt = async () => {
+    try {
+      // Get the current authenticated user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
+      const { error } = await supabase
+        .from('prompts')
+        .insert([{ ...formData, user_id: user.id }]);
+
+      if (error) {
+        throw error;
+      }
+
+      setIsModalOpen(false);
+      setFormData({ title: "", prompt_text: "" });
+      fetchPrompts(); // Refresh the list
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create prompt');
+    }
+  };
+
+  const handleUpdatePrompt = async () => {
+    if (!editingPrompt) return;
+
+    try {
+      const { error } = await supabase
+        .from('prompts')
+        .update(formData)
+        .eq('id', editingPrompt.id);
+
+      if (error) {
+        throw error;
+      }
+
+      setIsModalOpen(false);
+      setEditingPrompt(null);
+      setFormData({ title: "", prompt_text: "" });
+      fetchPrompts(); // Refresh the list
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update prompt');
+    }
+  };
+
+  const handleDeletePrompt = async (id: number) => {
+    if (!window.confirm('Are you sure you want to delete this prompt?')) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('prompts')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        throw error;
+      }
+
+      setPrompts(prompts.filter(prompt => prompt.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete prompt');
+    }
+  };
+
+  const handleCopyPrompt = async (promptText: string, id: number) => {
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      setError('Failed to copy to clipboard');
+    }
+  };
+
+  const handleToggleFavorite = async (prompt: Prompt) => {
+    try {
+      const newFavoriteStatus = !prompt.is_favorited;
+      
+      const { error } = await supabase
+        .from('prompts')
+        .update({ is_favorited: newFavoriteStatus })
+        .eq('id', prompt.id);
+
+      if (error) {
+        throw error;
+      }
+
+      // Update the prompt in the local state
+      setPrompts(prompts.map(p => 
+        p.id === prompt.id 
+          ? { ...p, is_favorited: newFavoriteStatus }
+          : p
+      ));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update favorite status');
+    }
+  };
+
+  const handleEditPrompt = (prompt: Prompt) => {
+    setEditingPrompt(prompt);
+    setFormData({ title: prompt.title, prompt_text: prompt.prompt_text });
+    setIsModalOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setEditingPrompt(null);
+    setFormData({ title: "", prompt_text: "" });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingPrompt) {
+      handleUpdatePrompt();
+    } else {
+      handleCreatePrompt();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="flex">
+        <AppSidebar 
+          isCollapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
+        
+        <div className="flex-1 lg:ml-0">
+          <div className="p-6 border-b border-border">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold font-heading text-foreground">
+                AI Prompts
+              </h1>
+              <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+                <DialogTrigger asChild>
+                  <Button className="zen-transition hover:shadow-md">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add New Prompt
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[500px]">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {editingPrompt ? 'Edit Prompt' : 'Create New Prompt'}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="title">Title</Label>
+                      <Input
+                        id="title"
+                        value={formData.title}
+                        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                        placeholder="Enter prompt title"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="prompt_text">Prompt Text</Label>
+                      <Textarea
+                        id="prompt_text"
+                        value={formData.prompt_text}
+                        onChange={(e) => setFormData({ ...formData, prompt_text: e.target.value })}
+                        placeholder="Enter your prompt text"
+                        rows={6}
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end space-x-2 pt-4">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleModalClose}
+                      >
+                        Cancel
+                      </Button>
+                      <Button type="submit">
+                        {editingPrompt ? 'Update' : 'Create'}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+
+          <div className="p-6">
+            {error && (
+              <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
+                {error}
+              </div>
+            )}
+
+            {loading ? (
+              <div className="zen-card p-8 text-center">
+                <p className="text-muted-foreground">Loading prompts...</p>
+              </div>
+            ) : prompts.length === 0 ? (
+              <div className="zen-card p-8 text-center">
+                <p className="text-muted-foreground mb-4">
+                  You haven't created any prompts yet. Click 'Add New Prompt' to start!
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {prompts.map((prompt) => (
+                  <div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition">
+                                         <h3 className="text-lg font-semibold text-foreground mb-2 truncate">
+                       {prompt.title}
+                     </h3>
+                     <p className="text-muted-foreground mb-4 text-sm overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
+                       {prompt.prompt_text}
+                     </p>
+                                         <div className="flex space-x-2">
+                       <Button
+                         size="sm"
+                         variant="outline"
+                         onClick={() => handleCopyPrompt(prompt.prompt_text, prompt.id)}
+                         className="flex-1"
+                       >
+                         {copiedId === prompt.id ? (
+                           <>
+                             <Check className="h-4 w-4 mr-1" />
+                             Copied
+                           </>
+                         ) : (
+                           <>
+                             <Copy className="h-4 w-4 mr-1" />
+                             Copy
+                           </>
+                         )}
+                       </Button>
+                       <Button
+                         size="sm"
+                         variant="outline"
+                         onClick={() => handleToggleFavorite(prompt)}
+                         className={prompt.is_favorited ? "text-yellow-500 hover:text-yellow-600" : ""}
+                       >
+                         <Star className={`h-4 w-4 ${prompt.is_favorited ? "fill-current" : ""}`} />
+                       </Button>
+                       <Button
+                         size="sm"
+                         variant="outline"
+                         onClick={() => handleEditPrompt(prompt)}
+                       >
+                         <Edit className="h-4 w-4" />
+                       </Button>
+                       <Button
+                         size="sm"
+                         variant="outline"
+                         onClick={() => handleDeletePrompt(prompt.id)}
+                         className="text-destructive hover:text-destructive"
+                       >
+                         <Trash2 className="h-4 w-4" />
+                       </Button>
+                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Prompts;
