@@ -1,73 +1,62 @@
-# Welcome to your Lovable project
+## NoteHaven
 
-## Project info
+Personal productivity & media companion built with React + TypeScript + Vite + Supabase.
 
-**URL**: https://lovable.dev/projects/9c0c6a58-58a4-489a-995d-1364a834aaa0
+### Features
+- Email/password auth (single Supabase client)
+- Notes (auto-save), Tasks, Media Tracker, AI Prompts, Favorites
+- Dashboard overview & stats
+- Row Level Security (user owns their data)
+- Environment-driven configuration (Vite `VITE_` vars)
 
-## How can I edit this code?
+### Tech Stack
+- React 18, TypeScript, Vite
+- Supabase (Auth + Postgres)
+- Tailwind CSS + shadcn/ui components
+- React Router, React Query
 
-There are several ways of editing your application.
+### Getting Started
+1. Clone & install:
+   ```bash
+   npm install
+   ```
+2. Copy `.env.example` to `.env` and fill values:
+   ```bash
+   VITE_SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
+   VITE_SUPABASE_ANON_KEY="YOUR_ANON_KEY"
+   VITE_SUPABASE_PROJECT_ID="YOUR_PROJECT_REF"
+   ```
+3. Run dev server:
+   ```bash
+   npm run dev
+   ```
+4. Open the shown local URL (default http://localhost:5173 unless configured).
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/9c0c6a58-58a4-489a-995d-1364a834aaa0) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+### Production Build
+```bash
+npm run build
+npm run preview
 ```
 
-**Edit a file directly in GitHub**
+### Database Schema (summary)
+Tables: `prompts`, `notes`, `tasks`, `media_tracker` (all include `user_id` + timestamps). Additional columns: `is_favorited`, `updated_at` with triggers.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### RLS Policy Pattern
+Grant row access only when `auth.uid() = user_id` for each CRUD verb.
 
-**Use GitHub Codespaces**
+### Supabase Client
+`src/integrations/supabase/client.ts` exports the singleton. Do not call `createClient` elsewhere.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Troubleshooting
+Blank screen:
+1. Check DevTools console for runtime errors.
+2. Verify env vars: `import.meta.env.VITE_SUPABASE_URL`.
+3. Ensure migrations added required columns (`is_favorited`, `updated_at`).
 
-## What technologies are used for this project?
+Auth not persisting: confirm only one client; clear localStorage and sign in again.
 
-This project is built with:
+### Contributing
+PRs welcome. Run lint & build before submitting.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/9c0c6a58-58a4-489a-995d-1364a834aaa0) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+### License
+MIT
