@@ -21,6 +21,7 @@ export type Database = {
           title: string | null
           prompt_text: string | null
           is_favorited: boolean | null
+          category: string | null
           created_at: string
         }
         Insert: {
@@ -29,6 +30,7 @@ export type Database = {
           title?: string | null
             prompt_text?: string | null
           is_favorited?: boolean | null
+          category?: string | null
           created_at?: string
         }
         Update: {
@@ -37,6 +39,7 @@ export type Database = {
           title?: string | null
           prompt_text?: string | null
           is_favorited?: boolean | null
+          category?: string | null
           created_at?: string
         }
         Relationships: []

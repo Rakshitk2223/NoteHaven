@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { Badge } from "@/components/ui/badge";
 
 interface Prompt {
   id: number;
@@ -20,39 +21,59 @@ interface Prompt {
   title: string;
   prompt_text: string;
   is_favorited?: boolean;
+  category?: string;
   created_at: string;
 }
 
 const Prompts = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [activeFilter, setActiveFilter] = useState<string>('All');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
-  const [formData, setFormData] = useState({ title: "", prompt_text: "" });
+  const [formData, setFormData] = useState({ title: "", prompt_text: "", category: "" });
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   // Fetch prompts on component mount
   useEffect(() => {
-    fetchPrompts();
+    fetchPrompts("All");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchPrompts = async () => {
+  const fetchPrompts = async (filter: string = activeFilter) => {
     try {
       setLoading(true);
       setError(null);
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('prompts')
         .select('*')
         .order('created_at', { ascending: false });
+
+      if (filter !== 'All') {
+        query = query.eq('category', filter);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         throw error;
       }
 
       setPrompts(data || []);
+
+      // Derive unique categories from the (possibly filtered) list
+      const unique = Array.from(
+        new Set(
+          (data || [])
+            .map(p => p.category?.trim())
+            .filter((c): c is string => !!c && c.length > 0)
+        )
+      );
+      setCategories(unique);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch prompts');
     } finally {
@@ -78,8 +99,8 @@ const Prompts = () => {
       }
 
       setIsModalOpen(false);
-      setFormData({ title: "", prompt_text: "" });
-      fetchPrompts(); // Refresh the list
+  setFormData({ title: "", prompt_text: "", category: "" });
+  fetchPrompts(activeFilter); // Refresh the list
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create prompt');
     }
@@ -100,8 +121,8 @@ const Prompts = () => {
 
       setIsModalOpen(false);
       setEditingPrompt(null);
-      setFormData({ title: "", prompt_text: "" });
-      fetchPrompts(); // Refresh the list
+  setFormData({ title: "", prompt_text: "", category: "" });
+  fetchPrompts(activeFilter); // Refresh the list
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update prompt');
     }
@@ -164,14 +185,19 @@ const Prompts = () => {
 
   const handleEditPrompt = (prompt: Prompt) => {
     setEditingPrompt(prompt);
-    setFormData({ title: prompt.title, prompt_text: prompt.prompt_text });
+  setFormData({ title: prompt.title, prompt_text: prompt.prompt_text, category: prompt.category || "" });
     setIsModalOpen(true);
   };
 
   const handleModalClose = () => {
     setIsModalOpen(false);
     setEditingPrompt(null);
-    setFormData({ title: "", prompt_text: "" });
+    setFormData({ title: "", prompt_text: "", category: "" });
+  };
+
+  const handleFilterChange = (filter: string) => {
+    setActiveFilter(filter);
+    fetchPrompts(filter);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -232,6 +258,15 @@ const Prompts = () => {
                         required
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="category">Category (optional)</Label>
+                      <Input
+                        id="category"
+                        value={formData.category}
+                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                        placeholder="e.g. Writing, Code, Marketing"
+                      />
+                    </div>
                     <div className="flex justify-end space-x-2 pt-4">
                       <Button
                         type="button"
@@ -257,6 +292,27 @@ const Prompts = () => {
               </div>
             )}
 
+            {/* Filter Buttons */}
+            <div className="mb-6 flex flex-wrap gap-2">
+              <Button
+                variant={activeFilter === 'All' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleFilterChange('All')}
+              >
+                All
+              </Button>
+              {categories.map(cat => (
+                <Button
+                  key={cat}
+                  variant={activeFilter === cat ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => handleFilterChange(cat)}
+                >
+                  {cat}
+                </Button>
+              ))}
+            </div>
+
             {loading ? (
               <div className="zen-card p-8 text-center">
                 <p className="text-muted-foreground">Loading prompts...</p>
@@ -271,13 +327,20 @@ const Prompts = () => {
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {prompts.map((prompt) => (
                   <div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition">
-                                         <h3 className="text-lg font-semibold text-foreground mb-2 truncate">
-                       {prompt.title}
-                     </h3>
+                     <div className="flex items-start justify-between mb-2">
+                       <h3 className="text-lg font-semibold text-foreground truncate pr-2">
+                         {prompt.title}
+                       </h3>
+                       {prompt.category && (
+                         <Badge variant="secondary" className="whitespace-nowrap ml-2">
+                           {prompt.category}
+                         </Badge>
+                       )}
+                     </div>
                      <p className="text-muted-foreground mb-4 text-sm overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
                        {prompt.prompt_text}
                      </p>
-                                         <div className="flex space-x-2">
+                     <div className="flex space-x-2">
                        <Button
                          size="sm"
                          variant="outline"
