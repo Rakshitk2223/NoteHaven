@@ -70,7 +70,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       email,
       password,
     });
-
     if (error) {
       toast({
         title: "Error",
@@ -79,11 +78,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
       throw error;
     }
-
-    toast({
-      title: "Account created!",
-      description: "Please check your email to verify your account.",
-    });
+    // No toast; redirect handled in SignUp.tsx
   };
 
   const signOut = async () => {

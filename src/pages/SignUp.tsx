@@ -18,8 +18,8 @@ const SignUp = () => {
     
     setLoading(true);
     try {
-      await signUp(email, password);
-      navigate('/login');
+  await signUp(email, password);
+  navigate('/check-email');
     } catch (error) {
       console.error('SignUp error:', error);
     } finally {
