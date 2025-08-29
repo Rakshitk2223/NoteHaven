@@ -13,6 +13,7 @@ interface Task {
   is_completed: boolean;
   created_at: string;
   is_pinned?: boolean;
+  due_date?: string | null;
 }
 
 const Tasks = () => {
@@ -21,6 +22,7 @@ const Tasks = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newTaskText, setNewTaskText] = useState("");
+  const [newTaskDue, setNewTaskDue] = useState<string>("");
 
   // Fetch tasks on component mount
   useEffect(() => {
@@ -65,13 +67,14 @@ const Tasks = () => {
 
       const { error } = await supabase
         .from('tasks')
-        .insert([{ task_text: newTaskText.trim(), user_id: user.id }]);
+        .insert([{ task_text: newTaskText.trim(), user_id: user.id, due_date: newTaskDue || null }]);
 
       if (error) {
         throw error;
       }
 
-      setNewTaskText("");
+  setNewTaskText("");
+  setNewTaskDue("");
       fetchTasks();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add task');
@@ -162,15 +165,24 @@ const Tasks = () => {
 
             {/* Add Task Form */}
             <div className="mb-8">
-              <form onSubmit={handleAddTask} className="flex gap-3">
-                <Input
-                  value={newTaskText}
-                  onChange={(e) => setNewTaskText(e.target.value)}
-                  placeholder="Add a new task..."
-                  className="flex-1"
-                  disabled={loading}
-                />
-                <Button type="submit" disabled={!newTaskText.trim() || loading}>
+              <form onSubmit={handleAddTask} className="flex flex-col md:flex-row gap-3">
+                <div className="flex-1 flex gap-3">
+                  <Input
+                    value={newTaskText}
+                    onChange={(e) => setNewTaskText(e.target.value)}
+                    placeholder="Add a new task..."
+                    className="flex-1"
+                    disabled={loading}
+                  />
+                  <Input
+                    type="date"
+                    value={newTaskDue}
+                    onChange={(e) => setNewTaskDue(e.target.value)}
+                    className="w-40"
+                    disabled={loading}
+                  />
+                </div>
+                <Button type="submit" disabled={!newTaskText.trim() || loading} className="self-start md:self-auto">
                   <Plus className="h-4 w-4 mr-2" />
                   Add Task
                 </Button>
@@ -210,10 +222,24 @@ const Tasks = () => {
                             onCheckedChange={() => handleToggleTask(task.id, task.is_completed)}
                             className="flex-shrink-0"
                           />
-                          <span className="flex-1 text-foreground flex items-center gap-2">
-                            {task.is_pinned && <Pin className="h-3 w-3 text-primary" />}
-                            {task.task_text}
-                          </span>
+                          <div className="flex-1 text-foreground flex flex-col gap-1">
+                            <span className="flex items-center gap-2">
+                              {task.is_pinned && <Pin className="h-3 w-3 text-primary" />}
+                              {task.task_text}
+                            </span>
+                            {task.due_date && (
+                              <span className={(() => {
+                                const today = new Date();
+                                today.setHours(0,0,0,0);
+                                const due = new Date(task.due_date + 'T00:00:00');
+                                const diff = due.getTime() - today.getTime();
+                                const isPastOrToday = diff <= 0;
+                                return `text-xs font-medium ${isPastOrToday ? 'text-red-500' : 'text-muted-foreground'}`;
+                              })()}>
+                                Due {new Date(task.due_date).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
                           <Button
                             size="sm"
                             variant="ghost"
@@ -253,10 +279,15 @@ const Tasks = () => {
                             onCheckedChange={() => handleToggleTask(task.id, task.is_completed)}
                             className="flex-shrink-0"
                           />
-                          <span className="flex-1 text-foreground line-through text-muted-foreground flex items-center gap-2">
-                            {task.is_pinned && <Pin className="h-3 w-3" />}
-                            {task.task_text}
-                          </span>
+                          <div className="flex-1 text-foreground line-through text-muted-foreground flex flex-col gap-1">
+                            <span className="flex items-center gap-2">
+                              {task.is_pinned && <Pin className="h-3 w-3" />}
+                              {task.task_text}
+                            </span>
+                            {task.due_date && (
+                              <span className="text-xs">Due {new Date(task.due_date).toLocaleDateString()}</span>
+                            )}
+                          </div>
                           <Button
                             size="sm"
                             variant="ghost"

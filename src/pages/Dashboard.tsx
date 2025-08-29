@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin } from "lucide-react";
+import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin, Clock, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Task {
   id: number;
@@ -38,6 +41,11 @@ interface PinnedItem {
   title: string;
   updated_at?: string;
 }
+interface Countdown {
+  id: number;
+  event_name: string;
+  event_date: string; // ISO date
+}
 
 const Dashboard = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -47,6 +55,9 @@ const Dashboard = () => {
   const [watchingMedia, setWatchingMedia] = useState<MediaItem[]>([]);
   const [favoritePrompts, setFavoritePrompts] = useState<Prompt[]>([]);
   const [pinnedItems, setPinnedItems] = useState<PinnedItem[]>([]);
+  const [countdowns, setCountdowns] = useState<Countdown[]>([]);
+  const [showCountdownModal, setShowCountdownModal] = useState(false);
+  const [newCountdown, setNewCountdown] = useState({ event_name: '', event_date: '' });
   const [stats, setStats] = useState({
     prompts: 0,
     media: 0,
@@ -56,6 +67,7 @@ const Dashboard = () => {
   });
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchDashboardData();
@@ -80,14 +92,16 @@ const Dashboard = () => {
         mediaResult,
         promptsResult,
   statsResult,
-  pinnedResult
+  pinnedResult,
+  countdownResult
       ] = await Promise.all([
         fetchPendingTasks(),
         fetchRecentNotes(),
         fetchWatchingMedia(),
         fetchFavoritePrompts(),
   fetchStats(),
-  fetchPinnedItems()
+  fetchPinnedItems(),
+  fetchCountdowns()
       ]);
 
       setPendingTasks(tasksResult);
@@ -96,6 +110,7 @@ const Dashboard = () => {
       setFavoritePrompts(promptsResult);
   setStats(statsResult);
   setPinnedItems(pinnedResult);
+  setCountdowns(countdownResult);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast({
@@ -211,6 +226,39 @@ const Dashboard = () => {
       media: mediaResult.data?.length || 0,
       prompts: promptsResult.data?.length || 0
     };
+  };
+
+  const fetchCountdowns = async (): Promise<Countdown[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+    const { data, error } = await supabase
+      .from('countdowns')
+      .select('id, event_name, event_date')
+      .eq('user_id', user.id)
+      .order('event_date', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  };
+
+  const handleAddCountdown = async () => {
+    if (!newCountdown.event_name.trim() || !newCountdown.event_date) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('countdowns')
+      .insert([{ user_id: user.id, event_name: newCountdown.event_name.trim(), event_date: newCountdown.event_date }])
+      .select()
+      .single();
+    if (!error && data) {
+      setCountdowns(prev => [...prev, data].sort((a,b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime()));
+      setNewCountdown({ event_name: '', event_date: '' });
+      setShowCountdownModal(false);
+    }
+  };
+
+  const handleDeleteCountdown = async (id: number) => {
+    const { error } = await supabase.from('countdowns').delete().eq('id', id);
+    if (!error) setCountdowns(prev => prev.filter(c => c.id !== id));
   };
 
   const handleTaskComplete = async (taskId: number) => {
@@ -348,7 +396,16 @@ const Dashboard = () => {
                 </Button>
               )}
               <h1 className="text-2xl font-bold font-heading text-foreground">
-                Dashboard
+                {(() => {
+                  const name = (user?.user_metadata as any)?.display_name as string | undefined;
+                  if (!name) return 'Dashboard';
+                  const hour = new Date().getHours();
+                  let greet = 'Hello';
+                  if (hour < 12) greet = 'Good morning';
+                  else if (hour < 18) greet = 'Good afternoon';
+                  else greet = 'Good evening';
+                  return `${greet}, ${name}`;
+                })()}
               </h1>
             </div>
             <div className="text-sm text-muted-foreground">
@@ -624,6 +681,64 @@ const Dashboard = () => {
                         />
                       </button>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Countdowns Widget */}
+              <div className="zen-card zen-shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    Countdowns
+                  </h3>
+                  <Dialog open={showCountdownModal} onOpenChange={setShowCountdownModal}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm"><Plus className="h-4 w-4" /></Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[400px]">
+                      <DialogHeader>
+                        <DialogTitle>Add Countdown</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium">Event Name</label>
+                          <Input value={newCountdown.event_name} onChange={e => setNewCountdown(c => ({ ...c, event_name: e.target.value }))} placeholder="e.g. Launch Day" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-sm font-medium">Event Date</label>
+                          <Input type="date" value={newCountdown.event_date} onChange={e => setNewCountdown(c => ({ ...c, event_date: e.target.value }))} />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setShowCountdownModal(false)}>Cancel</Button>
+                          <Button size="sm" onClick={handleAddCountdown} disabled={!newCountdown.event_name.trim() || !newCountdown.event_date}>Save</Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[...Array(2)].map((_, i) => <div key={i} className="h-4 bg-muted rounded animate-pulse" />)}
+                  </div>
+                ) : countdowns.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No countdowns yet</div>
+                ) : (
+                  <div className="space-y-3">
+                    {countdowns.map(c => {
+                      const days = Math.max(0, Math.ceil((new Date(c.event_date).getTime() - Date.now()) / (1000*60*60*24)));
+                      return (
+                        <div key={c.id} className="flex items-center gap-3 text-sm">
+                          <div className="flex-1">
+                            <p className="font-medium text-foreground truncate">{c.event_name}</p>
+                            <p className="text-xs text-muted-foreground">{days} day{days!==1?'s':''} remaining</p>
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteCountdown(c.id)} className="h-6 w-6 text-destructive hover:text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

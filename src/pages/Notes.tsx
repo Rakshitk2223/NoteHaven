@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette } from "lucide-react";
+import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Removed Input for title rich text
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -34,6 +34,8 @@ const Notes = () => {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [activeField, setActiveField] = useState<'title' | 'content' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [wordCount, setWordCount] = useState(0);
+  const [lineCount, setLineCount] = useState(0);
 
   // Debouncing for auto-save
   const [titleTimeout, setTitleTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -89,11 +91,44 @@ const Notes = () => {
         throw error;
       }
 
-      setNotes(data || []);
+      let loaded = data || [];
+
+      // 1. Locate existing Inbox (exact title match only now)
+      let inboxNote = loaded.find(n => (n.title || '') === 'Inbox');
+
+      // 2. If missing, create it
+      if (!inboxNote) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: created, error: createErr } = await supabase
+            .from('notes')
+            .insert([{ title: 'Inbox', content: '', user_id: user.id }])
+            .select()
+            .single();
+          if (!createErr && created) {
+            inboxNote = created;
+            loaded = [created, ...loaded];
+          }
+        }
+      }
+
+      // 3. Separate inbox from others explicitly
+      const otherNotes = loaded.filter(n => n !== inboxNote);
+
+      // 4. Sort remaining notes: pinned first, then by updated_at desc
+      otherNotes.sort((a,b) => {
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (b.is_pinned && !a.is_pinned) return 1;
+        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+      });
+
+      // 5. Compose final list ensuring Inbox is always at index 0
+      const finalList = inboxNote ? [inboxNote, ...otherNotes] : otherNotes;
+      setNotes(finalList);
       
       // Select the first note by default
-      if (data && data.length > 0 && !selectedNote) {
-        setSelectedNote(data[0]);
+      if (finalList.length > 0 && !selectedNote) {
+        setSelectedNote(finalList[0]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch notes');
@@ -239,6 +274,19 @@ const Notes = () => {
     setContentValue(html);
     debouncedSaveContent(html);
   };
+
+  // Word & line count calculation
+  useEffect(() => {
+    const plain = contentValue
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(div|p|h[1-6]|li)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ');
+    const words = plain.trim().length === 0 ? 0 : plain.trim().split(/\s+/).length;
+    const lines = plain.split(/\n/).filter(() => true).length;
+    setWordCount(words);
+    setLineCount(lines);
+  }, [contentValue]);
 
   // Toggle pin status for selected note
   const handleTogglePin = async () => {
@@ -400,21 +448,26 @@ const Notes = () => {
                         className={`
                           p-3 rounded-lg cursor-pointer transition-colors
                           ${selectedNote?.id === note.id ? 'ring-2 ring-primary' : 'hover:bg-muted'}
+                          ${note.background_color ? 'text-neutral-900 dark:text-neutral-900' : ''}
                         `}
                         style={{ backgroundColor: note.background_color || undefined }}
                       >
                         <div className="font-medium truncate flex items-center gap-2">
-                          {note.is_pinned && <Pin className="h-3 w-3 text-primary" />}
+                          {note.title === 'Inbox' ? (
+                            <Lightbulb className="h-3 w-3 text-amber-500" />
+                          ) : note.is_pinned ? (
+                            <Pin className="h-3 w-3 text-primary" />
+                          ) : null}
                           <span
                             className="truncate"
                             dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }}
                           />
                         </div>
                         <div
-                          className="text-sm mt-1 text-muted-foreground whitespace-pre-wrap line-clamp-3"
+                          className={`text-sm mt-1 whitespace-pre-wrap line-clamp-3 ${note.background_color ? 'text-gray-600 dark:text-gray-700' : 'text-muted-foreground'}`}
                           dangerouslySetInnerHTML={{ __html: renderPreviewHTML(note.content || '') }}
                         />
-                        <div className="text-xs mt-2 text-muted-foreground">
+                        <div className={`text-xs mt-2 ${note.background_color ? 'text-gray-500 dark:text-gray-600' : 'text-muted-foreground'}`}>
                           {formatDate(note.updated_at)}
                         </div>
                       </div>
@@ -485,7 +538,7 @@ const Notes = () => {
                   </div>
 
                   {/* Editor Content */}
-                  <div className="flex-1 p-4 space-y-4 flex flex-col" style={{ backgroundColor: selectedNote.background_color || undefined }}>
+                  <div className={`flex-1 p-4 space-y-4 flex flex-col ${selectedNote.background_color ? 'text-neutral-900 dark:text-neutral-900' : ''}`} style={{ backgroundColor: selectedNote.background_color || undefined }}>
                     <div
                       ref={titleRef}
                       contentEditable
@@ -506,17 +559,22 @@ const Notes = () => {
                       className="flex-1 border-none focus:outline-none text-base leading-relaxed min-h-[calc(100vh-320px)] px-1 whitespace-pre-wrap"
                       aria-label="Note content"
                     />
-                    {/* Formatting toolbar at bottom */}
-                    <div className="flex items-center gap-1 pt-2 border-t border-border">
-                      <Button size="sm" variant="ghost" onClick={() => execFormat('bold')} title="Bold (Ctrl+B)">
-                        <Bold className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => execFormat('italic')} title="Italic (Ctrl+I)">
-                        <Italic className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => execFormat('underline')} title="Underline (Ctrl+U)">
-                        <Underline className="h-4 w-4" />
-                      </Button>
+                    {/* Formatting toolbar + status bar */}
+                    <div className="flex items-center justify-between pt-2 border-t border-border text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => execFormat('bold')} title="Bold (Ctrl+B)">
+                          <Bold className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => execFormat('italic')} title="Italic (Ctrl+I)">
+                          <Italic className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => execFormat('underline')} title="Underline (Ctrl+U)">
+                          <Underline className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="px-2 tabular-nums select-none">
+                        Words: {wordCount} | Lines: {lineCount}
+                      </div>
                     </div>
                   </div>
                 </>

@@ -8,7 +8,8 @@ import {
   FileText, 
   LogOut,
   Menu,
-  X
+  X,
+  Settings as SettingsIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ const navigation = [
   { name: "Media Tracker", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },
+  { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
 interface AppSidebarProps {

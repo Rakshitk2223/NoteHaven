@@ -19,6 +19,7 @@ import SimpleNotes from "./pages/SimpleNotes";
 import Notes from "./pages/Notes";
 import NotFound from "./pages/NotFound";
 import CheckEmail from "./pages/CheckEmail";
+import Settings from "./pages/Settings";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ const App = () => (
             <Route path="/media" element={<ProtectedRoute><MediaTracker /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
             <Route path="/notes" element={<ProtectedRoute><Notes /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/check-email" element={<CheckEmail />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />

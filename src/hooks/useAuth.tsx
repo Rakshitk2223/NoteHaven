@@ -27,42 +27,38 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+    let mounted = true;
+    const init = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!mounted) return;
         setUser(session?.user ?? null);
-        setLoading(false);
+      } finally {
+        if (mounted) setLoading(false);
       }
-    );
+    };
+    init();
 
-    return () => subscription.unsubscribe();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Avoid extra async call; session already contains user + metadata if present
+      setUser(prev => (prev?.id === session?.user?.id ? session?.user ?? null : session?.user ?? null));
+    });
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message, variant: "destructive" });
       throw error;
     }
-
-    toast({
-      title: "Welcome back!",
-      description: "Successfully signed in.",
-    });
+    // Fetch fresh user (ensures metadata like display_name available immediately)
+    const { data: refreshed } = await supabase.auth.getUser();
+    if (refreshed.user) setUser(refreshed.user);
+    toast({ title: "Welcome back!", description: "Successfully signed in." });
   };
 
   const signUp = async (email: string, password: string) => {

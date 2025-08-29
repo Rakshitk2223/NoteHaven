@@ -152,6 +152,30 @@ export type Database = {
         }
         Relationships: []
       }
+      countdowns: {
+        Row: {
+          id: number
+          user_id: string
+          event_name: string
+          event_date: string
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          event_name: string
+          event_date: string
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          event_name?: string
+          event_date?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
