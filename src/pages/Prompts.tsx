@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Copy, Edit, Trash2, Check, Star } from "lucide-react";
+import { Plus, Copy, Edit, Trash2, Check, Star, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,6 +22,7 @@ interface Prompt {
   prompt_text: string;
   is_favorited?: boolean;
   category?: string;
+  is_pinned?: boolean;
   created_at: string;
 }
 
@@ -183,6 +184,22 @@ const Prompts = () => {
     }
   };
 
+  const handleTogglePin = async (prompt: Prompt) => {
+    try {
+      const newPinned = !prompt.is_pinned;
+      const { error } = await supabase
+        .from('prompts')
+        .update({ is_pinned: newPinned })
+        .eq('id', prompt.id);
+
+      if (error) throw error;
+
+      setPrompts(prompts.map(p => p.id === prompt.id ? { ...p, is_pinned: newPinned } : p));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update pin status');
+    }
+  };
+
   const handleEditPrompt = (prompt: Prompt) => {
     setEditingPrompt(prompt);
   setFormData({ title: prompt.title, prompt_text: prompt.prompt_text, category: prompt.category || "" });
@@ -325,8 +342,16 @@ const Prompts = () => {
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {prompts.map((prompt) => (
-                  <div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition">
+                {prompts
+                  .slice()
+                  .sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0))
+                  .map((prompt) => (
+                  <div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition relative">
+                     {prompt.is_pinned && (
+                       <div className="absolute -top-2 -right-2 bg-primary text-primary-foreground rounded-full p-1 shadow">
+                         <Pin className="h-3 w-3" />
+                       </div>
+                     )}
                      <div className="flex items-start justify-between mb-2">
                        <h3 className="text-lg font-semibold text-foreground truncate pr-2">
                          {prompt.title}
@@ -367,6 +392,14 @@ const Prompts = () => {
                        >
                          <Star className={`h-4 w-4 ${prompt.is_favorited ? "fill-current" : ""}`} />
                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleTogglePin(prompt)}
+                          className={prompt.is_pinned ? "text-primary" : ""}
+                        >
+                          <Pin className={`h-4 w-4 ${prompt.is_pinned ? 'fill-current' : ''}`} />
+                        </Button>
                        <Button
                          size="sm"
                          variant="outline"

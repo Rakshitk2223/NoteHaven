@@ -22,6 +22,7 @@ export type Database = {
           prompt_text: string | null
           is_favorited: boolean | null
           category: string | null
+          is_pinned: boolean | null
           created_at: string
         }
         Insert: {
@@ -31,6 +32,7 @@ export type Database = {
             prompt_text?: string | null
           is_favorited?: boolean | null
           category?: string | null
+          is_pinned?: boolean | null
           created_at?: string
         }
         Update: {
@@ -40,6 +42,7 @@ export type Database = {
           prompt_text?: string | null
           is_favorited?: boolean | null
           category?: string | null
+          is_pinned?: boolean | null
           created_at?: string
         }
         Relationships: []
@@ -52,6 +55,8 @@ export type Database = {
           content: string | null
           created_at: string
           updated_at: string
+          is_pinned: boolean | null
+          background_color: string | null
         }
         Insert: {
           id?: number
@@ -60,6 +65,8 @@ export type Database = {
           content?: string | null
           created_at?: string
           updated_at?: string
+          is_pinned?: boolean | null
+          background_color?: string | null
         }
         Update: {
           id?: number
@@ -68,6 +75,8 @@ export type Database = {
           content?: string | null
           created_at?: string
           updated_at?: string
+          is_pinned?: boolean | null
+          background_color?: string | null
         }
         Relationships: []
       }
@@ -79,6 +88,7 @@ export type Database = {
           is_completed: boolean | null
           created_at: string
           updated_at: string
+          is_pinned: boolean | null
         }
         Insert: {
           id?: number
@@ -87,6 +97,7 @@ export type Database = {
           is_completed?: boolean | null
           created_at?: string
           updated_at?: string
+          is_pinned?: boolean | null
         }
         Update: {
           id?: number
@@ -95,6 +106,7 @@ export type Database = {
           is_completed?: boolean | null
           created_at?: string
           updated_at?: string
+          is_pinned?: boolean | null
         }
         Relationships: []
       }

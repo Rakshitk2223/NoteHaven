@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Trash2, Menu } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+// Removed Input for title rich text
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -13,6 +13,8 @@ interface Note {
   content: string;
   created_at: string;
   updated_at: string;
+  is_pinned?: boolean;
+  background_color?: string | null;
 }
 
 const Notes = () => {
@@ -23,10 +25,14 @@ const Notes = () => {
   const [error, setError] = useState<string | null>(null);
   const [isMobileView, setIsMobileView] = useState(false);
   const [showNoteList, setShowNoteList] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
   
   // Auto-save states
-  const [titleValue, setTitleValue] = useState("");
-  const [contentValue, setContentValue] = useState("");
+  const [titleValue, setTitleValue] = useState(""); // HTML
+  const [contentValue, setContentValue] = useState(""); // HTML
+  const titleRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [activeField, setActiveField] = useState<'title' | 'content' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Debouncing for auto-save
@@ -52,11 +58,19 @@ const Notes = () => {
   // Update form values when selected note changes
   useEffect(() => {
     if (selectedNote) {
-      setTitleValue(selectedNote.title);
-      setContentValue(selectedNote.content);
+      const t = selectedNote.title || "";
+      const c = selectedNote.content || "";
+      setTitleValue(t);
+      setContentValue(c);
+      requestAnimationFrame(() => {
+        if (titleRef.current && titleRef.current.innerHTML !== t) titleRef.current.innerHTML = t;
+        if (contentRef.current && contentRef.current.innerHTML !== c) contentRef.current.innerHTML = c;
+      });
     } else {
       setTitleValue("");
       setContentValue("");
+      if (titleRef.current) titleRef.current.innerHTML = "";
+      if (contentRef.current) contentRef.current.innerHTML = "";
     }
   }, [selectedNote]);
 
@@ -68,7 +82,8 @@ const Notes = () => {
       const { data, error } = await supabase
         .from('notes')
         .select('*')
-        .order('updated_at', { ascending: false });
+  .order('is_pinned', { ascending: false })
+  .order('updated_at', { ascending: false });
 
       if (error) {
         throw error;
@@ -213,18 +228,50 @@ const Notes = () => {
     setContentTimeout(timeout);
   }, [selectedNote, contentTimeout]);
 
-  // Handle title change
-  const handleTitleChange = (value: string) => {
-    setTitleValue(value);
-    debouncedSaveTitle(value);
+  const handleTitleInput = () => {
+    const html = titleRef.current?.innerHTML || "";
+    setTitleValue(html);
+    debouncedSaveTitle(html);
   };
 
-  // Handle content change
-  const handleContentChange = (value: string) => {
-    setContentValue(value);
-    debouncedSaveContent(value);
+  const handleContentInput = () => {
+    const html = contentRef.current?.innerHTML || "";
+    setContentValue(html);
+    debouncedSaveContent(html);
   };
 
+  // Toggle pin status for selected note
+  const handleTogglePin = async () => {
+    if (!selectedNote) return;
+    try {
+      await updateNote(selectedNote.id, { is_pinned: !selectedNote.is_pinned });
+      setNotes(prev => prev.slice().sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to pin note');
+    }
+  };
+
+  // Change background color of selected note
+  const handleColorChange = async (color: string | null) => {
+    if (!selectedNote) return;
+    try {
+      await updateNote(selectedNote.id, { background_color: color });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to set color');
+    }
+  };
+
+  const execFormat = (command: string) => {
+    document.execCommand(command, false);
+    if (activeField === 'title') {
+      handleTitleInput();
+    } else if (activeField === 'content') {
+      handleContentInput();
+    } else {
+      handleTitleInput();
+      handleContentInput();
+    }
+  };
   // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
@@ -339,23 +386,21 @@ const Notes = () => {
                         }}
                         className={`
                           p-3 rounded-lg cursor-pointer transition-colors
-                          ${selectedNote?.id === note.id
-                            ? 'bg-primary text-primary-foreground'
-                            : 'hover:bg-muted'
-                          }
+                          ${selectedNote?.id === note.id ? 'ring-2 ring-primary' : 'hover:bg-muted'}
                         `}
+                        style={{ backgroundColor: note.background_color || undefined }}
                       >
-                        <div className="font-medium truncate">
-                          {note.title || 'Untitled'}
+                        <div className="font-medium truncate flex items-center gap-2">
+                          {note.is_pinned && <Pin className="h-3 w-3 text-primary" />}
+                          <span
+                            className="truncate"
+                            dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }}
+                          />
                         </div>
-                        <div className={`text-sm truncate mt-1 ${
-                          selectedNote?.id === note.id ? 'text-primary-foreground/70' : 'text-muted-foreground'
-                        }`}>
-                          {truncateText(note.content)}
+                        <div className="text-sm truncate mt-1 text-muted-foreground">
+                          {truncateText(note.content.replace(/<[^>]+>/g,'').trim())}
                         </div>
-                        <div className={`text-xs mt-2 ${
-                          selectedNote?.id === note.id ? 'text-primary-foreground/50' : 'text-muted-foreground'
-                        }`}>
+                        <div className="text-xs mt-2 text-muted-foreground">
                           {formatDate(note.updated_at)}
                         </div>
                       </div>
@@ -377,38 +422,88 @@ const Notes = () => {
                 <>
                   {/* Editor Header */}
                   <div className="p-4 border-b border-border flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      {isSaving && (
-                        <div className="text-xs text-muted-foreground">
-                          Saving...
-                        </div>
-                      )}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {isSaving && <span>Saving...</span>}
                     </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => deleteNote(selectedNote.id)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="ghost" onClick={handleTogglePin} className={selectedNote.is_pinned ? 'text-primary' : ''} title={selectedNote.is_pinned ? 'Unpin' : 'Pin note'}>
+                        <Pin className={`h-4 w-4 ${selectedNote.is_pinned ? 'fill-current' : ''}`} />
+                      </Button>
+                      <Popover open={showPalette} onOpenChange={setShowPalette}>
+                        <PopoverTrigger asChild>
+                          <Button size="sm" variant="ghost" title="Change color">
+                            <Palette className="h-4 w-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-52">
+                          <div className="grid grid-cols-6 gap-2">
+                            {[
+                              { label: 'None', value: null },
+                              { label: 'Yellow', value: '#FEF3C7' },
+                              { label: 'Green', value: '#DCFCE7' },
+                              { label: 'Blue', value: '#DBEAFE' },
+                              { label: 'Purple', value: '#EDE9FE' },
+                              { label: 'Pink', value: '#FCE7F3' },
+                              { label: 'Orange', value: '#FFEDD5' },
+                              { label: 'Gray', value: '#F3F4F6' },
+                            ].map(c => (
+                              <button
+                                key={c.label}
+                                title={c.label}
+                                onClick={() => handleColorChange(c.value)}
+                                className={`w-7 h-7 rounded-full border shadow-sm transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-primary ${selectedNote.background_color === c.value || (!selectedNote.background_color && c.value === null) ? 'ring-2 ring-primary' : ''}`}
+                                style={{ backgroundColor: c.value || '#ffffff' }}
+                              />
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => deleteNote(selectedNote.id)}
+                        className="text-destructive hover:text-destructive"
+                        title="Delete note"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Editor Content */}
-                  <div className="flex-1 p-4 space-y-4">
-                    <Input
-                      value={titleValue}
-                      onChange={(e) => handleTitleChange(e.target.value)}
-                      placeholder="Note title..."
-                      className="text-xl font-semibold border-none shadow-none focus-visible:ring-0 px-0"
+                  <div className="flex-1 p-4 space-y-4 flex flex-col" style={{ backgroundColor: selectedNote.background_color || undefined }}>
+                    <div
+                      ref={titleRef}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={handleTitleInput}
+                      onFocus={() => setActiveField('title')}
+                      className="text-2xl font-semibold focus:outline-none px-1"
+                      data-placeholder="Note title..."
+                      aria-label="Note title"
                     />
-                    <Textarea
-                      value={contentValue}
-                      onChange={(e) => handleContentChange(e.target.value)}
-                      placeholder="Start writing your note..."
-                      className="flex-1 border-none shadow-none focus-visible:ring-0 resize-none text-base leading-relaxed px-0"
-                      style={{ minHeight: 'calc(100vh - 300px)' }}
+                    <div
+                      id="rich-editor"
+                      ref={contentRef}
+                      contentEditable
+                      suppressContentEditableWarning
+                      onInput={handleContentInput}
+                      onFocus={() => setActiveField('content')}
+                      className="flex-1 border-none focus:outline-none text-base leading-relaxed min-h-[calc(100vh-320px)] px-1"
+                      aria-label="Note content"
                     />
+                    {/* Formatting toolbar at bottom */}
+                    <div className="flex items-center gap-1 pt-2 border-t border-border">
+                      <Button size="sm" variant="ghost" onClick={() => execFormat('bold')} title="Bold (Ctrl+B)">
+                        <Bold className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => execFormat('italic')} title="Italic (Ctrl+I)">
+                        <Italic className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => execFormat('underline')} title="Underline (Ctrl+U)">
+                        <Underline className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </>
               ) : (

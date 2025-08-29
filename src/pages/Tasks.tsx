@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,6 +12,7 @@ interface Task {
   task_text: string;
   is_completed: boolean;
   created_at: string;
+  is_pinned?: boolean;
 }
 
 const Tasks = () => {
@@ -34,6 +35,7 @@ const Tasks = () => {
       const { data, error } = await supabase
         .from('tasks')
         .select('*')
+        .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -98,6 +100,21 @@ const Tasks = () => {
     }
   };
 
+  const handleTogglePin = async (task: Task) => {
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ is_pinned: !task.is_pinned })
+        .eq('id', task.id);
+
+      if (error) throw error;
+
+      setTasks(tasks.map(t => t.id === task.id ? { ...t, is_pinned: !task.is_pinned } : t));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update pin');
+    }
+  };
+
   const handleDeleteTask = async (taskId: number) => {
     try {
       const { error } = await supabase
@@ -116,8 +133,8 @@ const Tasks = () => {
     }
   };
 
-  const todoTasks = tasks.filter(task => !task.is_completed);
-  const completedTasks = tasks.filter(task => task.is_completed);
+  const todoTasks = tasks.filter(task => !task.is_completed).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
+  const completedTasks = tasks.filter(task => task.is_completed).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
 
   return (
     <div className="min-h-screen bg-background">
@@ -193,9 +210,18 @@ const Tasks = () => {
                             onCheckedChange={() => handleToggleTask(task.id, task.is_completed)}
                             className="flex-shrink-0"
                           />
-                          <span className="flex-1 text-foreground">
+                          <span className="flex-1 text-foreground flex items-center gap-2">
+                            {task.is_pinned && <Pin className="h-3 w-3 text-primary" />}
                             {task.task_text}
                           </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleTogglePin(task)}
+                            className={"text-muted-foreground hover:text-foreground" + (task.is_pinned ? ' text-primary' : '')}
+                          >
+                            <Pin className={`h-4 w-4 ${task.is_pinned ? 'fill-current' : ''}`} />
+                          </Button>
                           <Button
                             size="sm"
                             variant="ghost"
@@ -227,9 +253,18 @@ const Tasks = () => {
                             onCheckedChange={() => handleToggleTask(task.id, task.is_completed)}
                             className="flex-shrink-0"
                           />
-                          <span className="flex-1 text-foreground line-through text-muted-foreground">
+                          <span className="flex-1 text-foreground line-through text-muted-foreground flex items-center gap-2">
+                            {task.is_pinned && <Pin className="h-3 w-3" />}
                             {task.task_text}
                           </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleTogglePin(task)}
+                            className={"text-muted-foreground hover:text-foreground" + (task.is_pinned ? ' text-primary' : '')}
+                          >
+                            <Pin className={`h-4 w-4 ${task.is_pinned ? 'fill-current' : ''}`} />
+                          </Button>
                           <Button
                             size="sm"
                             variant="ghost"

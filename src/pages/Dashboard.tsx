@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles } from "lucide-react";
+import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import AppSidebar from "@/components/AppSidebar";
@@ -17,6 +17,7 @@ interface Note {
   id: number;
   title: string;
   updated_at: string;
+  is_pinned?: boolean;
 }
 
 interface MediaItem {
@@ -29,6 +30,13 @@ interface Prompt {
   id: number;
   title: string;
   is_favorited?: boolean;
+  is_pinned?: boolean;
+}
+interface PinnedItem {
+  id: number;
+  type: 'note' | 'task' | 'prompt';
+  title: string;
+  updated_at?: string;
 }
 
 const Dashboard = () => {
@@ -38,6 +46,7 @@ const Dashboard = () => {
   const [recentNotes, setRecentNotes] = useState<Note[]>([]);
   const [watchingMedia, setWatchingMedia] = useState<MediaItem[]>([]);
   const [favoritePrompts, setFavoritePrompts] = useState<Prompt[]>([]);
+  const [pinnedItems, setPinnedItems] = useState<PinnedItem[]>([]);
   const [stats, setStats] = useState({
     prompts: 0,
     media: 0,
@@ -70,20 +79,23 @@ const Dashboard = () => {
         notesResult,
         mediaResult,
         promptsResult,
-        statsResult
+  statsResult,
+  pinnedResult
       ] = await Promise.all([
         fetchPendingTasks(),
         fetchRecentNotes(),
         fetchWatchingMedia(),
         fetchFavoritePrompts(),
-        fetchStats()
+  fetchStats(),
+  fetchPinnedItems()
       ]);
 
       setPendingTasks(tasksResult);
       setRecentNotes(notesResult);
       setWatchingMedia(mediaResult);
       setFavoritePrompts(promptsResult);
-      setStats(statsResult);
+  setStats(statsResult);
+  setPinnedItems(pinnedResult);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast({
@@ -157,6 +169,25 @@ const Dashboard = () => {
 
     if (error) throw error;
     return data || [];
+  };
+
+  const fetchPinnedItems = async (): Promise<PinnedItem[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+
+    const [notesPinned, tasksPinned, promptsPinned] = await Promise.all([
+      supabase.from('notes').select('id, title, updated_at, is_pinned').eq('user_id', user.id).eq('is_pinned', true).order('updated_at', { ascending: false }).limit(5),
+      supabase.from('tasks').select('id, task_text, is_pinned, updated_at').eq('user_id', user.id).eq('is_pinned', true).order('updated_at', { ascending: false }).limit(5),
+      supabase.from('prompts').select('id, title, is_pinned, created_at').eq('user_id', user.id).eq('is_pinned', true).order('created_at', { ascending: false }).limit(5)
+    ]);
+
+    const items: PinnedItem[] = [];
+  if (notesPinned.data) items.push(...notesPinned.data.map(n => ({ id: n.id, type: 'note' as const, title: n.title || 'Untitled', updated_at: n.updated_at })));
+  if (tasksPinned.data) items.push(...tasksPinned.data.map(t => ({ id: t.id, type: 'task' as const, title: t.task_text || 'Task', updated_at: t.updated_at })));
+  if (promptsPinned.data) items.push(...promptsPinned.data.map(p => ({ id: p.id, type: 'prompt' as const, title: p.title || 'Prompt' })));
+
+    // Sort by updated_at where available
+    return items.sort((a,b) => (new Date(b.updated_at || '').getTime()) - (new Date(a.updated_at || '').getTime())).slice(0,6);
   };
 
   const fetchStats = async () => {
@@ -234,6 +265,22 @@ const Dashboard = () => {
   };
 
   const completionRate = stats.tasks > 0 ? Math.round((stats.completedTasks / stats.tasks) * 100) : 0;
+
+  const handlePinnedItemClick = (item: PinnedItem) => {
+    switch (item.type) {
+      case 'task':
+        navigate('/tasks');
+        break;
+      case 'prompt':
+        navigate('/prompts');
+        break;
+      case 'note':
+        navigate(`/notes?note=${item.id}`);
+        break;
+      default:
+        break;
+    }
+  };
 
   const statWidgets = [
     {
@@ -430,9 +477,10 @@ const Dashboard = () => {
                         onClick={() => handleNoteClick(note.id)}
                         className="p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
                       >
-                        <p className="font-medium text-sm text-foreground mb-1">
-                          {note.title || 'Untitled'}
-                        </p>
+                        <p
+                          className="font-medium text-sm text-foreground mb-1"
+                          dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }}
+                        />
                         <p className="text-xs text-muted-foreground">
                           {new Date(note.updated_at).toLocaleDateString()}
                         </p>
@@ -535,6 +583,46 @@ const Dashboard = () => {
                           {prompt.title}
                         </p>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Pinned Items Widget */}
+              <div className="zen-card zen-shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <Pin className="h-5 w-5" />
+                    Pinned
+                  </h3>
+                </div>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[...Array(4)].map((_, i) => (
+                      <div key={i} className="animate-pulse h-4 bg-muted rounded"></div>
+                    ))}
+                  </div>
+                ) : pinnedItems.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Pin className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-muted-foreground">No pinned items</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {pinnedItems.map(item => (
+                      <button 
+                        key={item.id}
+                        onClick={() => handlePinnedItemClick(item)}
+                        className="w-full text-left p-2 rounded-lg hover:bg-muted/60 transition-colors cursor-pointer flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        <span className="text-xs uppercase text-muted-foreground tracking-wide">
+                          {item.type}
+                        </span>
+                        <span
+                          className="flex-1 text-sm text-foreground truncate"
+                          dangerouslySetInnerHTML={{ __html: item.title }}
+                        />
+                      </button>
                     ))}
                   </div>
                 )}
