@@ -299,6 +299,19 @@ const Notes = () => {
     return text.substring(0, maxLength) + '...';
   };
 
+  const renderPreviewHTML = (html: string) => {
+    // strip tags but keep line breaks by replacing block tags with newline first
+    const withBreaks = html
+      .replace(/<(div|p|br|li|h[1-6])\b[^>]*>/gi, '\n')
+      .replace(/<\/[^>]+>/g, '');
+    const cleaned = withBreaks
+      .replace(/\n{3,}/g, '\n\n') // collapse excess
+      .trim();
+    const shortened = cleaned.length > 300 ? cleaned.slice(0,300) + '…' : cleaned;
+    // convert remaining newlines to <br/>
+    return shortened.replace(/\n/g, '<br/>');
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
@@ -397,9 +410,10 @@ const Notes = () => {
                             dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }}
                           />
                         </div>
-                        <div className="text-sm truncate mt-1 text-muted-foreground">
-                          {truncateText(note.content.replace(/<[^>]+>/g,'').trim())}
-                        </div>
+                        <div
+                          className="text-sm mt-1 text-muted-foreground whitespace-pre-wrap line-clamp-3"
+                          dangerouslySetInnerHTML={{ __html: renderPreviewHTML(note.content || '') }}
+                        />
                         <div className="text-xs mt-2 text-muted-foreground">
                           {formatDate(note.updated_at)}
                         </div>
@@ -489,7 +503,7 @@ const Notes = () => {
                       suppressContentEditableWarning
                       onInput={handleContentInput}
                       onFocus={() => setActiveField('content')}
-                      className="flex-1 border-none focus:outline-none text-base leading-relaxed min-h-[calc(100vh-320px)] px-1"
+                      className="flex-1 border-none focus:outline-none text-base leading-relaxed min-h-[calc(100vh-320px)] px-1 whitespace-pre-wrap"
                       aria-label="Note content"
                     />
                     {/* Formatting toolbar at bottom */}
