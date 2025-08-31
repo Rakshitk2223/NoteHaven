@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin, Clock, Trash2 } from "lucide-react";
+import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin, Clock, Trash2, Gift } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ interface Countdown {
   event_name: string;
   event_date: string; // ISO date
 }
+interface Birthday { id: number; name: string; date_of_birth: string; }
 
 const Dashboard = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -56,6 +57,7 @@ const Dashboard = () => {
   const [favoritePrompts, setFavoritePrompts] = useState<Prompt[]>([]);
   const [pinnedItems, setPinnedItems] = useState<PinnedItem[]>([]);
   const [countdowns, setCountdowns] = useState<Countdown[]>([]);
+  const [birthdays, setBirthdays] = useState<Birthday[]>([]);
   const [showCountdownModal, setShowCountdownModal] = useState(false);
   const [newCountdown, setNewCountdown] = useState({ event_name: '', event_date: '' });
   const [stats, setStats] = useState({
@@ -93,7 +95,8 @@ const Dashboard = () => {
         promptsResult,
   statsResult,
   pinnedResult,
-  countdownResult
+  countdownResult,
+  birthdaysResult
       ] = await Promise.all([
         fetchPendingTasks(),
         fetchRecentNotes(),
@@ -101,7 +104,8 @@ const Dashboard = () => {
         fetchFavoritePrompts(),
   fetchStats(),
   fetchPinnedItems(),
-  fetchCountdowns()
+  fetchCountdowns(),
+  fetchBirthdays()
       ]);
 
       setPendingTasks(tasksResult);
@@ -111,6 +115,7 @@ const Dashboard = () => {
   setStats(statsResult);
   setPinnedItems(pinnedResult);
   setCountdowns(countdownResult);
+  setBirthdays(birthdaysResult);
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast({
@@ -236,6 +241,17 @@ const Dashboard = () => {
       .select('id, event_name, event_date')
       .eq('user_id', user.id)
       .order('event_date', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  };
+
+  const fetchBirthdays = async (): Promise<Birthday[]> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
+    const { data, error } = await supabase
+      .from('birthdays')
+      .select('id, name, date_of_birth')
+      .eq('user_id', user.id);
     if (error) throw error;
     return data || [];
   };
@@ -739,6 +755,48 @@ const Dashboard = () => {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+
+              {/* Upcoming Birthdays Widget */}
+              <div className="zen-card zen-shadow p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                    <Gift className="h-5 w-5" />
+                    Upcoming Birthdays
+                  </h3>
+                  <Button variant="ghost" size="sm" onClick={() => navigate('/birthdays')} className="text-xs">View</Button>
+                </div>
+                {loading ? (
+                  <div className="space-y-3">
+                    {[...Array(3)].map((_,i)=><div key={i} className="h-4 bg-muted rounded animate-pulse" />)}
+                  </div>
+                ) : birthdays.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No birthdays added</div>
+                ) : (
+                  <div className="space-y-3">
+                    {birthdays
+                      .map(b => {
+                        const base = new Date(b.date_of_birth + 'T00:00:00');
+                        const now = new Date();
+                        const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
+                        if (target.getTime() < now.getTime()) target.setFullYear(now.getFullYear()+1);
+                        const days = Math.ceil((target.getTime() - now.getTime())/(1000*60*60*24));
+                        let message: string;
+                        if (days === 0) message = `${b.name}'s birthday is today! 🎉`;
+                        else if (days === 1) message = `${b.name}'s birthday is tomorrow!`;
+                        else if (days <= 7) message = `${b.name}'s birthday is soon! (${days} days)`;
+                        else message = `${b.name}'s birthday is in ${days} days`;
+                        return { ...b, days, message };
+                      })
+                      .sort((a,b) => a.days - b.days)
+                      .slice(0,5)
+                      .map(b => (
+                        <div key={b.id} className="text-sm">
+                          <span className="font-medium text-foreground block truncate">{b.message}</span>
+                        </div>
+                      ))}
                   </div>
                 )}
               </div>

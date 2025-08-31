@@ -21,6 +21,7 @@ const navigation = [
   { name: "Media Tracker", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },
+  { name: "Birthdays", href: "/birthdays", icon: SettingsIcon },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 

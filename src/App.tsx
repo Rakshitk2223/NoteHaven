@@ -21,6 +21,7 @@ import Notes from "./pages/Notes";
 import NotFound from "./pages/NotFound";
 import CheckEmail from "./pages/CheckEmail";
 import Settings from "./pages/Settings";
+import Birthdays from "./pages/Birthdays";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,7 @@ const AppInner = () => {
         <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
         <Route path="/notes" element={<ProtectedRoute><Notes /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+  <Route path="/birthdays" element={<ProtectedRoute><Birthdays /></ProtectedRoute>} />
         <Route path="/check-email" element={<CheckEmail />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
