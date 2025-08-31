@@ -28,21 +28,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     let mounted = true;
-    const init = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!mounted) return;
-        setUser(session?.user ?? null);
-      } finally {
+    let initialResolved = false;
+
+    // We rely on both an immediate session fetch AND the first auth state event.
+    const resolveInitial = () => {
+      if (!initialResolved) {
+        initialResolved = true;
         if (mounted) setLoading(false);
       }
     };
-    init();
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!mounted) return;
+      if (session?.user) setUser(session.user);
+      resolveInitial();
+    });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Avoid extra async call; session already contains user + metadata if present
-      setUser(prev => (prev?.id === session?.user?.id ? session?.user ?? null : session?.user ?? null));
+      if (!mounted) return;
+      setUser(session?.user ?? null);
+      resolveInitial();
     });
+
     return () => {
       mounted = false;
       subscription.unsubscribe();

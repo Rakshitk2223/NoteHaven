@@ -127,4 +127,15 @@ All colors MUST be HSL.
   .zen-transition {
     @apply transition-all duration-300 ease-in-out;
   }
+
+  /* Rich text editor list styling */
+  #rich-editor ul, .note-preview ul {
+    @apply list-disc list-inside ml-4 my-2 space-y-1;
+  }
+  #rich-editor ol, .note-preview ol {
+    @apply list-decimal list-inside ml-4 my-2 space-y-1;
+  }
+  #rich-editor li, .note-preview li {
+    @apply leading-relaxed;
+  }
 }

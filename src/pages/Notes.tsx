@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette, Lightbulb } from "lucide-react";
+import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette, Lightbulb, List } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Removed Input for title rich text
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/components/ui/use-toast";
 
 interface Note {
   id: number;
@@ -36,6 +37,7 @@ const Notes = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [lineCount, setLineCount] = useState(0);
+  const { toast } = useToast();
 
   // Debouncing for auto-save
   const [titleTimeout, setTitleTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -233,46 +235,61 @@ const Notes = () => {
   };
 
   // Debounced auto-save functions
-  const debouncedSaveTitle = useCallback((value: string) => {
-    if (titleTimeout) {
-      clearTimeout(titleTimeout);
+  const saveField = useCallback(async (noteId: number, field: 'title' | 'content', value: string, previous: string) => {
+    try {
+      setIsSaving(true);
+      const { error } = await supabase.from('notes').update({ [field]: value }).eq('id', noteId);
+      if (error) throw error;
+      // On success update updated_at optimistically (without resorting list yet)
+      const now = new Date().toISOString();
+      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, updated_at: now } : n));
+      setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, updated_at: now } : prev);
+    } catch (e:any) {
+      // Revert field
+      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: previous } : n));
+      setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: previous } : prev);
+      toast({ title: 'Save failed', description: e.message || 'Could not save note', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
     }
+  }, [toast]);
 
-    const timeout = setTimeout(() => {
-      if (selectedNote && value !== selectedNote.title) {
-        setIsSaving(true);
-        updateNote(selectedNote.id, { title: value }).finally(() => setIsSaving(false));
-      }
-    }, 1500);
-
+  const scheduleTitleSave = useCallback((noteId: number, newValue: string, previous: string) => {
+    if (titleTimeout) clearTimeout(titleTimeout);
+    const timeout = setTimeout(() => saveField(noteId, 'title', newValue, previous), 1200);
     setTitleTimeout(timeout);
-  }, [selectedNote, titleTimeout]);
+  }, [titleTimeout, saveField]);
 
-  const debouncedSaveContent = useCallback((value: string) => {
-    if (contentTimeout) {
-      clearTimeout(contentTimeout);
-    }
-
-    const timeout = setTimeout(() => {
-      if (selectedNote && value !== selectedNote.content) {
-        setIsSaving(true);
-        updateNote(selectedNote.id, { content: value }).finally(() => setIsSaving(false));
-      }
-    }, 1500);
-
+  const scheduleContentSave = useCallback((noteId: number, newValue: string, previous: string) => {
+    if (contentTimeout) clearTimeout(contentTimeout);
+    const timeout = setTimeout(() => saveField(noteId, 'content', newValue, previous), 1200);
     setContentTimeout(timeout);
-  }, [selectedNote, contentTimeout]);
+  }, [contentTimeout, saveField]);
 
   const handleTitleInput = () => {
     const html = titleRef.current?.innerHTML || "";
     setTitleValue(html);
-    debouncedSaveTitle(html);
+    if (selectedNote) {
+      const noteId = selectedNote.id;
+      const previous = selectedNote.title || '';
+      // Optimistic local update
+      setSelectedNote(prev => prev ? { ...prev, title: html } : prev);
+      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, title: html } : n));
+      // Debounced background save
+      if (html !== previous) scheduleTitleSave(noteId, html, previous);
+    }
   };
 
   const handleContentInput = () => {
     const html = contentRef.current?.innerHTML || "";
     setContentValue(html);
-    debouncedSaveContent(html);
+    if (selectedNote) {
+      const noteId = selectedNote.id;
+      const previous = selectedNote.content || '';
+      setSelectedNote(prev => prev ? { ...prev, content: html } : prev);
+      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, content: html } : n));
+      if (html !== previous) scheduleContentSave(noteId, html, previous);
+    }
   };
 
   // Word & line count calculation
@@ -556,7 +573,7 @@ const Notes = () => {
                       suppressContentEditableWarning
                       onInput={handleContentInput}
                       onFocus={() => setActiveField('content')}
-                      className="flex-1 border-none focus:outline-none text-base leading-relaxed min-h-[calc(100vh-320px)] px-1 whitespace-pre-wrap"
+                      className="note-preview flex-1 border-none focus:outline-none text-base leading-relaxed min-h-[calc(100vh-320px)] px-1 whitespace-pre-wrap"
                       aria-label="Note content"
                     />
                     {/* Formatting toolbar + status bar */}
@@ -570,6 +587,9 @@ const Notes = () => {
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => execFormat('underline')} title="Underline (Ctrl+U)">
                           <Underline className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => execFormat('insertUnorderedList')} title="Bullet List">
+                          <List className="h-4 w-4" />
                         </Button>
                       </div>
                       <div className="px-2 tabular-nums select-none">
