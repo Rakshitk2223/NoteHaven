@@ -5,11 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
-import { Plus, Trash2, Gift, Calendar as CalendarIcon } from 'lucide-react';
+import { Plus, Trash2, Gift } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
+import { DatePicker } from '@/components/ui/DatePicker';
 
 interface Birthday { id: number; name: string; date_of_birth: string; }
 
@@ -21,7 +19,6 @@ const Birthdays = () => {
   const [newName, setNewName] = useState('');
   const [newDate, setNewDate] = useState<string>('');
   const [newDateObj, setNewDateObj] = useState<Date | undefined>(undefined);
-  const [dobPickerOpen, setDobPickerOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => { fetchBirthdays(); }, []);
@@ -127,34 +124,16 @@ const Birthdays = () => {
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm font-medium">Date of Birth</label>
-                    <Popover open={dobPickerOpen} onOpenChange={setDobPickerOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className={cn('w-full justify-start text-left font-normal', !newDate && 'text-muted-foreground')}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {newDate ? format(new Date(newDate + 'T00:00:00'), 'PPP') : <span>Select date</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="p-2 w-auto" align="start" side="bottom">
-                        <Calendar
-                          mode="single"
-                          selected={newDateObj}
-                          onSelect={(d) => {
-                            if (d) {
-                              setNewDate(format(d, 'yyyy-MM-dd'));
-                              setNewDateObj(d);
-                              setDobPickerOpen(false);
-                            }
-                          }}
-                          captionLayout="dropdown"
-                          fromYear={1900}
-                          toYear={new Date().getFullYear()}
-                        />
-                      </PopoverContent>
-                    </Popover>
+                    <DatePicker
+                      date={newDateObj}
+                      setDate={(d) => {
+                        setNewDateObj(d);
+                        setNewDate(d ? d.toISOString().slice(0,10) : '');
+                      }}
+                      fromYear={1900}
+                      toYear={new Date().getFullYear()}
+                      placeholder="Select date"
+                    />
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setShowModal(false)}>Cancel</Button>

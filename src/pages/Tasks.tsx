@@ -4,11 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import { Calendar as CalendarIcon } from "lucide-react";
-import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { DatePicker } from "@/components/ui/DatePicker";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -30,12 +26,10 @@ const Tasks = () => {
   const [newTaskText, setNewTaskText] = useState("");
   const [newTaskDue, setNewTaskDue] = useState<string>("");
   const [newTaskDueObj, setNewTaskDueObj] = useState<Date | undefined>(undefined);
-  const [newDueOpen, setNewDueOpen] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [editText, setEditText] = useState("");
   const [editDue, setEditDue] = useState("");
   const [editDueObj, setEditDueObj] = useState<Date | undefined>(undefined);
-  const [editDueOpen, setEditDueOpen] = useState(false);
 
   // Fetch tasks on component mount
   useEffect(() => {
@@ -187,31 +181,15 @@ const Tasks = () => {
                     className="flex-1"
                     disabled={loading}
                   />
-                  <Popover open={newDueOpen} onOpenChange={setNewDueOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={cn("w-40 justify-start text-left font-normal", !newTaskDue && "text-muted-foreground")}
-                        disabled={loading}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {newTaskDue ? format(new Date(newTaskDue + 'T00:00:00'), 'PPP') : <span>Due date</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="p-2 w-auto" align="start" side="bottom">
-                      <Calendar
-                        mode="single"
-                        selected={newTaskDueObj}
-                        onSelect={(d) => {
-                          if (d) { setNewTaskDue(format(d, 'yyyy-MM-dd')); setNewTaskDueObj(d); setNewDueOpen(false); }
-                        }}
-                        captionLayout="dropdown"
-                        fromYear={new Date().getFullYear() - 1}
-                        toYear={new Date().getFullYear() + 5}
-                      />
-                    </PopoverContent>
-                  </Popover>
+                  <div className="w-40">
+                    <DatePicker
+                      date={newTaskDueObj}
+                      setDate={(d) => { setNewTaskDueObj(d); setNewTaskDue(d ? d.toISOString().slice(0,10) : ''); }}
+                      fromYear={new Date().getFullYear() - 1}
+                      toYear={new Date().getFullYear() + 5}
+                      placeholder="Due date"
+                    />
+                  </div>
                 </div>
                 <Button type="submit" disabled={!newTaskText.trim() || loading} className="self-start md:self-auto">
                   <Plus className="h-4 w-4 mr-2" />
@@ -371,30 +349,13 @@ const Tasks = () => {
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Due Date</label>
-              <Popover open={editDueOpen} onOpenChange={setEditDueOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className={cn("w-full justify-start text-left font-normal", !editDue && "text-muted-foreground")}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {editDue ? format(new Date(editDue + 'T00:00:00'), 'PPP') : <span>Pick a date</span>}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="p-2 w-auto" align="start" side="bottom">
-                  <Calendar
-                    mode="single"
-                    selected={editDueObj}
-                    onSelect={(d) => {
-                      if (d) { setEditDue(format(d, 'yyyy-MM-dd')); setEditDueObj(d); setEditDueOpen(false); }
-                    }}
-                    captionLayout="dropdown"
-                    fromYear={new Date().getFullYear() - 1}
-                    toYear={new Date().getFullYear() + 5}
-                  />
-                </PopoverContent>
-              </Popover>
+              <DatePicker
+                date={editDueObj}
+                setDate={(d) => { setEditDueObj(d); setEditDue(d ? d.toISOString().slice(0,10) : ''); }}
+                fromYear={new Date().getFullYear() - 1}
+                toYear={new Date().getFullYear() + 5}
+                placeholder="Pick a date"
+              />
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setEditTask(null)}>Cancel</Button>
