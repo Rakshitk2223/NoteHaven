@@ -15,7 +15,8 @@ import remarkGfm from "remark-gfm";
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
-import { Markdown } from 'tiptap-markdown';
+import TurndownService from 'turndown';
+import { marked } from 'marked';
 
 interface Note {
   id: number;
@@ -27,6 +28,9 @@ interface Note {
   is_pinned?: boolean;
   background_color?: string | null;
 }
+
+// Turndown instance for HTML -> Markdown conversion of legacy notes
+const turndownService = new TurndownService();
 
 const Notes = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -73,20 +77,17 @@ const Notes = () => {
   }, []);
 
   // Update form values when selected note changes
-  const stripHtml = (html: string) => html.replace(/<[^>]*>/g, "");
-  // Initialize Tiptap editor (v2) once
+  // Initialize Tiptap editor (v2) once (HTML internal, Markdown persisted)
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: false, codeBlock: false }),
       Underline,
-      Markdown.configure({ html: false })
     ],
     editable: true,
     content: '',
     onUpdate: ({ editor }) => {
-      const md = editor.storage.markdown.getMarkdown();
-      // avoid loop: only trigger save when markdown differs
-      if (md !== contentValue) handleContentChange(md, true);
+      const html = editor.getHTML();
+      if (html !== contentValue) handleContentChange(html, true);
     }
   });
   editorRef.current = editor;
@@ -95,11 +96,12 @@ const Notes = () => {
   useEffect(() => {
     if (!editor) return;
     if (selectedNote) {
-      const title = stripHtml(selectedNote.title || '');
-      const md = selectedNote.content || '';
+      const title = selectedNote.title || '';
+      const markdown = selectedNote.content || '';
+      const html = marked.parse(markdown) as string; // Markdown -> HTML for Tiptap
       setTitleValue(title);
-      setContentValue(md);
-      editor.commands.setContent(md);
+      setContentValue(markdown);
+      editor.commands.setContent(html);
     } else {
       setTitleValue('');
       setContentValue('');
@@ -298,13 +300,23 @@ const Notes = () => {
   };
 
   const handleContentChange = (val: string, fromEditor = false) => {
-    setContentValue(val);
+    // val is HTML when fromEditor=true; convert to Markdown for persistence
+    let markdown = val;
+    if (fromEditor) {
+      try {
+        markdown = turndownService.turndown(val || '');
+      } catch {
+        markdown = val; // fallback
+      }
+    }
+    setContentValue(markdown);
     if (selectedNote) {
       const previous = selectedNote.content || '';
-      if (val !== previous) scheduleContentSave(selectedNote.id, val, previous);
+      if (markdown !== previous) scheduleContentSave(selectedNote.id, markdown, previous);
     }
     if (!fromEditor && editor) {
-      editor.commands.setContent(val);
+      // External updates provide Markdown; set directly (will render as-is)
+      editor.commands.setContent(val, { parseOptions: { preserveWhitespace: 'full' } });
     }
   };
 
@@ -506,11 +518,11 @@ const Notes = () => {
                           ) : note.is_pinned ? (
                             <Pin className="h-3 w-3 text-primary" />
                           ) : null}
-                          <span className="truncate">{truncateText(stripHtml(note.title || 'Untitled'), 80)}</span>
+                          <span className="truncate">{truncateText(note.title || 'Untitled', 80)}</span>
                         </div>
                         <div className={`text-sm mt-1 line-clamp-3 ${note.background_color ? 'text-gray-600 dark:text-gray-700' : 'text-muted-foreground'} prose dark:prose-invert max-w-none`}> 
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {truncateText(stripHtml(note.content || ''), 300)}
+                            {note.content || ''}
                           </ReactMarkdown>
                         </div>
                         <div className={`text-xs mt-2 ${note.background_color ? 'text-gray-500 dark:text-gray-600' : 'text-muted-foreground'}`}>
