@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Edit, Trash2, Star, Filter, Upload, Search } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -62,6 +62,7 @@ const MediaTracker = () => {
   const searchDebounceRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
+  const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
 
   // Fetch media items on component mount and when filters change
   useEffect(() => {
@@ -101,6 +102,57 @@ const MediaTracker = () => {
       setError(err instanceof Error ? err.message : 'Failed to fetch media items');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const groupedByStatus = useMemo(() => {
+    const groups: Record<string, MediaItem[]> = {};
+    mediaItems.forEach(item => {
+      const key = item.status || 'Uncategorized';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(item);
+    });
+    const order = ['Watching','Reading','Plan to Watch','Plan to Read','Completed'];
+    const keys = Object.keys(groups).sort((a,b) => {
+      const ia = order.indexOf(a); const ib = order.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1; if (ib === -1) return -1; return ia - ib;
+    });
+    return { keys, groups };
+  }, [mediaItems]);
+
+  const handleQuickUpdate = async (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => {
+    const currentVal = (item as any)[field];
+    if (currentVal == null && amount < 0) return;
+    const newValue = Math.max((currentVal || 0) + amount, 1);
+    setUpdatingIds(prev => new Set(prev).add(item.id));
+    try {
+      const { error } = await supabase.from('media_tracker').update({ [field]: newValue }).eq('id', item.id);
+      if (error) throw error;
+      setMediaItems(prev => prev.map(m => m.id === item.id ? { ...m, [field]: newValue } as MediaItem : m));
+      toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
+    } catch (e:any) {
+      toast({ title: 'Update failed', description: e.message || 'Error', variant: 'destructive' });
+    } finally {
+      setUpdatingIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+    }
+  };
+
+  const handleExportJson = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { data, error } = await supabase.from('media_tracker').select('*').eq('user_id', user.id);
+      if (error) throw error;
+      const json = JSON.stringify(data || [], null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'notehaven_media_export.json';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      toast({ title: 'Export started', description: 'Download should begin shortly.' });
+    } catch (e:any) {
+      toast({ title: 'Export failed', description: e.message || 'Error', variant: 'destructive' });
     }
   };
 
@@ -367,6 +419,14 @@ const MediaTracker = () => {
                   <Upload className="h-4 w-4 mr-2" />
                   {isImporting ? 'Importing...' : 'Import'}
                 </Button>
+                <Button
+                  variant="outline"
+                  className="zen-transition hover:shadow-md"
+                  onClick={handleExportJson}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
                 <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                   <DialogTrigger asChild>
                     <Button className="zen-transition hover:shadow-md">
@@ -597,55 +657,68 @@ const MediaTracker = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {mediaItems.map((item) => (
-                  <div key={item.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition">
-                    <div className="flex items-start justify-between mb-3">
-                      <Badge className={getTypeColor(item.type)}>
-                        {item.type}
-                      </Badge>
-                      <Badge className={getStatusColor(item.status)}>
-                        {item.status}
-                      </Badge>
-                    </div>
-                    
-                    <h3 className="text-lg font-semibold text-foreground mb-2 truncate">
-                      {item.title}
-                    </h3>
-                    
-                    {item.rating && (
-                      <div className="flex items-center gap-1 mb-3">
-                        <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                        <span className="text-sm font-medium">{item.rating}/10</span>
-                      </div>
-                    )}
-                    
-                    {(item.current_season || item.current_episode || item.current_chapter) && (
-                      <div className="text-sm text-muted-foreground mb-4 space-x-2">
-                        {item.current_season && <span>Season {item.current_season}</span>}
-                        {item.current_episode && <span>Episode {item.current_episode}</span>}
-                        {item.current_chapter && <span>Chapter {item.current_chapter}</span>}
-                      </div>
-                    )}
-                    
-                    <div className="flex space-x-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleEditMedia(item)}
-                        className="flex-1"
-                      >
-                        <Edit className="h-4 w-4 mr-1" />
-                        Edit
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDeleteMedia(item.id)}
-                        className="text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+              <div className="space-y-10">
+                {groupedByStatus.keys.map(statusKey => (
+                  <div key={statusKey}>
+                    <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                      <Badge className={getStatusColor(statusKey as MediaItem['status'])}>{statusKey}</Badge>
+                      <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>
+                    </h2>
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {groupedByStatus.groups[statusKey].map(item => (
+                        <div key={item.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition">
+                          <div className="flex items-start justify-between mb-3">
+                            <Badge className={getTypeColor(item.type)}>{item.type}</Badge>
+                            <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
+                          </div>
+                          <h3 className="text-lg font-semibold text-foreground mb-2 truncate">{item.title}</h3>
+                          {item.rating && (
+                            <div className="flex items-center gap-1 mb-3">
+                              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                              <span className="text-sm font-medium">{item.rating}/10</span>
+                            </div>
+                          )}
+                          {(item.current_season || item.current_episode || item.current_chapter) && (
+                            <div className="text-sm text-muted-foreground mb-4 space-y-2">
+                              {item.current_season && <div>Season {item.current_season}</div>}
+                              {item.current_episode && (
+                                <div className="flex items-center gap-2">
+                                  <span>Episode {item.current_episode}</span>
+                                  <div className="flex gap-1">
+                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_episode',-1)}>
+                                      <Minus className="h-3 w-3" />
+                                    </Button>
+                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_episode',1)}>
+                                      <PlusIcon className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                              {item.current_chapter && (
+                                <div className="flex items-center gap-2">
+                                  <span>Chapter {item.current_chapter}</span>
+                                  <div className="flex gap-1">
+                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_chapter',-1)}>
+                                      <Minus className="h-3 w-3" />
+                                    </Button>
+                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_chapter',1)}>
+                                      <PlusIcon className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className="flex space-x-2">
+                            <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)} className="flex-1">
+                              <Edit className="h-4 w-4 mr-1" />Edit
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => handleDeleteMedia(item.id)} className="text-destructive hover:text-destructive">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
