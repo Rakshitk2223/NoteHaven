@@ -28,9 +28,9 @@ const Notes = () => {
   const [showNoteList, setShowNoteList] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   
-  // Auto-save states
-  const [titleValue, setTitleValue] = useState(""); // HTML
-  const [contentValue, setContentValue] = useState(""); // HTML
+  // Local editor states (decoupled from notes array to prevent cursor jump)
+  const [localTitle, setLocalTitle] = useState(""); // HTML
+  const [localContent, setLocalContent] = useState(""); // HTML
   const titleRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [activeField, setActiveField] = useState<'title' | 'content' | null>(null);
@@ -64,15 +64,15 @@ const Notes = () => {
     if (selectedNote) {
       const t = selectedNote.title || "";
       const c = selectedNote.content || "";
-      setTitleValue(t);
-      setContentValue(c);
+  setLocalTitle(t);
+  setLocalContent(c);
       requestAnimationFrame(() => {
         if (titleRef.current && titleRef.current.innerHTML !== t) titleRef.current.innerHTML = t;
         if (contentRef.current && contentRef.current.innerHTML !== c) contentRef.current.innerHTML = c;
       });
     } else {
-      setTitleValue("");
-      setContentValue("");
+  setLocalTitle("");
+  setLocalContent("");
       if (titleRef.current) titleRef.current.innerHTML = "";
       if (contentRef.current) contentRef.current.innerHTML = "";
     }
@@ -169,8 +169,8 @@ const Notes = () => {
       setSelectedNote(data);
       
       // Reset form values
-      setTitleValue(data.title);
-      setContentValue(data.content);
+  setLocalTitle(data.title);
+  setLocalContent(data.content);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create note');
     }
@@ -187,18 +187,11 @@ const Notes = () => {
         throw error;
       }
 
-      // Update the note in the local state
-      setNotes(prevNotes => 
-        prevNotes.map(note => 
-          note.id === noteId 
-            ? { ...note, ...updates, updated_at: new Date().toISOString() }
-            : note
-        )
-      );
-
-      // Update selected note if it's the one being edited
+      // Update timestamp + any non-editor fields (or applied after save) in local list to keep previews fresh.
+      setNotes(prevNotes => prevNotes.map(note => note.id === noteId ? { ...note, ...updates, updated_at: new Date().toISOString() } : note));
       if (selectedNote && selectedNote.id === noteId) {
-        setSelectedNote(prev => prev ? { ...prev, ...updates, updated_at: new Date().toISOString() } : null);
+        // Do not overwrite localTitle/localContent here to avoid cursor jump; only bump updated_at.
+        setSelectedNote(prev => prev ? { ...prev, updated_at: new Date().toISOString(), ...('background_color' in updates || 'is_pinned' in updates ? updates : {}) } : null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update note');
@@ -240,14 +233,13 @@ const Notes = () => {
       setIsSaving(true);
       const { error } = await supabase.from('notes').update({ [field]: value }).eq('id', noteId);
       if (error) throw error;
-      // On success update updated_at optimistically (without resorting list yet)
       const now = new Date().toISOString();
-      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, updated_at: now } : n));
-      setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, updated_at: now } : prev);
+      // Update list & selected note with new field value so previews stay fresh, but keep DOM caret (innerHTML write guarded below)
+      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value, updated_at: now } : n));
+      setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value, updated_at: now } : prev);
     } catch (e:any) {
-      // Revert field
+      // Revert field in list (do NOT touch local editor state; user keeps typing)
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: previous } : n));
-      setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: previous } : prev);
       toast({ title: 'Save failed', description: e.message || 'Could not save note', variant: 'destructive' });
     } finally {
       setIsSaving(false);
@@ -268,33 +260,25 @@ const Notes = () => {
 
   const handleTitleInput = () => {
     const html = titleRef.current?.innerHTML || "";
-    setTitleValue(html);
+    setLocalTitle(html);
     if (selectedNote) {
-      const noteId = selectedNote.id;
       const previous = selectedNote.title || '';
-      // Optimistic local update
-      setSelectedNote(prev => prev ? { ...prev, title: html } : prev);
-      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, title: html } : n));
-      // Debounced background save
-      if (html !== previous) scheduleTitleSave(noteId, html, previous);
+      if (html !== previous) scheduleTitleSave(selectedNote.id, html, previous);
     }
   };
 
   const handleContentInput = () => {
     const html = contentRef.current?.innerHTML || "";
-    setContentValue(html);
+    setLocalContent(html);
     if (selectedNote) {
-      const noteId = selectedNote.id;
       const previous = selectedNote.content || '';
-      setSelectedNote(prev => prev ? { ...prev, content: html } : prev);
-      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, content: html } : n));
-      if (html !== previous) scheduleContentSave(noteId, html, previous);
+      if (html !== previous) scheduleContentSave(selectedNote.id, html, previous);
     }
   };
 
   // Word & line count calculation
   useEffect(() => {
-    const plain = contentValue
+    const plain = localContent
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/(div|p|h[1-6]|li)>/gi, '\n')
       .replace(/<[^>]+>/g, '')
@@ -303,7 +287,7 @@ const Notes = () => {
     const lines = plain.split(/\n/).filter(() => true).length;
     setWordCount(words);
     setLineCount(lines);
-  }, [contentValue]);
+  }, [localContent]);
 
   // Toggle pin status for selected note
   const handleTogglePin = async () => {
