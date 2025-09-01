@@ -22,6 +22,7 @@ import NotFound from "./pages/NotFound";
 import CheckEmail from "./pages/CheckEmail";
 import Settings from "./pages/Settings";
 import Birthdays from "./pages/Birthdays";
+import SharedNote from "./pages/SharedNote.tsx"; // shared note public view
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,7 @@ const AppInner = () => {
         <Route path="/media" element={<ProtectedRoute><MediaTracker /></ProtectedRoute>} />
         <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
         <Route path="/notes" element={<ProtectedRoute><Notes /></ProtectedRoute>} />
+  <Route path="/notes/share/:shareId" element={<SharedNote />} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
   <Route path="/birthdays" element={<ProtectedRoute><Birthdays /></ProtectedRoute>} />
         <Route path="/check-email" element={<CheckEmail />} />

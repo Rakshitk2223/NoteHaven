@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette, Lightbulb, List } from "lucide-react";
+import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette, Lightbulb, List, Share2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 // Removed Input for title rich text
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
@@ -38,6 +41,11 @@ const Notes = () => {
   const [wordCount, setWordCount] = useState(0);
   const [lineCount, setLineCount] = useState(0);
   const { toast } = useToast();
+  // Sharing state
+  const [shareOpen, setShareOpen] = useState(false);
+  const [allowEditShare, setAllowEditShare] = useState(false);
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [generatingShare, setGeneratingShare] = useState(false);
 
   // Debouncing for auto-save
   const [titleTimeout, setTitleTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -310,6 +318,47 @@ const Notes = () => {
     }
   };
 
+  // Generate or fetch existing share link
+  const generateShareLink = async () => {
+    if (!selectedNote) return;
+    setGeneratingShare(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      // Check existing
+      const { data: existing, error: existingErr } = await supabase
+        .from('shared_notes')
+        .select('id, allow_edit')
+        .eq('note_id', selectedNote.id)
+        .eq('owner_id', user.id)
+        .maybeSingle();
+      let shareId: string;
+      if (existing && !existingErr) {
+        shareId = existing.id as string;
+        // If allow_edit changed, update
+        if (existing.allow_edit !== allowEditShare) {
+          await supabase.from('shared_notes').update({ allow_edit: allowEditShare }).eq('id', shareId);
+        }
+      } else {
+        const { data: inserted, error: insertErr } = await supabase
+          .from('shared_notes')
+          .insert([{ note_id: selectedNote.id, owner_id: user.id, allow_edit: allowEditShare }])
+          .select('id')
+          .single();
+        if (insertErr || !inserted) throw insertErr || new Error('Failed to create share');
+        shareId = inserted.id as string;
+      }
+      const origin = window.location.origin;
+      const full = `${origin}/notes/share/${shareId}`;
+      setShareLink(full);
+      toast({ title: 'Share link ready', description: allowEditShare ? 'Editing enabled' : 'Read-only link created' });
+    } catch (e:any) {
+      toast({ title: 'Share failed', description: e.message || 'Could not create share link', variant: 'destructive' });
+    } finally {
+      setGeneratingShare(false);
+    }
+  };
+
   const execFormat = (command: string) => {
     document.execCommand(command, false);
     if (activeField === 'title') {
@@ -535,6 +584,49 @@ const Notes = () => {
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
+                      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+                        <DialogTrigger asChild>
+                          <Button size="sm" variant="ghost" title="Share note">
+                            <Share2 className="h-4 w-4" />
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-md">
+                          <DialogHeader>
+                            <DialogTitle>Share Note</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-4 py-2">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm font-medium">Allow editing</p>
+                                <p className="text-xs text-muted-foreground">Others can change this note</p>
+                              </div>
+                              <Switch checked={allowEditShare} onCheckedChange={v => setAllowEditShare(!!v)} />
+                            </div>
+                            <Button size="sm" onClick={generateShareLink} disabled={generatingShare || !selectedNote} className="w-full">
+                              {generatingShare ? 'Generating...' : 'Create / Update Share Link'}
+                            </Button>
+                            {shareLink && (
+                              <div className="space-y-2">
+                                <label className="text-xs font-medium text-muted-foreground">Share URL</label>
+                                <div className="flex gap-2">
+                                  <Input readOnly value={shareLink} className="text-xs" />
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(shareLink);
+                                      toast({ title: 'Copied link to clipboard' });
+                                    }}
+                                  >
+                                    <Check className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </DialogContent>
+                      </Dialog>
                     </div>
                   </div>
 

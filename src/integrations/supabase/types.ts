@@ -200,6 +200,37 @@ export type Database = {
         }
         Relationships: []
       }
+      shared_notes: {
+        Row: {
+          id: string
+          note_id: number
+          owner_id: string
+          allow_edit: boolean | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          note_id: number
+          owner_id: string
+          allow_edit?: boolean | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          note_id?: number
+          owner_id?: string
+          allow_edit?: boolean | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: string
+            columns: string[]
+            referencedRelation: string
+            referencedColumns: string[]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
