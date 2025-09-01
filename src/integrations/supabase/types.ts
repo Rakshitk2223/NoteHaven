@@ -120,6 +120,7 @@ export type Database = {
           rating: number | null
           current_season: number | null
           current_episode: number | null
+          current_chapter: number | null
           image_url: string | null
           created_at: string
           updated_at: string
@@ -133,6 +134,7 @@ export type Database = {
           rating?: number | null
           current_season?: number | null
           current_episode?: number | null
+          current_chapter?: number | null
           image_url?: string | null
           created_at?: string
           updated_at?: string
@@ -146,6 +148,7 @@ export type Database = {
           rating?: number | null
           current_season?: number | null
           current_episode?: number | null
+          current_chapter?: number | null
           image_url?: string | null
           created_at?: string
           updated_at?: string

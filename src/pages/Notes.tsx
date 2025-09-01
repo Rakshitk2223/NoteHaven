@@ -9,14 +9,14 @@ import { Input } from "@/components/ui/input";
 // Removed Textarea split-view in favor of Tiptap WYSIWYG
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { getContrastTextColor } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+// Removed markdown rendering libraries; now storing & rendering raw HTML
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
-import TurndownService from 'turndown';
-import { marked } from 'marked';
+import Gapcursor from '@tiptap/extension-gapcursor';
+// Markdown conversion utilities removed with HTML-only pivot
 
 interface Note {
   id: number;
@@ -29,8 +29,7 @@ interface Note {
   background_color?: string | null;
 }
 
-// Turndown instance for HTML -> Markdown conversion of legacy notes
-const turndownService = new TurndownService();
+// HTML-only persistence: any legacy markdown handling removed
 
 const Notes = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -42,9 +41,9 @@ const Notes = () => {
   const [showNoteList, setShowNoteList] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   
-  // Local editor states (Markdown + plain text)
+  // Local editor states (HTML persistence)
   const [titleValue, setTitleValue] = useState("");
-  const [contentValue, setContentValue] = useState(""); // markdown string persisted
+  const [contentValue, setContentValue] = useState(""); // HTML string persisted
   const editorRef = useRef<ReturnType<typeof useEditor> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [wordCount, setWordCount] = useState(0);
@@ -55,6 +54,29 @@ const Notes = () => {
   const [allowEditShare, setAllowEditShare] = useState(false);
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [generatingShare, setGeneratingShare] = useState(false);
+  // Color palettes for light/dark modes
+  const lightModeColors = [
+    { label: 'None', value: null },
+    { label: 'GreenSoft', value: '#CADCAE' },
+    { label: 'GreenLight', value: '#E1E9C9' },
+    { label: 'OrangeMuted', value: '#EDA35A' },
+    { label: 'Peach', value: '#FEE8D9' },
+  ];
+  const darkModeColors = [
+    { label: 'None', value: null },
+    { label: 'RedVivid', value: '#F7374F' },
+    { label: 'Plum', value: '#88304E' },
+    { label: 'Eggplant', value: '#522546' },
+    { label: 'Charcoal', value: '#2C2C2C' },
+  ];
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  useEffect(() => {
+    const check = () => setIsDarkMode(document.documentElement.classList.contains('dark'));
+    check();
+    const observer = new MutationObserver(check);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
   // Debouncing for auto-save
   const [titleTimeout, setTitleTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -76,32 +98,31 @@ const Notes = () => {
     fetchNotes();
   }, []);
 
-  // Update form values when selected note changes
-  // Initialize Tiptap editor (v2) once (HTML internal, Markdown persisted)
+  // Initialize Tiptap editor (v2) once (HTML internal & persisted)
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: false, codeBlock: false }),
       Underline,
+      Gapcursor,
     ],
     editable: true,
     content: '',
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
-      if (html !== contentValue) handleContentChange(html, true);
+    if (html !== contentValue) handleContentChange(html);
     }
   });
   editorRef.current = editor;
 
-  // Load selected note into editor
+  // Load selected note into editor (HTML direct)
   useEffect(() => {
     if (!editor) return;
     if (selectedNote) {
       const title = selectedNote.title || '';
-      const markdown = selectedNote.content || '';
-      const html = marked.parse(markdown) as string; // Markdown -> HTML for Tiptap
-      setTitleValue(title);
-      setContentValue(markdown);
-      editor.commands.setContent(html);
+    const html = selectedNote.content || '';
+    setTitleValue(title);
+    setContentValue(html);
+    editor.commands.setContent(html);
     } else {
       setTitleValue('');
       setContentValue('');
@@ -281,13 +302,13 @@ const Notes = () => {
 
   const scheduleTitleSave = useCallback((noteId: number, newValue: string, previous: string) => {
     if (titleTimeout) clearTimeout(titleTimeout);
-    const timeout = setTimeout(() => saveField(noteId, 'title', newValue, previous), 1200);
+    const timeout = setTimeout(() => saveField(noteId, 'title', newValue, previous), 5000);
     setTitleTimeout(timeout);
   }, [titleTimeout, saveField]);
 
   const scheduleContentSave = useCallback((noteId: number, newValue: string, previous: string) => {
     if (contentTimeout) clearTimeout(contentTimeout);
-    const timeout = setTimeout(() => saveField(noteId, 'content', newValue, previous), 1200);
+    const timeout = setTimeout(() => saveField(noteId, 'content', newValue, previous), 5000);
     setContentTimeout(timeout);
   }, [contentTimeout, saveField]);
 
@@ -299,32 +320,33 @@ const Notes = () => {
     }
   };
 
-  const handleContentChange = (val: string, fromEditor = false) => {
-    // val is HTML when fromEditor=true; convert to Markdown for persistence
-    let markdown = val;
-    if (fromEditor) {
-      try {
-        markdown = turndownService.turndown(val || '');
-      } catch {
-        markdown = val; // fallback
-      }
-    }
-    setContentValue(markdown);
+  const handleContentChange = (html: string) => {
+    setContentValue(html);
     if (selectedNote) {
       const previous = selectedNote.content || '';
-      if (markdown !== previous) scheduleContentSave(selectedNote.id, markdown, previous);
+      if (html !== previous) scheduleContentSave(selectedNote.id, html, previous);
     }
-    if (!fromEditor && editor) {
-      // External updates provide Markdown; set directly (will render as-is)
-      editor.commands.setContent(val, { parseOptions: { preserveWhitespace: 'full' } });
+    if (editor && editor.getHTML() !== html) {
+      editor.commands.setContent(html);
     }
   };
 
   // Word & line count calculation
   useEffect(() => {
-    const plain = contentValue;
-    const words = plain.trim().length === 0 ? 0 : plain.trim().split(/\s+/).length;
-    const lines = plain.split(/\n/).filter(() => true).length;
+    // Strip HTML tags to compute word count
+    const text = contentValue
+      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ') // tags
+      .replace(/&nbsp;/g, ' ') // entities
+      .replace(/&amp;/g, '&');
+    const words = text.trim().length === 0 ? 0 : text.trim().split(/\s+/).length;
+    // Approximate line count: treat block tags & br as breaks
+    const lineText = contentValue
+      .replace(/<(p|div|br|li|h[1-6])[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .trim();
+    const lines = lineText === '' ? 0 : lineText.split(/\n+/).length;
     setWordCount(words);
     setLineCount(lines);
   }, [contentValue]);
@@ -508,7 +530,7 @@ const Notes = () => {
                         className={`
                           p-3 rounded-lg cursor-pointer transition-colors
                           ${selectedNote?.id === note.id ? 'ring-2 ring-primary' : 'hover:bg-muted'}
-                          ${note.background_color ? 'text-neutral-900 dark:text-neutral-900' : ''}
+                          ${note.background_color ? getContrastTextColor(note.background_color) : ''}
                         `}
                         style={{ backgroundColor: note.background_color || undefined }}
                       >
@@ -520,12 +542,9 @@ const Notes = () => {
                           ) : null}
                           <span className="truncate">{truncateText(note.title || 'Untitled', 80)}</span>
                         </div>
-                        <div className={`text-sm mt-1 line-clamp-3 ${note.background_color ? 'text-gray-600 dark:text-gray-700' : 'text-muted-foreground'} prose dark:prose-invert max-w-none`}> 
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {note.content || ''}
-                          </ReactMarkdown>
-                        </div>
-                        <div className={`text-xs mt-2 ${note.background_color ? 'text-gray-500 dark:text-gray-600' : 'text-muted-foreground'}`}>
+                        <div className={`text-sm mt-1 line-clamp-3 ${note.background_color ? getContrastTextColor(note.background_color) : 'text-muted-foreground'} prose dark:prose-invert max-w-none`} 
+                          dangerouslySetInnerHTML={{ __html: note.content || '' }} />
+                        <div className={`text-xs mt-2 ${note.background_color ? getContrastTextColor(note.background_color) : 'text-muted-foreground'}`}>
                           {formatDate(note.updated_at)}
                         </div>
                       </div>
@@ -562,16 +581,7 @@ const Notes = () => {
                         </PopoverTrigger>
                         <PopoverContent align="end" className="w-52">
                           <div className="grid grid-cols-6 gap-2">
-                            {[
-                              { label: 'None', value: null },
-                              { label: 'Yellow', value: '#FEF3C7' },
-                              { label: 'Green', value: '#DCFCE7' },
-                              { label: 'Blue', value: '#DBEAFE' },
-                              { label: 'Purple', value: '#EDE9FE' },
-                              { label: 'Pink', value: '#FCE7F3' },
-                              { label: 'Orange', value: '#FFEDD5' },
-                              { label: 'Gray', value: '#F3F4F6' },
-                            ].map(c => (
+                            {[...lightModeColors, ...darkModeColors.filter(c => c.value !== null)].map(c => (
                               <button
                                 key={c.label}
                                 title={c.label}
@@ -639,7 +649,7 @@ const Notes = () => {
                   </div>
 
                   {/* Editor Content - Tiptap WYSIWYG */}
-                  <div className={`flex-1 p-4 flex flex-col gap-4 ${selectedNote.background_color ? 'text-neutral-900 dark:text-neutral-900' : ''}`} style={{ backgroundColor: selectedNote.background_color || undefined }}>
+                  <div className={`flex-1 p-4 flex flex-col gap-4 ${selectedNote.background_color ? getContrastTextColor(selectedNote.background_color) : ''}`} style={{ backgroundColor: selectedNote.background_color || undefined }}>
                     <Input
                       value={titleValue}
                       onChange={(e) => handleTitleChange(e.target.value)}
@@ -659,7 +669,7 @@ const Notes = () => {
                       </div>
                     </div>
                     <div className="flex items-center justify-between pt-2 border-t border-border text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2">Markdown autosaves</div>
+                      <div className="flex items-center gap-2">Autosave every 10s</div>
                       <div className="px-2 tabular-nums select-none">Words: {wordCount} | Lines: {lineCount}</div>
                     </div>
                   </div>

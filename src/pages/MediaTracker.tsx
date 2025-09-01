@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, Edit, Trash2, Star, Filter } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Plus, Edit, Trash2, Star, Filter, Upload, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,20 +19,22 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import AppSidebar from "@/components/AppSidebar";
+import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 interface MediaItem {
   id: number;
   user_id: string;
   title: string;
-  // Accept exact literals for UI plus generic string to satisfy DB returns
-  type: 'Movie' | 'Series' | 'Anime' | 'Manga' | string;
-  status: 'Watching' | 'Completed' | 'On Hold' | 'Plan to Watch' | string;
+  // Restrict to the allowed canonical set while keeping string for legacy DB rows
+  type: 'Movie' | 'Series' | 'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'KDrama' | 'JDrama' | string;
+  status: 'Watching' | 'Completed' | 'Plan to Read' | 'Plan to Watch' | 'Reading' | string;
   rating?: number;
   current_season?: number;
   current_episode?: number;
+  current_chapter?: number;
   created_at: string;
-  updated_at?: string; // added in migration; optional for backward compatibility
+  updated_at?: string;
 }
 
 const MediaTracker = () => {
@@ -44,29 +46,37 @@ const MediaTracker = () => {
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
   const [filterType, setFilterType] = useState<string>('All');
   const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [formData, setFormData] = useState({
     title: "",
     type: "" as MediaItem['type'],
     status: "" as MediaItem['status'],
     rating: "",
     current_season: "",
-    current_episode: ""
+    current_episode: "",
+    current_chapter: ""
   });
+  const [isImporting, setIsImporting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(''); // debounced term actually used for query
+  const [typedSearchTerm, setTypedSearchTerm] = useState(''); // immediate input echo
+  const searchDebounceRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { toast } = useToast();
 
   // Fetch media items on component mount and when filters change
   useEffect(() => {
     fetchMediaItems();
-  }, [filterType, filterStatus]);
+  }, [filterType, filterStatus, searchTerm, sortOrder]);
 
   const fetchMediaItems = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      let query = supabase
+  let query = supabase
         .from('media_tracker')
         .select('*')
-        // Prefer updated_at if present (after migration), fallback to created_at
+        .order('title', { ascending: sortOrder === 'asc' })
         .order('updated_at', { ascending: false });
 
       // Apply filters
@@ -75,6 +85,9 @@ const MediaTracker = () => {
       }
       if (filterStatus !== 'All') {
         query = query.eq('status', filterStatus);
+      }
+      if (searchTerm.trim() !== '') {
+        query = query.ilike('title', `%${searchTerm.trim()}%`);
       }
 
       const { data, error } = await query;
@@ -107,6 +120,7 @@ const MediaTracker = () => {
         rating: formData.rating ? parseInt(formData.rating) : null,
         current_season: formData.current_season ? parseInt(formData.current_season) : null,
         current_episode: formData.current_episode ? parseInt(formData.current_episode) : null,
+        current_chapter: formData.current_chapter ? parseInt(formData.current_chapter) : null,
         user_id: user.id
       };
 
@@ -136,7 +150,8 @@ const MediaTracker = () => {
         status: formData.status,
         rating: formData.rating ? parseInt(formData.rating) : null,
         current_season: formData.current_season ? parseInt(formData.current_season) : null,
-        current_episode: formData.current_episode ? parseInt(formData.current_episode) : null
+        current_episode: formData.current_episode ? parseInt(formData.current_episode) : null,
+        current_chapter: formData.current_chapter ? parseInt(formData.current_chapter) : null
       };
 
       const { error } = await supabase
@@ -186,7 +201,8 @@ const MediaTracker = () => {
       status: item.status,
       rating: item.rating?.toString() || "",
       current_season: item.current_season?.toString() || "",
-      current_episode: item.current_episode?.toString() || ""
+      current_episode: item.current_episode?.toString() || "",
+      current_chapter: item.current_chapter?.toString() || ""
     });
     setIsModalOpen(true);
   };
@@ -198,7 +214,8 @@ const MediaTracker = () => {
       status: "" as MediaItem['status'],
       rating: "",
       current_season: "",
-      current_episode: ""
+      current_episode: "",
+      current_chapter: ""
     });
   };
 
@@ -221,8 +238,9 @@ const MediaTracker = () => {
     switch (status) {
       case 'Watching': return 'bg-blue-100 text-blue-800';
       case 'Completed': return 'bg-green-100 text-green-800';
-      case 'On Hold': return 'bg-yellow-100 text-yellow-800';
-      case 'Plan to Watch': return 'bg-gray-100 text-gray-800';
+      case 'Plan to Read': return 'bg-gray-100 text-gray-800';
+      case 'Plan to Watch': return 'bg-yellow-100 text-yellow-800';
+      case 'Reading': return 'bg-cyan-100 text-cyan-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -233,11 +251,89 @@ const MediaTracker = () => {
       case 'Series': return 'bg-indigo-100 text-indigo-800';
       case 'Anime': return 'bg-pink-100 text-pink-800';
       case 'Manga': return 'bg-orange-100 text-orange-800';
+      case 'Manhwa': return 'bg-teal-100 text-teal-800';
+      case 'Manhua': return 'bg-lime-100 text-lime-800';
+      case 'KDrama': return 'bg-rose-100 text-rose-800';
+      case 'JDrama': return 'bg-amber-100 text-amber-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const showSeasonEpisode = formData.type === 'Series' || formData.type === 'Anime';
+  // Episodic content includes dramas as well
+  const showSeasonEpisode = ['Series','Anime','KDrama','JDrama'].includes(formData.type);
+  // Chapter based content includes Manga / Manhwa / Manhua
+  const showChapter = ['Manga','Manhwa','Manhua'].includes(formData.type);
+
+  // Debounced search handler
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setTypedSearchTerm(value);
+    if (searchDebounceRef.current) {
+      window.clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = window.setTimeout(() => {
+      setSearchTerm(value);
+    }, 400);
+  };
+
+  // JSON Import handler
+  const handleJsonImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const text = await file.text();
+      let data: any[] = [];
+      try {
+        data = JSON.parse(text);
+        if (!Array.isArray(data)) throw new Error('JSON root must be an array');
+      } catch (e:any) {
+        setError(e.message || 'Invalid JSON');
+        setIsImporting(false);
+        return;
+      }
+      toast({ title: 'Import started', description: 'Your media is being imported in the background.' });
+      const batchSize = 50;
+      const successfulImports: any[] = [];
+      const failedImports: any[] = [];
+      for (let i = 0; i < data.length; i += batchSize) {
+        const batch = data.slice(i, i + batchSize).map(item => ({
+          title: item.title || '',
+          type: item.type || 'Movie',
+          status: item.status || 'Plan to Read',
+          rating: item.rating ?? null,
+          current_season: item.current_season ?? null,
+          current_episode: item.current_episode ?? null,
+          current_chapter: item.current_chapter ?? null,
+          user_id: item.user_id || undefined // will be overridden by RLS / server if needed
+        }));
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+        batch.forEach(b => b.user_id = user.id);
+        const { error } = await supabase.from('media_tracker').insert(batch);
+        if (error) {
+          console.error('Batch insert failed', error);
+            failedImports.push(...batch);
+        } else {
+          successfulImports.push(...batch);
+        }
+      }
+      if (failedImports.length === 0) {
+        toast({ title: 'Import Complete', description: `${successfulImports.length} items were successfully imported.` });
+      } else {
+        const failedTitles = failedImports.map(i => i.title).filter(Boolean).slice(0, 20).join(', ');
+        toast({ title: 'Import Partially Complete', description: `${successfulImports.length} items imported. ${failedImports.length} failed. Failed titles: ${failedTitles}${failedImports.length>20?', ...':''}`, variant: 'destructive' });
+      }
+      fetchMediaItems();
+    } catch (e:any) {
+      console.error('Import error', e);
+      setError(e.message || 'Import failed');
+      toast({ title: 'Import failed', description: e.message || 'An error occurred', variant: 'destructive' });
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -253,14 +349,32 @@ const MediaTracker = () => {
               <h1 className="text-2xl font-bold font-heading text-foreground">
                 Media Tracker
               </h1>
-              <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                <DialogTrigger asChild>
-                  <Button className="zen-transition hover:shadow-md">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Media
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[500px]">
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={handleJsonImport}
+                  disabled={isImporting}
+                />
+                <Button
+                  variant="outline"
+                  className="zen-transition hover:shadow-md"
+                  disabled={isImporting}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  {isImporting ? 'Importing...' : 'Import'}
+                </Button>
+                <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+                  <DialogTrigger asChild>
+                    <Button className="zen-transition hover:shadow-md">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Media
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[500px]">
                   <DialogHeader>
                     <DialogTitle>
                       {editingItem ? 'Edit Media' : 'Add New Media'}
@@ -294,6 +408,10 @@ const MediaTracker = () => {
                             <SelectItem value="Series">Series</SelectItem>
                             <SelectItem value="Anime">Anime</SelectItem>
                             <SelectItem value="Manga">Manga</SelectItem>
+                            <SelectItem value="Manhwa">Manhwa</SelectItem>
+                            <SelectItem value="Manhua">Manhua</SelectItem>
+                            <SelectItem value="KDrama">KDrama</SelectItem>
+                            <SelectItem value="JDrama">JDrama</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -310,8 +428,9 @@ const MediaTracker = () => {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="Watching">Watching</SelectItem>
+                            <SelectItem value="Reading">Reading</SelectItem>
                             <SelectItem value="Completed">Completed</SelectItem>
-                            <SelectItem value="On Hold">On Hold</SelectItem>
+                            <SelectItem value="Plan to Read">Plan to Read</SelectItem>
                             <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
                           </SelectContent>
                         </Select>
@@ -357,6 +476,19 @@ const MediaTracker = () => {
                         </div>
                       </div>
                     )}
+                    {showChapter && (
+                      <div className="space-y-2">
+                        <Label htmlFor="current_chapter">Current Chapter</Label>
+                        <Input
+                          id="current_chapter"
+                          type="number"
+                          min="1"
+                          value={formData.current_chapter}
+                          onChange={(e) => setFormData({ ...formData, current_chapter: e.target.value })}
+                          placeholder="Chapter number"
+                        />
+                      </div>
+                    )}
 
                     <div className="flex justify-end space-x-2 pt-4">
                       <Button
@@ -371,12 +503,22 @@ const MediaTracker = () => {
                       </Button>
                     </div>
                   </form>
-                </DialogContent>
-              </Dialog>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </div>
           </div>
 
           <div className="p-6">
+            {/* Search Bar */}
+            <div className="mb-4 flex items-center gap-2 max-w-md">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search title..."
+                value={typedSearchTerm}
+                onChange={handleSearchChange}
+              />
+            </div>
             {error && (
               <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
                 {error}
@@ -403,6 +545,10 @@ const MediaTracker = () => {
                       <SelectItem value="Series">Series</SelectItem>
                       <SelectItem value="Anime">Anime</SelectItem>
                       <SelectItem value="Manga">Manga</SelectItem>
+                      <SelectItem value="Manhwa">Manhwa</SelectItem>
+                      <SelectItem value="Manhua">Manhua</SelectItem>
+                      <SelectItem value="KDrama">KDrama</SelectItem>
+                      <SelectItem value="JDrama">JDrama</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -416,9 +562,22 @@ const MediaTracker = () => {
                     <SelectContent>
                       <SelectItem value="All">All</SelectItem>
                       <SelectItem value="Watching">Watching</SelectItem>
+                      <SelectItem value="Reading">Reading</SelectItem>
                       <SelectItem value="Completed">Completed</SelectItem>
-                      <SelectItem value="On Hold">On Hold</SelectItem>
+                      <SelectItem value="Plan to Read">Plan to Read</SelectItem>
                       <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="sort-order" className="text-sm">Sort:</Label>
+                  <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="asc">Title A → Z</SelectItem>
+                      <SelectItem value="desc">Title Z → A</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -461,11 +620,11 @@ const MediaTracker = () => {
                       </div>
                     )}
                     
-                    {(item.current_season || item.current_episode) && (
-                      <div className="text-sm text-muted-foreground mb-4">
-                        {item.current_season && `Season ${item.current_season}`}
-                        {item.current_season && item.current_episode && ' • '}
-                        {item.current_episode && `Episode ${item.current_episode}`}
+                    {(item.current_season || item.current_episode || item.current_chapter) && (
+                      <div className="text-sm text-muted-foreground mb-4 space-x-2">
+                        {item.current_season && <span>Season {item.current_season}</span>}
+                        {item.current_episode && <span>Episode {item.current_episode}</span>}
+                        {item.current_chapter && <span>Chapter {item.current_chapter}</span>}
                       </div>
                     )}
                     
