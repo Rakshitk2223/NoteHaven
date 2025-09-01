@@ -1,14 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline, Palette, Lightbulb, List, Share2, Check } from "lucide-react";
+import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered } from "lucide-react";
 import { Button } from "@/components/ui/button";
-// Removed Input for title rich text
+// Markdown-based editor now replaces previous contentEditable implementation
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+// Removed Textarea split-view in favor of Tiptap WYSIWYG
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Underline from '@tiptap/extension-underline';
+import { Markdown } from 'tiptap-markdown';
 
 interface Note {
   id: number;
@@ -31,12 +38,10 @@ const Notes = () => {
   const [showNoteList, setShowNoteList] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   
-  // Local editor states (decoupled from notes array to prevent cursor jump)
-  const [localTitle, setLocalTitle] = useState(""); // HTML
-  const [localContent, setLocalContent] = useState(""); // HTML
-  const titleRef = useRef<HTMLDivElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const [activeField, setActiveField] = useState<'title' | 'content' | null>(null);
+  // Local editor states (Markdown + plain text)
+  const [titleValue, setTitleValue] = useState("");
+  const [contentValue, setContentValue] = useState(""); // markdown string persisted
+  const editorRef = useRef<ReturnType<typeof useEditor> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [lineCount, setLineCount] = useState(0);
@@ -68,23 +73,40 @@ const Notes = () => {
   }, []);
 
   // Update form values when selected note changes
-  useEffect(() => {
-    if (selectedNote) {
-      const t = selectedNote.title || "";
-      const c = selectedNote.content || "";
-  setLocalTitle(t);
-  setLocalContent(c);
-      requestAnimationFrame(() => {
-        if (titleRef.current && titleRef.current.innerHTML !== t) titleRef.current.innerHTML = t;
-        if (contentRef.current && contentRef.current.innerHTML !== c) contentRef.current.innerHTML = c;
-      });
-    } else {
-  setLocalTitle("");
-  setLocalContent("");
-      if (titleRef.current) titleRef.current.innerHTML = "";
-      if (contentRef.current) contentRef.current.innerHTML = "";
+  const stripHtml = (html: string) => html.replace(/<[^>]*>/g, "");
+  // Initialize Tiptap editor (v2) once
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ heading: false, codeBlock: false }),
+      Underline,
+      Markdown.configure({ html: false })
+    ],
+    editable: true,
+    content: '',
+    onUpdate: ({ editor }) => {
+      const md = editor.storage.markdown.getMarkdown();
+      // avoid loop: only trigger save when markdown differs
+      if (md !== contentValue) handleContentChange(md, true);
     }
-  }, [selectedNote]);
+  });
+  editorRef.current = editor;
+
+  // Load selected note into editor
+  useEffect(() => {
+    if (!editor) return;
+    if (selectedNote) {
+      const title = stripHtml(selectedNote.title || '');
+      const md = selectedNote.content || '';
+      setTitleValue(title);
+      setContentValue(md);
+      editor.commands.setContent(md);
+    } else {
+      setTitleValue('');
+      setContentValue('');
+      editor.commands.clearContent();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNote, editor]);
 
   const fetchNotes = async () => {
     try {
@@ -176,9 +198,10 @@ const Notes = () => {
       setNotes(prevNotes => [data, ...prevNotes]);
       setSelectedNote(data);
       
-      // Reset form values
-  setLocalTitle(data.title);
-  setLocalContent(data.content);
+  // Reset form values
+  setTitleValue(data.title || "");
+  setContentValue(data.content || "");
+  editor?.commands.setContent(data.content || '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create note');
     }
@@ -242,7 +265,7 @@ const Notes = () => {
       const { error } = await supabase.from('notes').update({ [field]: value }).eq('id', noteId);
       if (error) throw error;
       const now = new Date().toISOString();
-      // Update list & selected note with new field value so previews stay fresh, but keep DOM caret (innerHTML write guarded below)
+  // Update list & selected note with new field value so previews stay fresh
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value, updated_at: now } : n));
       setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value, updated_at: now } : prev);
     } catch (e:any) {
@@ -266,36 +289,33 @@ const Notes = () => {
     setContentTimeout(timeout);
   }, [contentTimeout, saveField]);
 
-  const handleTitleInput = () => {
-    const html = titleRef.current?.innerHTML || "";
-    setLocalTitle(html);
+  const handleTitleChange = (val: string) => {
+    setTitleValue(val);
     if (selectedNote) {
       const previous = selectedNote.title || '';
-      if (html !== previous) scheduleTitleSave(selectedNote.id, html, previous);
+      if (val !== previous) scheduleTitleSave(selectedNote.id, val, previous);
     }
   };
 
-  const handleContentInput = () => {
-    const html = contentRef.current?.innerHTML || "";
-    setLocalContent(html);
+  const handleContentChange = (val: string, fromEditor = false) => {
+    setContentValue(val);
     if (selectedNote) {
       const previous = selectedNote.content || '';
-      if (html !== previous) scheduleContentSave(selectedNote.id, html, previous);
+      if (val !== previous) scheduleContentSave(selectedNote.id, val, previous);
+    }
+    if (!fromEditor && editor) {
+      editor.commands.setContent(val);
     }
   };
 
   // Word & line count calculation
   useEffect(() => {
-    const plain = localContent
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(div|p|h[1-6]|li)>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ');
+    const plain = contentValue;
     const words = plain.trim().length === 0 ? 0 : plain.trim().split(/\s+/).length;
     const lines = plain.split(/\n/).filter(() => true).length;
     setWordCount(words);
     setLineCount(lines);
-  }, [localContent]);
+  }, [contentValue]);
 
   // Toggle pin status for selected note
   const handleTogglePin = async () => {
@@ -359,17 +379,8 @@ const Notes = () => {
     }
   };
 
-  const execFormat = (command: string) => {
-    document.execCommand(command, false);
-    if (activeField === 'title') {
-      handleTitleInput();
-    } else if (activeField === 'content') {
-      handleContentInput();
-    } else {
-      handleTitleInput();
-      handleContentInput();
-    }
-  };
+  // Tiptap toolbar helpers
+  const run = (cb: (e: any) => any) => () => { if (editor) { editor.chain().focus(); cb(editor); } };
   // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
@@ -395,19 +406,6 @@ const Notes = () => {
   const truncateText = (text: string, maxLength: number = 50) => {
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength) + '...';
-  };
-
-  const renderPreviewHTML = (html: string) => {
-    // strip tags but keep line breaks by replacing block tags with newline first
-    const withBreaks = html
-      .replace(/<(div|p|br|li|h[1-6])\b[^>]*>/gi, '\n')
-      .replace(/<\/[^>]+>/g, '');
-    const cleaned = withBreaks
-      .replace(/\n{3,}/g, '\n\n') // collapse excess
-      .trim();
-    const shortened = cleaned.length > 300 ? cleaned.slice(0,300) + '…' : cleaned;
-    // convert remaining newlines to <br/>
-    return shortened.replace(/\n/g, '<br/>');
   };
 
   return (
@@ -508,15 +506,13 @@ const Notes = () => {
                           ) : note.is_pinned ? (
                             <Pin className="h-3 w-3 text-primary" />
                           ) : null}
-                          <span
-                            className="truncate"
-                            dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }}
-                          />
+                          <span className="truncate">{truncateText(stripHtml(note.title || 'Untitled'), 80)}</span>
                         </div>
-                        <div
-                          className={`text-sm mt-1 whitespace-pre-wrap line-clamp-3 ${note.background_color ? 'text-gray-600 dark:text-gray-700' : 'text-muted-foreground'}`}
-                          dangerouslySetInnerHTML={{ __html: renderPreviewHTML(note.content || '') }}
-                        />
+                        <div className={`text-sm mt-1 line-clamp-3 ${note.background_color ? 'text-gray-600 dark:text-gray-700' : 'text-muted-foreground'} prose dark:prose-invert max-w-none`}> 
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {truncateText(stripHtml(note.content || ''), 300)}
+                          </ReactMarkdown>
+                        </div>
                         <div className={`text-xs mt-2 ${note.background_color ? 'text-gray-500 dark:text-gray-600' : 'text-muted-foreground'}`}>
                           {formatDate(note.updated_at)}
                         </div>
@@ -630,47 +626,29 @@ const Notes = () => {
                     </div>
                   </div>
 
-                  {/* Editor Content */}
-                  <div className={`flex-1 p-4 space-y-4 flex flex-col ${selectedNote.background_color ? 'text-neutral-900 dark:text-neutral-900' : ''}`} style={{ backgroundColor: selectedNote.background_color || undefined }}>
-                    <div
-                      ref={titleRef}
-                      contentEditable
-                      suppressContentEditableWarning
-                      onInput={handleTitleInput}
-                      onFocus={() => setActiveField('title')}
-                      className="text-2xl font-semibold focus:outline-none px-1"
-                      data-placeholder="Note title..."
-                      aria-label="Note title"
+                  {/* Editor Content - Tiptap WYSIWYG */}
+                  <div className={`flex-1 p-4 flex flex-col gap-4 ${selectedNote.background_color ? 'text-neutral-900 dark:text-neutral-900' : ''}`} style={{ backgroundColor: selectedNote.background_color || undefined }}>
+                    <Input
+                      value={titleValue}
+                      onChange={(e) => handleTitleChange(e.target.value)}
+                      placeholder="Note title..."
+                      className="text-xl font-semibold"
                     />
-                    <div
-                      id="rich-editor"
-                      ref={contentRef}
-                      contentEditable
-                      suppressContentEditableWarning
-                      onInput={handleContentInput}
-                      onFocus={() => setActiveField('content')}
-                      className="note-preview flex-1 border-none focus:outline-none text-base leading-relaxed min-h-[calc(100vh-320px)] px-1 whitespace-pre-wrap"
-                      aria-label="Note content"
-                    />
-                    {/* Formatting toolbar + status bar */}
+                    <div className="flex-1 flex flex-col border rounded-md bg-background/60 overflow-hidden min-h-[calc(100vh-360px)]">
+                      <div className="flex items-center gap-1 flex-wrap border-b border-border p-1 text-xs">
+                        <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold"><Bold className="h-4 w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic"><Italic className="h-4 w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('underline') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline"><UnderlineIcon className="h-4 w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('bulletList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List"><List className="h-4 w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('orderedList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Ordered List"><ListOrdered className="h-4 w-4" /></Button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-4 flex">
+                        {editor && <EditorContent editor={editor} className="prose dark:prose-invert max-w-none focus:outline-none flex-1" />}
+                      </div>
+                    </div>
                     <div className="flex items-center justify-between pt-2 border-t border-border text-xs text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => execFormat('bold')} title="Bold (Ctrl+B)">
-                          <Bold className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => execFormat('italic')} title="Italic (Ctrl+I)">
-                          <Italic className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => execFormat('underline')} title="Underline (Ctrl+U)">
-                          <Underline className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => execFormat('insertUnorderedList')} title="Bullet List">
-                          <List className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div className="px-2 tabular-nums select-none">
-                        Words: {wordCount} | Lines: {lineCount}
-                      </div>
+                      <div className="flex items-center gap-2">Markdown autosaves</div>
+                      <div className="px-2 tabular-nums select-none">Words: {wordCount} | Lines: {lineCount}</div>
                     </div>
                   </div>
                 </>

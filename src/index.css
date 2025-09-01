@@ -138,4 +138,53 @@ All colors MUST be HSL.
   #rich-editor li, .note-preview li {
     @apply leading-relaxed;
   }
+
+  /* Tiptap / ProseMirror editor styles */
+  .ProseMirror {
+    @apply min-h-[calc(100vh-360px)] outline-none; /* overall min height and remove default outline */
+  }
+  .ProseMirror p { /* paragraph spacing */
+    @apply mb-3 leading-relaxed;
+  }
+  .ProseMirror p:last-child { /* avoid extra space at bottom */
+    @apply mb-0;
+  }
+  .ProseMirror p.is-empty::before { /* show placeholder height for blank lines */
+    content: "\200b"; /* zero width space */
+    @apply text-transparent block h-5;
+  }
+  .ProseMirror pre { /* code block styling harmony */
+    @apply bg-muted rounded-md p-3 overflow-x-auto text-sm font-mono;
+  }
+  .ProseMirror ul { @apply list-disc list-inside ml-4 my-2 space-y-1; }
+  .ProseMirror ol { @apply list-decimal list-inside ml-4 my-2 space-y-1; }
+  .ProseMirror li { @apply leading-relaxed; }
+}
+
+/* Explicit Tiptap editor overrides (requested) */
+.ProseMirror {
+  min-height: 300px;
+  height: 100%;
+  padding: 0.5rem;
+  outline: none;
+}
+.ProseMirror:focus { outline: none; }
+.ProseMirror p {
+  margin-bottom: 0.75rem;
+}
+.ProseMirror p.is-empty::before {
+  content: '\200B';
+  float: left;
+  height: 0;
+}
+.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+}
+.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+}
+.ProseMirror li {
+  margin-bottom: 0.25rem;
 }
