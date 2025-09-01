@@ -226,7 +226,9 @@ const Notes = () => {
   setContentValue(data.content || "");
   editor?.commands.setContent(data.content || '');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create note');
+      const message = err instanceof Error ? err.message : 'Failed to create note';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to create note.', variant: 'destructive' });
     }
   };
 
@@ -248,7 +250,9 @@ const Notes = () => {
         setSelectedNote(prev => prev ? { ...prev, updated_at: new Date().toISOString(), ...('background_color' in updates || 'is_pinned' in updates ? updates : {}) } : null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update note');
+      const message = err instanceof Error ? err.message : 'Failed to update note';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to update note.', variant: 'destructive' });
     }
   };
 
@@ -277,7 +281,9 @@ const Notes = () => {
         setSelectedNote(nextNote);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete note');
+      const message = err instanceof Error ? err.message : 'Failed to delete note';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to delete note.', variant: 'destructive' });
     }
   };
 
@@ -358,7 +364,9 @@ const Notes = () => {
       await updateNote(selectedNote.id, { is_pinned: !selectedNote.is_pinned });
       setNotes(prev => prev.slice().sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to pin note');
+      const message = err instanceof Error ? err.message : 'Failed to pin note';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to pin/unpin note.', variant: 'destructive' });
     }
   };
 
@@ -368,7 +376,9 @@ const Notes = () => {
     try {
       await updateNote(selectedNote.id, { background_color: color });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to set color');
+      const message = err instanceof Error ? err.message : 'Failed to set color';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to change color.', variant: 'destructive' });
     }
   };
 

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/components/ui/use-toast";
 import { Badge } from "@/components/ui/badge";
 
 interface Prompt {
@@ -37,6 +38,7 @@ const Prompts = () => {
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [formData, setFormData] = useState({ title: "", prompt_text: "", category: "" });
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const { toast } = useToast();
 
   // Fetch prompts on component mount
   useEffect(() => {
@@ -76,7 +78,9 @@ const Prompts = () => {
       );
       setCategories(unique);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch prompts');
+      const message = err instanceof Error ? err.message : 'Failed to fetch prompts';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to load prompts.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -103,7 +107,9 @@ const Prompts = () => {
   setFormData({ title: "", prompt_text: "", category: "" });
   fetchPrompts(activeFilter); // Refresh the list
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create prompt');
+      const message = err instanceof Error ? err.message : 'Failed to create prompt';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to create prompt.', variant: 'destructive' });
     }
   };
 
@@ -125,7 +131,9 @@ const Prompts = () => {
   setFormData({ title: "", prompt_text: "", category: "" });
   fetchPrompts(activeFilter); // Refresh the list
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update prompt');
+      const message = err instanceof Error ? err.message : 'Failed to update prompt';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to update prompt.', variant: 'destructive' });
     }
   };
 
@@ -146,7 +154,9 @@ const Prompts = () => {
 
       setPrompts(prompts.filter(prompt => prompt.id !== id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete prompt');
+      const message = err instanceof Error ? err.message : 'Failed to delete prompt';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to delete prompt.', variant: 'destructive' });
     }
   };
 
@@ -157,6 +167,7 @@ const Prompts = () => {
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
       setError('Failed to copy to clipboard');
+      toast({ title: 'Error', description: 'Clipboard copy failed.', variant: 'destructive' });
     }
   };
 
@@ -180,7 +191,9 @@ const Prompts = () => {
           : p
       ));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update favorite status');
+      const message = err instanceof Error ? err.message : 'Failed to update favorite status';
+      setError(message);
+      toast({ title: 'Error', description: 'Could not update favorite status.', variant: 'destructive' });
     }
   };
 
@@ -196,7 +209,9 @@ const Prompts = () => {
 
       setPrompts(prompts.map(p => p.id === prompt.id ? { ...p, is_pinned: newPinned } : p));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update pin status');
+      const message = err instanceof Error ? err.message : 'Failed to update pin status';
+      setError(message);
+      toast({ title: 'Error', description: 'Could not update pin status.', variant: 'destructive' });
     }
   };
 

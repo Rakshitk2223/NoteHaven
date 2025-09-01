@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import GridLayout, { Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
-import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin, Clock, Trash2, Gift, RotateCcw } from "lucide-react";
+import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin, Clock, Trash2, Gift, RotateCcw, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
@@ -70,6 +71,7 @@ const Dashboard = () => {
     notes: 0,
     completedTasks: 0
   });
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -160,6 +162,7 @@ const Dashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
+      setIsRefreshing(true);
       
       // Check if user is authenticated first
       const { data: { user } } = await supabase.auth.getUser();
@@ -207,6 +210,7 @@ const Dashboard = () => {
       });
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -431,28 +435,28 @@ const Dashboard = () => {
   const statWidgets = [
     {
       title: "AI Prompts",
-      content: loading ? "..." : `${stats.prompts}`,
+      value: stats.prompts,
       description: "Total prompts created",
       icon: <Sparkles className="h-5 w-5" />,
       link: "/prompts"
     },
     {
       title: "Media Items",
-      content: loading ? "..." : `${stats.media}`,
+      value: stats.media,
       description: "Movies, shows, and books tracked",
       icon: <Play className="h-5 w-5" />,
       link: "/media"
     },
     {
       title: "Tasks",
-      content: loading ? "..." : `${stats.tasks - stats.completedTasks}`,
+      value: stats.tasks - stats.completedTasks,
       description: "Pending tasks",
       icon: <Check className="h-5 w-5" />,
       link: "/tasks"
     },
     {
       title: "Notes",
-      content: loading ? "..." : `${stats.notes}`,
+      value: stats.notes,
       description: "Total notes created",
       icon: <FileText className="h-5 w-5" />,
       link: "/notes"
@@ -506,8 +510,20 @@ const Dashboard = () => {
                 })()}
               </h1>
             </div>
-            <div className="text-sm text-muted-foreground">
-              {completionRate}% task completion rate
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-muted-foreground hidden md:block">
+                {completionRate}% task completion rate
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                title="Refresh dashboard"
+                onClick={fetchDashboardData}
+                disabled={isRefreshing}
+                className={isRefreshing ? 'animate-spin-slow' : ''}
+              >
+                <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </Button>
             </div>
           </div>
 
@@ -526,8 +542,8 @@ const Dashboard = () => {
                     </div>
                     <ExternalLink className="h-3 w-3 text-muted-foreground" />
                   </div>
-                  <p className="text-2xl font-bold text-primary mb-1">
-                    {widget.content}
+                  <p className="text-2xl font-bold text-primary mb-1 min-h-[1.75rem] flex items-center">
+                    {loading ? <Skeleton className="h-6 w-10" /> : widget.value}
                   </p>
                   <p className="text-sm font-medium text-foreground mb-1">
                     {widget.title}

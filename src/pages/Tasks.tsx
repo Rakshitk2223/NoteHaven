@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/DatePicker";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/components/ui/use-toast";
 
 interface Task {
   id: number;
@@ -21,6 +22,7 @@ interface Task {
 const Tasks = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newTaskText, setNewTaskText] = useState("");
@@ -84,7 +86,9 @@ const Tasks = () => {
   setNewTaskDue("");
       fetchTasks();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add task');
+      const message = err instanceof Error ? err.message : 'Failed to add task';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to add task. Please try again.', variant: 'destructive' });
     }
   };
 
@@ -106,7 +110,9 @@ const Tasks = () => {
           : task
       ));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update task');
+      const message = err instanceof Error ? err.message : 'Failed to update task';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to update task. Please try again.', variant: 'destructive' });
     }
   };
 
@@ -121,7 +127,9 @@ const Tasks = () => {
 
       setTasks(tasks.map(t => t.id === task.id ? { ...t, is_pinned: !task.is_pinned } : t));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update pin');
+      const message = err instanceof Error ? err.message : 'Failed to update pin';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to update pin status.', variant: 'destructive' });
     }
   };
 
@@ -139,7 +147,9 @@ const Tasks = () => {
       // Remove the task from the local state immediately
       setTasks(tasks.filter(task => task.id !== taskId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete task');
+      const message = err instanceof Error ? err.message : 'Failed to delete task';
+      setError(message);
+      toast({ title: 'Error', description: 'Failed to delete task. Please try again.', variant: 'destructive' });
     }
   };
 
@@ -360,15 +370,15 @@ const Tasks = () => {
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setEditTask(null)}>Cancel</Button>
               <Button size="sm" disabled={!editText.trim()} onClick={async () => {
-                if (!editTask) return; 
+                if (!editTask) return;
                 try {
                   const { error } = await supabase.from('tasks').update({ task_text: editText.trim(), due_date: editDue || null }).eq('id', editTask.id);
                   if (error) throw error;
                   setTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, task_text: editText.trim(), due_date: editDue || null } : t));
                   setEditTask(null);
+                  toast({ title: 'Task updated', description: 'Your task changes have been saved.' });
                 } catch (e:any) {
-                  // basic error surfaced to UI
-                  alert(e.message || 'Failed to update task');
+                  toast({ title: 'Error', description: e.message || 'Failed to update task.', variant: 'destructive' });
                 }
               }}>Save</Button>
             </div>
