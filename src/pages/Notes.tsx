@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
+import { useLocation } from "react-router-dom";
 import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,6 +35,7 @@ interface Note {
 // HTML-only persistence: any legacy markdown handling removed
 
 const Notes = () => {
+  const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -145,6 +147,21 @@ const Notes = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNote, editor]);
+
+  // If URL has ?note=ID, select that note once notes are loaded
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const noteIdParam = params.get('note');
+    if (!noteIdParam || notes.length === 0) return;
+    const targetId = Number(noteIdParam);
+    if (!Number.isFinite(targetId)) return;
+    const target = notes.find(n => n.id === targetId);
+    if (target) {
+      setSelectedNote(target);
+      // If on mobile, ensure editor is shown
+      setShowNoteList(false);
+    }
+  }, [location.search, notes]);
 
   const fetchNotes = async () => {
     try {

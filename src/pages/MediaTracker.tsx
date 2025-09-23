@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,7 @@ interface MediaItem {
 }
 
 const MediaTracker = () => {
+  const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Persisted view mode (grid = categorized, list = table). Initialize from localStorage.
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
@@ -445,6 +447,25 @@ const MediaTracker = () => {
     }
   };
 
+  // When URL has ?media=ID, try to scroll/highlight the item after data renders
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const mediaId = params.get('media');
+    if (!mediaId) return;
+    const idNum = Number(mediaId);
+    if (!Number.isFinite(idNum)) return;
+    // slight delay after render to ensure DOM elements exist
+    const t = setTimeout(() => {
+      const el = document.querySelector(`#media-${idNum}`) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2','ring-primary');
+        setTimeout(() => el.classList.remove('ring-2','ring-primary'), 1500);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [location.search, mediaItems, viewMode]);
+
   // Grid view component
   const MediaGridView = ({ items }: { items: MediaItem[] }) => (
     <div className="space-y-10">
@@ -463,6 +484,7 @@ const MediaTracker = () => {
             {groupedByStatus.groups[statusKey].map((item) => (
               <motion.div
                 key={item.id}
+                id={`media-${item.id}`}
                 className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition"
                 variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
               >
@@ -581,7 +603,7 @@ const MediaTracker = () => {
         <TableBody>
           {items.map((item) => (
             <TableRow key={item.id}>
-              <TableCell className="font-medium">{item.title}</TableCell>
+              <TableCell id={`media-${item.id}`} className="font-medium">{item.title}</TableCell>
               <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
               <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
               <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>

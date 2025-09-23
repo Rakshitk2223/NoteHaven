@@ -402,8 +402,12 @@ const Dashboard = () => {
     navigate(`/notes?note=${noteId}`);
   };
 
-  const handleMediaClick = () => {
-    navigate('/media');
+  const handleMediaClick = (mediaId?: number) => {
+    if (mediaId) {
+      navigate(`/media?media=${mediaId}`);
+    } else {
+      navigate('/media');
+    }
   };
 
   const handlePromptClick = () => {
@@ -419,7 +423,7 @@ const Dashboard = () => {
   const handlePinnedItemClick = (item: PinnedItem) => {
     switch (item.type) {
       case 'task':
-        navigate('/tasks');
+        navigate(`/tasks?task=${item.id}`);
         break;
       case 'prompt':
         navigate('/prompts');
@@ -628,9 +632,13 @@ const Dashboard = () => {
                           onCheckedChange={() => handleTaskComplete(task.id)}
                           className="flex-shrink-0"
                         />
-                        <span className="flex-1 text-sm text-foreground">
+                        <button
+                          className="flex-1 text-left text-sm text-foreground truncate"
+                          onClick={() => navigate(`/tasks?task=${task.id}`)}
+                          title="Open task"
+                        >
                           {task.task_text}
-                        </span>
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -695,7 +703,7 @@ const Dashboard = () => {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={handleMediaClick}
+                    onClick={() => handleMediaClick()}
                     className="text-xs"
                   >
                     View All
@@ -721,7 +729,7 @@ const Dashboard = () => {
                     {watchingMedia.map((item) => (
                       <div
                         key={item.id}
-                        onClick={handleMediaClick}
+                        onClick={() => handleMediaClick(item.id)}
                         className="p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
                       >
                         <p className="font-medium text-sm text-foreground mb-1">

@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { Plus, Trash2, Pin, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ interface Task {
 }
 
 const Tasks = () => {
+  const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const { toast } = useToast();
@@ -39,6 +41,24 @@ const Tasks = () => {
   useEffect(() => {
     fetchTasks();
   }, []);
+
+  // After tasks load or location changes, if ?task=ID is present, attempt to scroll to it
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const taskIdParam = params.get('task');
+    if (!taskIdParam) return;
+    const idNum = Number(taskIdParam);
+    if (!Number.isFinite(idNum)) return;
+    // slight delay to ensure DOM rendered
+    setTimeout(() => {
+      const el = document.querySelector(`#task-${idNum}`) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2','ring-primary');
+        setTimeout(() => el.classList.remove('ring-2','ring-primary'), 1500);
+      }
+    }, 200);
+  }, [location.search, tasks]);
 
   const fetchTasks = async () => {
     try {
@@ -248,6 +268,7 @@ const Tasks = () => {
                       {todoTasks.map((task) => (
                         <motion.div
                           key={task.id}
+                          id={`task-${task.id}`}
                           className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg zen-transition"
                           variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
                         >
@@ -318,6 +339,7 @@ const Tasks = () => {
                       {completedTasks.map((task) => (
                         <motion.div
                           key={task.id}
+                          id={`task-${task.id}`}
                           className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg zen-transition opacity-75"
                           variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
                         >
