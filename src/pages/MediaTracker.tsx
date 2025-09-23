@@ -44,7 +44,14 @@ interface MediaItem {
 
 const MediaTracker = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>("grid");
+  // Persisted view mode (grid = categorized, list = table). Initialize from localStorage.
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerViewMode') : null;
+      if (stored === 'grid' || stored === 'list') return stored;
+    } catch {}
+    return 'grid';
+  });
   const [loading, setLoading] = useState(true); // retained for create/update flows
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -68,6 +75,16 @@ const MediaTracker = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
+  // Save view mode changes
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') localStorage.setItem('mediaTrackerViewMode', viewMode);
+    } catch {}
+  }, [viewMode]);
+
+  // Type sets for conditional progress logic
+  const readableTypes: MediaItem['type'][] = ['Manga', 'Manhwa', 'Manhua'];
+  const watchableTypes: MediaItem['type'][] = ['Series', 'Anime', 'KDrama', 'JDrama'];
 
   // Infinite query for media items
   const pageSize = 50;
@@ -189,16 +206,25 @@ const MediaTracker = () => {
         throw new Error('User not authenticated');
       }
 
-      const mediaData = {
+      const isReadable = readableTypes.includes(formData.type);
+      const isWatchable = watchableTypes.includes(formData.type);
+      const mediaData: any = {
         title: formData.title,
         type: formData.type,
         status: formData.status,
         rating: formData.rating ? parseInt(formData.rating) : null,
-        current_season: formData.current_season ? parseInt(formData.current_season) : null,
-        current_episode: formData.current_episode ? parseInt(formData.current_episode) : null,
-        current_chapter: formData.current_chapter ? parseInt(formData.current_chapter) : null,
+        // initialize all progress fields to null, then selectively set
+        current_season: null,
+        current_episode: null,
+        current_chapter: null,
         user_id: user.id
       };
+      if (isReadable) {
+        mediaData.current_chapter = formData.current_chapter ? parseInt(formData.current_chapter) : null;
+      } else if (isWatchable) {
+        mediaData.current_season = formData.current_season ? parseInt(formData.current_season) : null;
+        mediaData.current_episode = formData.current_episode ? parseInt(formData.current_episode) : null;
+      }
 
       const { error } = await supabase
         .from('media_tracker')
@@ -220,15 +246,24 @@ const MediaTracker = () => {
     if (!editingItem) return;
 
     try {
-      const mediaData = {
+      const isReadable = readableTypes.includes(formData.type);
+      const isWatchable = watchableTypes.includes(formData.type);
+      const mediaData: any = {
         title: formData.title,
         type: formData.type,
         status: formData.status,
         rating: formData.rating ? parseInt(formData.rating) : null,
-        current_season: formData.current_season ? parseInt(formData.current_season) : null,
-        current_episode: formData.current_episode ? parseInt(formData.current_episode) : null,
-        current_chapter: formData.current_chapter ? parseInt(formData.current_chapter) : null
+        // clean progress fields based on type
+        current_season: null,
+        current_episode: null,
+        current_chapter: null
       };
+      if (isReadable) {
+        mediaData.current_chapter = formData.current_chapter ? parseInt(formData.current_chapter) : null;
+      } else if (isWatchable) {
+        mediaData.current_season = formData.current_season ? parseInt(formData.current_season) : null;
+        mediaData.current_episode = formData.current_episode ? parseInt(formData.current_episode) : null;
+      }
 
       const { error } = await supabase
         .from('media_tracker')
@@ -335,10 +370,9 @@ const MediaTracker = () => {
     }
   };
 
-  // Episodic content includes dramas as well
-  const showSeasonEpisode = ['Series','Anime','KDrama','JDrama'].includes(formData.type);
-  // Chapter based content includes Manga / Manhwa / Manhua
-  const showChapter = ['Manga','Manhwa','Manhua'].includes(formData.type);
+  // Conditional progress fields based on selected type
+  const showSeasonEpisode = watchableTypes.includes(formData.type);
+  const showChapter = readableTypes.includes(formData.type);
 
   // Debounced search handler
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -443,37 +477,11 @@ const MediaTracker = () => {
                     <span className="text-sm font-medium">{item.rating}/10</span>
                   </div>
                 )}
-                {(item.current_season || item.current_episode || item.current_chapter) && (
-                  <div className="text-sm text-muted-foreground mb-4 space-y-2">
-                    {item.current_season && <div>Season {item.current_season}</div>}
-                    {item.current_episode && (
+                <div className="text-sm text-muted-foreground mb-4 space-y-2">
+                  {readableTypes.includes(item.type) ? (
+                    item.current_chapter ? (
                       <div className="flex items-center gap-2">
-                        <span>Episode {item.current_episode}</span>
-                        <div className="flex gap-1">
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            disabled={updatingIds.has(item.id)}
-                            onClick={() => handleQuickUpdate(item, 'current_episode', -1)}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            disabled={updatingIds.has(item.id)}
-                            onClick={() => handleQuickUpdate(item, 'current_episode', 1)}
-                          >
-                            <PlusIcon className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                    {item.current_chapter && (
-                      <div className="flex items-center gap-2">
-                        <span>Chapter {item.current_chapter}</span>
+                        <span>Ch. {item.current_chapter}</span>
                         <div className="flex gap-1">
                           <Button
                             size="icon"
@@ -495,9 +503,46 @@ const MediaTracker = () => {
                           </Button>
                         </div>
                       </div>
-                    )}
-                  </div>
-                )}
+                    ) : (
+                      <div>-</div>
+                    )
+                  ) : watchableTypes.includes(item.type) ? (
+                    (item.current_season || item.current_episode) ? (
+                      <div className="flex items-center gap-2">
+                        <span>
+                          {item.current_season ? `S${item.current_season} • ` : ''}
+                          {item.current_episode ? `E${item.current_episode}` : ''}
+                        </span>
+                        {item.current_episode && (
+                          <div className="flex gap-1">
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              className="h-6 w-6"
+                              disabled={updatingIds.has(item.id)}
+                              onClick={() => handleQuickUpdate(item, 'current_episode', -1)}
+                            >
+                              <Minus className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              className="h-6 w-6"
+                              disabled={updatingIds.has(item.id)}
+                              onClick={() => handleQuickUpdate(item, 'current_episode', 1)}
+                            >
+                              <PlusIcon className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div>-</div>
+                    )
+                  ) : (
+                    <div>-</div>
+                  )}
+                </div>
                 <div className="flex space-x-2">
                   <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)} className="flex-1">
                     <Edit className="h-4 w-4 mr-1" />Edit
@@ -541,9 +586,13 @@ const MediaTracker = () => {
               <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
               <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
               <TableCell>
-                {item.current_season ? `S${item.current_season}` : ''}
-                {item.current_episode ? (item.current_season ? ' • ' : '') + `E${item.current_episode}` : ''}
-                {item.current_chapter ? `${(item.current_season || item.current_episode)?' • ':''}Ch ${item.current_chapter}` : ''}
+                {readableTypes.includes(item.type)
+                  ? (item.current_chapter ? `Ch. ${item.current_chapter}` : '-')
+                  : watchableTypes.includes(item.type)
+                    ? ((item.current_season || item.current_episode)
+                        ? `${item.current_season ? `S${item.current_season} • ` : ''}${item.current_episode ? `E${item.current_episode}` : ''}`
+                        : '-')
+                    : '-'}
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">

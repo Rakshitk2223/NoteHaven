@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
 import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 // Removed Textarea split-view in favor of Tiptap WYSIWYG
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
-import { getContrastTextColor } from "@/lib/utils";
+import { cn, getContrastTextColor } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
 // Removed markdown rendering libraries; now storing & rendering raw HTML
 import { useEditor, EditorContent } from '@tiptap/react';
@@ -79,6 +79,19 @@ const Notes = () => {
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
   }, []);
+
+  // Dynamic style for editor header background color
+  let editorHeaderStyle: CSSProperties = {};
+  if (selectedNote?.background_color) {
+    editorHeaderStyle.backgroundColor = selectedNote.background_color;
+  }
+  // Dynamic style for editor body background color (text area)
+  let editorBodyStyle: CSSProperties = {};
+  if (selectedNote?.background_color) {
+    editorBodyStyle.backgroundColor = selectedNote.background_color;
+  }
+  const editorContrastClass = selectedNote?.background_color ? getContrastTextColor(selectedNote.background_color) : '';
+  const isDarkNoteBg = editorContrastClass === 'text-neutral-100';
 
   // Debouncing for auto-save
   const [titleTimeout, setTitleTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -558,7 +571,7 @@ const Notes = () => {
                         style={{ backgroundColor: note.background_color || undefined }}
                         variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
                       >
-                        <div className="font-medium truncate flex items-center gap-2">
+                        <div className="font-semibold truncate flex items-center gap-2">
                           {note.title === 'Inbox' ? (
                             <Lightbulb className="h-3 w-3 text-amber-500" />
                           ) : note.is_pinned ? (
@@ -588,14 +601,29 @@ const Notes = () => {
             `}>
               {selectedNote ? (
                 <>
-                  {/* Editor Header */}
-                  <div className="p-4 border-b border-border flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      {isSaving && <span>Saving...</span>}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button size="sm" variant="ghost" onClick={handleTogglePin} className={selectedNote.is_pinned ? 'text-primary' : ''} title={selectedNote.is_pinned ? 'Unpin' : 'Pin note'}>
-                        <Pin className={`h-4 w-4 ${selectedNote.is_pinned ? 'fill-current' : ''}`} />
+                  {/* Editor Header (title + actions) */}
+                  <div
+                    style={editorHeaderStyle}
+                    className={cn(
+                      "p-4 border-b border-border flex items-center justify-between",
+                      selectedNote?.background_color && getContrastTextColor(selectedNote.background_color)
+                    )}
+                  >
+                    <Input
+                      value={titleValue}
+                      onChange={(e) => handleTitleChange(e.target.value)}
+                      placeholder="Note title..."
+                      className={cn(
+                        "text-xl font-semibold",
+                        isDarkMode ? "text-white placeholder:text-white/70 caret-white" : "text-black placeholder:text-black/70 caret-black"
+                      )}
+                    />
+                    <div className="flex items-center gap-1 ml-3">
+                      <div className="flex items-center gap-2 text-xs">
+                        {isSaving && <span>Saving...</span>}
+                      </div>
+                      <Button size="sm" variant="ghost" onClick={handleTogglePin} title={selectedNote.is_pinned ? 'Unpin' : 'Pin note'}>
+                        <Pin className="h-4 w-4" />
                       </Button>
                       <Popover open={showPalette} onOpenChange={setShowPalette}>
                         <PopoverTrigger asChild>
@@ -610,7 +638,10 @@ const Notes = () => {
                                 key={c.label}
                                 title={c.label}
                                 onClick={() => handleColorChange(c.value)}
-                                className={`w-7 h-7 rounded-full border shadow-sm transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-primary ${selectedNote.background_color === c.value || (!selectedNote.background_color && c.value === null) ? 'ring-2 ring-primary' : ''}`}
+                                className={cn(
+                                  "w-7 h-7 rounded-full border shadow-sm transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-primary",
+                                  selectedNote.background_color === c.value || (!selectedNote.background_color && c.value === null) ? 'ring-2 ring-primary' : ''
+                                )}
                                 style={{ backgroundColor: c.value || '#ffffff' }}
                               />
                             ))}
@@ -621,7 +652,7 @@ const Notes = () => {
                         size="sm"
                         variant="ghost"
                         onClick={() => deleteNote(selectedNote.id)}
-                        className="text-destructive hover:text-destructive"
+                        className="hover:text-destructive"
                         title="Delete note"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -673,14 +704,14 @@ const Notes = () => {
                   </div>
 
                   {/* Editor Content - Tiptap WYSIWYG */}
-                  <div className={`flex-1 p-4 flex flex-col gap-4 ${selectedNote.background_color ? getContrastTextColor(selectedNote.background_color) : ''}`} style={{ backgroundColor: selectedNote.background_color || undefined }}>
-                    <Input
-                      value={titleValue}
-                      onChange={(e) => handleTitleChange(e.target.value)}
-                      placeholder="Note title..."
-                      className="text-xl font-semibold"
-                    />
-                    <div className="flex-1 flex flex-col border rounded-md bg-background/60 overflow-hidden min-h-[calc(100vh-360px)]">
+                  <div className="flex-1 p-4 flex flex-col gap-4">
+                    <div
+                      className={cn(
+                        "flex-1 flex flex-col border rounded-md overflow-hidden min-h-[calc(100vh-360px)]",
+                        editorContrastClass
+                      )}
+                      style={editorBodyStyle}
+                    >
                       <div className="flex items-center gap-1 flex-wrap border-b border-border p-1 text-xs">
                         <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold"><Bold className="h-4 w-4" /></Button>
                         <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic"><Italic className="h-4 w-4" /></Button>
@@ -689,7 +720,15 @@ const Notes = () => {
                         <Button size="sm" variant={editor?.isActive('orderedList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Ordered List"><ListOrdered className="h-4 w-4" /></Button>
                       </div>
                       <div className="flex-1 overflow-y-auto p-4 flex">
-                        {editor && <EditorContent editor={editor} className="prose dark:prose-invert max-w-none focus:outline-none flex-1" />}
+                        {editor && (
+                          <EditorContent
+                            editor={editor}
+                            className={cn(
+                              "prose max-w-none focus:outline-none flex-1",
+                              isDarkNoteBg && "prose-invert"
+                            )}
+                          />
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between pt-2 border-t border-border text-xs text-muted-foreground">
