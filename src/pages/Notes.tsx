@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { motion } from "framer-motion";
 // Markdown-based editor now replaces previous contentEditable implementation
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -517,8 +519,14 @@ const Notes = () => {
                 )}
 
                 {loading ? (
-                  <div className="p-4 text-center">
-                    <p className="text-muted-foreground">Loading notes...</p>
+                  <div className="p-4 space-y-2">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="p-3 rounded-lg border">
+                        <Skeleton className="h-4 w-40 mb-2" />
+                        <Skeleton className="h-3 w-full mb-1" />
+                        <Skeleton className="h-3 w-5/6" />
+                      </div>
+                    ))}
                   </div>
                 ) : notes.length === 0 ? (
                   <div className="p-4 text-center">
@@ -529,9 +537,14 @@ const Notes = () => {
                     </Button>
                   </div>
                 ) : (
-                  <div className="space-y-1 p-2">
+                  <motion.div
+                    className="space-y-1 p-2"
+                    initial="hidden"
+                    animate="show"
+                    variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+                  >
                     {notes.map((note) => (
-                      <div
+                      <motion.div
                         key={note.id}
                         onClick={() => {
                           setSelectedNote(note);
@@ -543,6 +556,7 @@ const Notes = () => {
                           ${note.background_color ? getContrastTextColor(note.background_color) : ''}
                         `}
                         style={{ backgroundColor: note.background_color || undefined }}
+                        variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
                       >
                         <div className="font-medium truncate flex items-center gap-2">
                           {note.title === 'Inbox' ? (
@@ -557,9 +571,9 @@ const Notes = () => {
                         <div className={`text-xs mt-2 ${note.background_color ? getContrastTextColor(note.background_color) : 'text-muted-foreground'}`}>
                           {formatDate(note.updated_at)}
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
-                  </div>
+                  </motion.div>
                 )}
               </div>
             </div>

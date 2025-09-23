@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
-import { Plus, Trash2, Gift } from 'lucide-react';
+import { Plus, Trash2, Gift, Edit } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/DatePicker';
 
@@ -16,6 +16,7 @@ const Birthdays = () => {
   const [birthdays, setBirthdays] = useState<Birthday[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [newName, setNewName] = useState('');
   const [newDate, setNewDate] = useState<string>('');
   const [newDateObj, setNewDateObj] = useState<Date | undefined>(undefined);
@@ -47,13 +48,26 @@ const Birthdays = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-      const { data, error } = await supabase
-        .from('birthdays')
-        .insert([{ user_id: user.id, name: newName.trim(), date_of_birth: newDate }])
-        .select()
-        .single();
-      if (error) throw error;
-      setBirthdays(prev => sortBirthdaysByNext([...prev, data]));
+      if (editingId == null) {
+        const { data, error } = await supabase
+          .from('birthdays')
+          .insert([{ user_id: user.id, name: newName.trim(), date_of_birth: newDate }])
+          .select()
+          .single();
+        if (error) throw error;
+        setBirthdays(prev => sortBirthdaysByNext([...prev, data]));
+      } else {
+        const { data, error } = await supabase
+          .from('birthdays')
+          .update({ name: newName.trim(), date_of_birth: newDate })
+          .eq('id', editingId)
+          .select()
+          .single();
+        if (error) throw error;
+        setBirthdays(prev => sortBirthdaysByNext(prev.map(b => b.id === editingId ? data : b)));
+      }
+      // reset and close
+      setEditingId(null);
       setNewName('');
       setNewDate('');
       setNewDateObj(undefined);
@@ -102,6 +116,33 @@ const Birthdays = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const openAddModal = () => {
+    setEditingId(null);
+    setNewName('');
+    setNewDate('');
+    setNewDateObj(undefined);
+    setShowModal(true);
+  };
+
+  const openEditModal = (b: Birthday) => {
+    setEditingId(b.id);
+    setNewName(b.name);
+    setNewDate(b.date_of_birth);
+    // Build local date for picker display
+    const parts = b.date_of_birth.split('-');
+    const asDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    setNewDateObj(asDate);
+    setShowModal(true);
+  };
+
+  // Format a Date as YYYY-MM-DD in local time (avoid timezone shifts)
+  const formatLocalYMD = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
@@ -109,13 +150,21 @@ const Birthdays = () => {
         <div className="flex-1">
           <div className="p-6 border-b border-border flex items-center justify-between">
             <h1 className="text-2xl font-bold font-heading flex items-center gap-2"><Gift className="h-6 w-6"/> Birthdays</h1>
-            <Dialog open={showModal} onOpenChange={setShowModal}>
+            <Dialog open={showModal} onOpenChange={(open) => {
+              setShowModal(open);
+              if (!open) {
+                setEditingId(null);
+                setNewName('');
+                setNewDate('');
+                setNewDateObj(undefined);
+              }
+            }}>
               <DialogTrigger asChild>
-                <Button size="sm"><Plus className="h-4 w-4 mr-1"/>Add Birthday</Button>
+                <Button size="sm" onClick={openAddModal}><Plus className="h-4 w-4 mr-1"/>Add Birthday</Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="sm:max-w-[440px]">
                 <DialogHeader>
-                  <DialogTitle>Add Birthday</DialogTitle>
+                  <DialogTitle>{editingId == null ? 'Add Birthday' : 'Edit Birthday'}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-1">
@@ -128,7 +177,7 @@ const Birthdays = () => {
                       date={newDateObj}
                       setDate={(d) => {
                         setNewDateObj(d);
-                        setNewDate(d ? d.toISOString().slice(0,10) : '');
+                        setNewDate(d ? formatLocalYMD(d) : '');
                       }}
                       fromYear={1900}
                       toYear={new Date().getFullYear()}
@@ -137,13 +186,13 @@ const Birthdays = () => {
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setShowModal(false)}>Cancel</Button>
-                    <Button size="sm" disabled={!newName.trim() || !newDate} onClick={handleAdd}>Save</Button>
+                    <Button size="sm" disabled={!newName.trim() || !newDate} onClick={handleAdd}>{editingId == null ? 'Save' : 'Update'}</Button>
                   </div>
                 </div>
               </DialogContent>
             </Dialog>
           </div>
-          <div className="p-6 grid lg:grid-cols-2 gap-8">
+          <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="zen-card p-4">
               <Calendar
                 mode="single"
@@ -170,9 +219,14 @@ const Birthdays = () => {
                           <p className="font-medium text-sm">{b.name}</p>
                           <p className="text-xs text-muted-foreground">{d === 0 ? 'Today!' : `In ${d} day${d!==1?'s':''}`} • {date.toLocaleDateString(undefined,{ month:'short', day:'numeric'})}</p>
                         </div>
-                        <Button size="icon" variant="ghost" onClick={() => handleDelete(b.id)} className="h-7 w-7 text-destructive hover:text-destructive">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button size="icon" variant="ghost" onClick={() => openEditModal(b)} className="h-7 w-7">
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button size="icon" variant="ghost" onClick={() => handleDelete(b.id)} className="h-7 w-7 text-destructive hover:text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}

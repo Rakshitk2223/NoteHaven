@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon } from "lucide-react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,11 @@ import { Badge } from "@/components/ui/badge";
 import AppSidebar from "@/components/AppSidebar";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { Skeleton } from "@/components/ui/skeleton";
+import { motion } from "framer-motion";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInView } from "react-intersection-observer";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
 interface MediaItem {
   id: number;
@@ -39,8 +44,8 @@ interface MediaItem {
 
 const MediaTracker = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>("grid");
+  const [loading, setLoading] = useState(true); // retained for create/update flows
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
@@ -64,46 +69,64 @@ const MediaTracker = () => {
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
 
-  // Fetch media items on component mount and when filters change
-  useEffect(() => {
-    fetchMediaItems();
-  }, [filterType, filterStatus, searchTerm, sortOrder]);
-
-  const fetchMediaItems = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-  let query = supabase
+  // Infinite query for media items
+  const pageSize = 50;
+  const {
+    data,
+    error: queryError,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    refetch,
+  } = useInfiniteQuery<{ items: MediaItem[]; count: number; page: number }>({
+    queryKey: ['mediaItems', filterType, filterStatus, searchTerm, sortOrder],
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const page = (typeof pageParam === 'number' ? pageParam : 0);
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+      let query = supabase
         .from('media_tracker')
-        .select('*')
+        .select('*', { count: 'exact' })
         .order('title', { ascending: sortOrder === 'asc' })
-        .order('updated_at', { ascending: false });
-
-      // Apply filters
-      if (filterType !== 'All') {
-        query = query.eq('type', filterType);
+        .order('updated_at', { ascending: false })
+        .range(from, to);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        query = query.eq('user_id', user.id);
       }
-      if (filterStatus !== 'All') {
-        query = query.eq('status', filterStatus);
-      }
-      if (searchTerm.trim() !== '') {
-        query = query.ilike('title', `%${searchTerm.trim()}%`);
-      }
+      if (filterType !== 'All') query = query.eq('type', filterType);
+      if (filterStatus !== 'All') query = query.eq('status', filterStatus);
+      if (searchTerm.trim() !== '') query = query.ilike('title', `%${searchTerm.trim()}%`);
+      const { data, error, count } = await query;
+      if (error) throw error;
+      return { items: (data || []) as MediaItem[], count: count ?? 0, page };
+    },
+    getNextPageParam: (lastPage) => {
+      const loaded = (lastPage.page + 1) * pageSize;
+      if (loaded < lastPage.count) return lastPage.page + 1;
+      return undefined;
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-      const { data, error } = await query;
+  // Expose combined items
+  const mediaItems: MediaItem[] = useMemo(() => (data?.pages.flatMap(p => p.items) ?? []), [data]);
 
-      if (error) {
-        throw error;
-      }
-
-      setMediaItems(data || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch media items');
-    } finally {
-      setLoading(false);
+  // Intersection observer to load more
+  const { ref: loadMoreRef, inView } = useInView({ rootMargin: '200px' });
+  useEffect(() => {
+    if (inView && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
     }
-  };
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Keep legacy loading/error wiring for skeleton and banners
+  useEffect(() => {
+    setLoading(isLoading);
+    setError(queryError ? (queryError as any).message || 'Failed to fetch media items' : null);
+  }, [isLoading, queryError]);
 
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
@@ -129,7 +152,8 @@ const MediaTracker = () => {
     try {
       const { error } = await supabase.from('media_tracker').update({ [field]: newValue }).eq('id', item.id);
       if (error) throw error;
-      setMediaItems(prev => prev.map(m => m.id === item.id ? { ...m, [field]: newValue } as MediaItem : m));
+  // Optimistic local cache update: force refetch for simplicity
+  refetch();
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
     } catch (e:any) {
       toast({ title: 'Update failed', description: e.message || 'Error', variant: 'destructive' });
@@ -186,7 +210,7 @@ const MediaTracker = () => {
 
       setIsModalOpen(false);
       resetForm();
-      fetchMediaItems();
+  refetch();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create media item');
     }
@@ -218,7 +242,7 @@ const MediaTracker = () => {
       setIsModalOpen(false);
       setEditingItem(null);
       resetForm();
-      fetchMediaItems();
+  refetch();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update media item');
     }
@@ -239,7 +263,7 @@ const MediaTracker = () => {
         throw error;
       }
 
-      setMediaItems(mediaItems.filter(item => item.id !== id));
+  refetch();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete media item');
     }
@@ -376,7 +400,7 @@ const MediaTracker = () => {
         const failedTitles = failedImports.map(i => i.title).filter(Boolean).slice(0, 20).join(', ');
         toast({ title: 'Import Partially Complete', description: `${successfulImports.length} items imported. ${failedImports.length} failed. Failed titles: ${failedTitles}${failedImports.length>20?', ...':''}`, variant: 'destructive' });
       }
-      fetchMediaItems();
+  refetch();
     } catch (e:any) {
       console.error('Import error', e);
       setError(e.message || 'Import failed');
@@ -386,6 +410,157 @@ const MediaTracker = () => {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
+  // Grid view component
+  const MediaGridView = ({ items }: { items: MediaItem[] }) => (
+    <div className="space-y-10">
+      {groupedByStatus.keys.map((statusKey) => (
+        <div key={statusKey}>
+          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+            <Badge className={getStatusColor(statusKey as MediaItem['status'])}>{statusKey}</Badge>
+            <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>
+          </h2>
+          <motion.div
+            className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            initial="hidden"
+            animate="show"
+            variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+          >
+            {groupedByStatus.groups[statusKey].map((item) => (
+              <motion.div
+                key={item.id}
+                className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition"
+                variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <Badge className={getTypeColor(item.type)}>{item.type}</Badge>
+                  <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
+                </div>
+                <h3 className="text-lg font-semibold text-foreground mb-2 truncate">{item.title}</h3>
+                {item.rating && (
+                  <div className="flex items-center gap-1 mb-3">
+                    <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                    <span className="text-sm font-medium">{item.rating}/10</span>
+                  </div>
+                )}
+                {(item.current_season || item.current_episode || item.current_chapter) && (
+                  <div className="text-sm text-muted-foreground mb-4 space-y-2">
+                    {item.current_season && <div>Season {item.current_season}</div>}
+                    {item.current_episode && (
+                      <div className="flex items-center gap-2">
+                        <span>Episode {item.current_episode}</span>
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            disabled={updatingIds.has(item.id)}
+                            onClick={() => handleQuickUpdate(item, 'current_episode', -1)}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            disabled={updatingIds.has(item.id)}
+                            onClick={() => handleQuickUpdate(item, 'current_episode', 1)}
+                          >
+                            <PlusIcon className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {item.current_chapter && (
+                      <div className="flex items-center gap-2">
+                        <span>Chapter {item.current_chapter}</span>
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            disabled={updatingIds.has(item.id)}
+                            onClick={() => handleQuickUpdate(item, 'current_chapter', -1)}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            disabled={updatingIds.has(item.id)}
+                            onClick={() => handleQuickUpdate(item, 'current_chapter', 1)}
+                          >
+                            <PlusIcon className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex space-x-2">
+                  <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)} className="flex-1">
+                    <Edit className="h-4 w-4 mr-1" />Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDeleteMedia(item.id)}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        </div>
+      ))}
+    </div>
+  );
+
+  // List view component
+  const MediaListView = ({ items }: { items: MediaItem[] }) => (
+    <div className="zen-card p-0 overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-1/3">Title</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Rating</TableHead>
+            <TableHead>Progress</TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {items.map((item) => (
+            <TableRow key={item.id}>
+              <TableCell className="font-medium">{item.title}</TableCell>
+              <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
+              <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
+              <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
+              <TableCell>
+                {item.current_season ? `S${item.current_season}` : ''}
+                {item.current_episode ? (item.current_season ? ' • ' : '') + `E${item.current_episode}` : ''}
+                {item.current_chapter ? `${(item.current_season || item.current_episode)?' • ':''}Ch ${item.current_chapter}` : ''}
+              </TableCell>
+              <TableCell className="text-right">
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)}>
+                    <Edit className="h-4 w-4 mr-1" /> Edit
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleDeleteMedia(item.id)} className="text-destructive hover:text-destructive">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -410,6 +585,15 @@ const MediaTracker = () => {
                   onChange={handleJsonImport}
                   disabled={isImporting}
                 />
+                {/* View toggle */}
+                <div className="hidden sm:flex items-center mr-2">
+                  <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'outline'} onClick={() => setViewMode('grid')} className="mr-1">
+                    <LayoutGrid className="h-4 w-4" />
+                  </Button>
+                  <Button size="sm" variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')}>
+                    <ListIcon className="h-4 w-4" />
+                  </Button>
+                </div>
                 <Button
                   variant="outline"
                   className="zen-transition hover:shadow-md"
@@ -645,8 +829,21 @@ const MediaTracker = () => {
             </div>
 
             {loading ? (
-              <div className="zen-card p-8 text-center">
-                <p className="text-muted-foreground">Loading media items...</p>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="zen-card p-6">
+                    <div className="flex items-start justify-between mb-3">
+                      <Skeleton className="h-6 w-20" />
+                      <Skeleton className="h-6 w-24" />
+                    </div>
+                    <Skeleton className="h-5 w-3/4 mb-3" />
+                    <Skeleton className="h-4 w-1/3 mb-4" />
+                    <div className="flex gap-2">
+                      <Skeleton className="h-8 w-24" />
+                      <Skeleton className="h-8 w-8" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : mediaItems.length === 0 ? (
               <div className="zen-card p-8 text-center">
@@ -657,71 +854,17 @@ const MediaTracker = () => {
                 </p>
               </div>
             ) : (
-              <div className="space-y-10">
-                {groupedByStatus.keys.map(statusKey => (
-                  <div key={statusKey}>
-                    <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                      <Badge className={getStatusColor(statusKey as MediaItem['status'])}>{statusKey}</Badge>
-                      <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>
-                    </h2>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {groupedByStatus.groups[statusKey].map(item => (
-                        <div key={item.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition">
-                          <div className="flex items-start justify-between mb-3">
-                            <Badge className={getTypeColor(item.type)}>{item.type}</Badge>
-                            <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
-                          </div>
-                          <h3 className="text-lg font-semibold text-foreground mb-2 truncate">{item.title}</h3>
-                          {item.rating && (
-                            <div className="flex items-center gap-1 mb-3">
-                              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                              <span className="text-sm font-medium">{item.rating}/10</span>
-                            </div>
-                          )}
-                          {(item.current_season || item.current_episode || item.current_chapter) && (
-                            <div className="text-sm text-muted-foreground mb-4 space-y-2">
-                              {item.current_season && <div>Season {item.current_season}</div>}
-                              {item.current_episode && (
-                                <div className="flex items-center gap-2">
-                                  <span>Episode {item.current_episode}</span>
-                                  <div className="flex gap-1">
-                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_episode',-1)}>
-                                      <Minus className="h-3 w-3" />
-                                    </Button>
-                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_episode',1)}>
-                                      <PlusIcon className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                              {item.current_chapter && (
-                                <div className="flex items-center gap-2">
-                                  <span>Chapter {item.current_chapter}</span>
-                                  <div className="flex gap-1">
-                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_chapter',-1)}>
-                                      <Minus className="h-3 w-3" />
-                                    </Button>
-                                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item,'current_chapter',1)}>
-                                      <PlusIcon className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          <div className="flex space-x-2">
-                            <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)} className="flex-1">
-                              <Edit className="h-4 w-4 mr-1" />Edit
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => handleDeleteMedia(item.id)} className="text-destructive hover:text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              <div className="space-y-6">
+                {viewMode === 'grid' ? (
+                  <MediaGridView items={mediaItems} />
+                ) : (
+                  <MediaListView items={mediaItems} />
+                )}
+                {/* Infinite scroll sentinel */}
+                <div ref={loadMoreRef} />
+                {isFetchingNextPage && (
+                  <div className="text-center text-sm text-muted-foreground">Loading more…</div>
+                )}
               </div>
             )}
           </div>

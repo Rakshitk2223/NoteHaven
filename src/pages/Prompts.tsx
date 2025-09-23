@@ -15,6 +15,8 @@ import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { motion } from "framer-motion";
 
 interface Prompt {
   id: number;
@@ -346,8 +348,19 @@ const Prompts = () => {
             </div>
 
             {loading ? (
-              <div className="zen-card p-8 text-center">
-                <p className="text-muted-foreground">Loading prompts...</p>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="zen-card p-6">
+                    <Skeleton className="h-5 w-1/2 mb-3" />
+                    <Skeleton className="h-3 w-full mb-2" />
+                    <Skeleton className="h-3 w-5/6 mb-2" />
+                    <Skeleton className="h-3 w-2/3" />
+                    <div className="flex gap-2 mt-4">
+                      <Skeleton className="h-8 w-20" />
+                      <Skeleton className="h-8 w-8" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : prompts.length === 0 ? (
               <div className="zen-card p-8 text-center">
@@ -356,12 +369,19 @@ const Prompts = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <motion.div
+                className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
+                initial="hidden"
+                animate="show"
+                variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } }}
+              >
                 {prompts
                   .slice()
                   .sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0))
                   .map((prompt) => (
-                  <div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition relative">
+                  <motion.div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition relative"
+                    variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
+                  >
                      {prompt.is_pinned && (
                        <div className="absolute -top-2 -right-2 bg-primary text-primary-foreground rounded-full p-1 shadow">
                          <Pin className="h-3 w-3" />
@@ -431,9 +451,9 @@ const Prompts = () => {
                          <Trash2 className="h-4 w-4" />
                        </Button>
                      </div>
-                  </div>
+                  </motion.div>
                 ))}
-              </div>
+              </motion.div>
             )}
           </div>
         </div>

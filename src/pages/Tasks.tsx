@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/DatePicker";
+import { Skeleton } from "@/components/ui/skeleton";
+import { motion } from "framer-motion";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
@@ -209,8 +211,15 @@ const Tasks = () => {
             </div>
 
             {loading ? (
-              <div className="zen-card p-8 text-center">
-                <p className="text-muted-foreground">Loading tasks...</p>
+              <div className="zen-card p-6 space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="p-4 border rounded-md">
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-5 w-5 rounded-sm" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : tasks.length === 0 ? (
               <div className="zen-card p-8 text-center">
@@ -230,11 +239,17 @@ const Tasks = () => {
                       <p className="text-muted-foreground">No tasks to do. Great job!</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
+                    <motion.div
+                      className="space-y-2"
+                      initial="hidden"
+                      animate="show"
+                      variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+                    >
                       {todoTasks.map((task) => (
-                        <div
+                        <motion.div
                           key={task.id}
                           className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg zen-transition"
+                          variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
                         >
                           <Checkbox
                             checked={task.is_completed}
@@ -282,9 +297,9 @@ const Tasks = () => {
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
-                        </div>
+                        </motion.div>
                       ))}
-                    </div>
+                    </motion.div>
                   )}
                 </div>
 
@@ -294,11 +309,17 @@ const Tasks = () => {
                     <h2 className="text-xl font-semibold text-foreground mb-4">
                       Completed ({completedTasks.length})
                     </h2>
-                    <div className="space-y-2">
+                    <motion.div
+                      className="space-y-2"
+                      initial="hidden"
+                      animate="show"
+                      variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+                    >
                       {completedTasks.map((task) => (
-                        <div
+                        <motion.div
                           key={task.id}
                           className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg zen-transition opacity-75"
+                          variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
                         >
                           <Checkbox
                             checked={task.is_completed}
@@ -337,9 +358,9 @@ const Tasks = () => {
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
-                        </div>
+                        </motion.div>
                       ))}
-                    </div>
+                    </motion.div>
                   </div>
                 )}
               </div>

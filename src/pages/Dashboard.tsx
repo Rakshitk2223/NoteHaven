@@ -918,8 +918,32 @@ const Dashboard = () => {
             </div>
             {/* Fallback stacked layout for mobile */}
             <div className="lg:hidden space-y-6">
-              {/* Reuse existing widgets in a simple vertical stack for mobile */}
-              {/* Could replicate minimal versions or reuse components - omitted for brevity */}
+              <div className="grid grid-cols-2 gap-4">
+                {statWidgets.map((w, i) => (
+                  <a key={i} href={w.link} className="zen-card p-3 block">
+                    <div className="text-xs text-muted-foreground">{w.title}</div>
+                    <div className="text-lg font-bold">{loading ? '—' : w.value}</div>
+                  </a>
+                ))}
+              </div>
+              <div className="zen-card p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-sm">Pending Tasks</h3>
+                  <Button size="sm" variant="ghost" className="h-7" onClick={handleViewAllTasks}>View</Button>
+                </div>
+                {/* Minimal mobile list */}
+                <div className="space-y-2">
+                  {loading ? (
+                    [...Array(3)].map((_,i)=>(<div key={i} className="h-3 bg-muted rounded"/>))
+                  ) : pendingTasks.length === 0 ? (
+                    <div className="text-xs text-muted-foreground">All done</div>
+                  ) : (
+                    pendingTasks.slice(0,3).map(t => (
+                      <div key={t.id} className="text-sm">{t.task_text}</div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
