@@ -5,11 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
+import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
 
 const Settings = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'));
+  const [colorTheme, setColorTheme] = useState(() => getCurrentTheme());
   const [displayName, setDisplayName] = useState('');
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [pw1, setPw1] = useState('');
@@ -22,7 +25,13 @@ const Settings = () => {
     const root = document.documentElement;
     if (theme === 'dark') root.classList.add('dark'); else root.classList.remove('dark');
     localStorage.setItem('theme', theme);
-  }, [theme]);
+    applyTheme(colorTheme, theme);
+  }, [theme, colorTheme]);
+
+  // Apply saved theme on mount
+  useEffect(() => {
+    applyTheme(colorTheme, theme);
+  }, []);
 
   // Load user metadata
   useEffect(() => {
@@ -129,9 +138,37 @@ const Settings = () => {
             {/* Appearance */}
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Appearance</h2>
-              <div className="flex items-center justify-between">
+              
+              {/* Color Theme Selector */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Color Theme</label>
+                <Select value={colorTheme} onValueChange={(value) => {
+                  setColorTheme(value);
+                  saveTheme(value);
+                  applyTheme(value, theme);
+                  toast({ title: 'Theme changed', description: `Switched to ${themes[value].label}` });
+                }}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.values(themes).map((t) => (
+                      <SelectItem key={t.name} value={t.name}>
+                        <div>
+                          <p className="font-medium">{t.label}</p>
+                          <p className="text-xs text-muted-foreground">{t.description}</p>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Choose your preferred color scheme</p>
+              </div>
+
+              {/* Light/Dark Mode Toggle */}
+              <div className="flex items-center justify-between pt-2">
                 <div>
-                  <p className="font-medium">Theme</p>
+                  <p className="font-medium">Mode</p>
                   <p className="text-sm text-muted-foreground">Toggle light / dark mode</p>
                 </div>
                 <div className="flex items-center gap-2">

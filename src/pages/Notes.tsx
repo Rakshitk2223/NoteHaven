@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered } from "lucide-react";
+import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered, Search, X, Undo, Redo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
 // Markdown-based editor now replaces previous contentEditable implementation
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 // Removed Textarea split-view in favor of Tiptap WYSIWYG
@@ -52,48 +53,119 @@ const Notes = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [lineCount, setLineCount] = useState(0);
+  const [lastServerUpdate, setLastServerUpdate] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [notesPerPage] = useState(50); // Pagination: load 50 notes at a time
+  const [currentPage, setCurrentPage] = useState(1);
   const { toast } = useToast();
   // Sharing state
   const [shareOpen, setShareOpen] = useState(false);
   const [allowEditShare, setAllowEditShare] = useState(false);
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [generatingShare, setGeneratingShare] = useState(false);
-  // Color palettes for light/dark modes
-  const lightModeColors = [
-    { label: 'None', value: null },
-    { label: 'GreenSoft', value: '#CADCAE' },
-    { label: 'GreenLight', value: '#E1E9C9' },
-    { label: 'OrangeMuted', value: '#EDA35A' },
-    { label: 'Peach', value: '#FEE8D9' },
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
+  // Semantic note categories with theme-integrated styling (Microsoft Sticky Notes inspired)
+  const noteCategories = [
+    { 
+      label: 'Default', 
+      value: null, 
+      icon: '📝',
+      description: 'No color',
+      borderColor: 'transparent',
+      bgLight: 'transparent',
+      bgDark: 'transparent'
+    },
+    { 
+      label: 'Yellow', 
+      value: 'yellow', 
+      icon: '💛',
+      description: 'Ideas & notes',
+      borderColor: '#F59E0B',
+      bgLight: 'rgba(253, 224, 71, 0.2)',
+      bgDark: 'rgba(161, 98, 7, 0.25)'
+    },
+    { 
+      label: 'Green', 
+      value: 'green', 
+      icon: '💚',
+      description: 'Tasks & success',
+      borderColor: '#10B981',
+      bgLight: 'rgba(134, 239, 172, 0.25)',
+      bgDark: 'rgba(6, 95, 70, 0.3)'
+    },
+    { 
+      label: 'Blue', 
+      value: 'blue', 
+      icon: '💙',
+      description: 'Information',
+      borderColor: '#3B82F6',
+      bgLight: 'rgba(147, 197, 253, 0.25)',
+      bgDark: 'rgba(30, 64, 175, 0.3)'
+    },
+    { 
+      label: 'Purple', 
+      value: 'purple', 
+      icon: '💜',
+      description: 'Creative ideas',
+      borderColor: '#A855F7',
+      bgLight: 'rgba(216, 180, 254, 0.25)',
+      bgDark: 'rgba(107, 33, 168, 0.3)'
+    },
+    { 
+      label: 'Pink', 
+      value: 'pink', 
+      icon: '💗',
+      description: 'Important',
+      borderColor: '#EC4899',
+      bgLight: 'rgba(251, 207, 232, 0.3)',
+      bgDark: 'rgba(131, 24, 67, 0.3)'
+    },
+    { 
+      label: 'Red', 
+      value: 'red', 
+      icon: '❤️',
+      description: 'Urgent',
+      borderColor: '#EF4444',
+      bgLight: 'rgba(254, 202, 202, 0.3)',
+      bgDark: 'rgba(127, 29, 29, 0.35)'
+    },
+    { 
+      label: 'Orange', 
+      value: 'orange', 
+      icon: '🧡',
+      description: 'Reminders',
+      borderColor: '#F97316',
+      bgLight: 'rgba(254, 215, 170, 0.3)',
+      bgDark: 'rgba(124, 45, 18, 0.35)'
+    },
+    { 
+      label: 'Gray', 
+      value: 'gray', 
+      icon: '🩶',
+      description: 'Archive',
+      borderColor: '#6B7280',
+      bgLight: 'rgba(229, 231, 235, 0.4)',
+      bgDark: 'rgba(55, 65, 81, 0.3)'
+    }
   ];
-  const darkModeColors = [
-    { label: 'None', value: null },
-    { label: 'RedVivid', value: '#F7374F' },
-    { label: 'Plum', value: '#88304E' },
-    { label: 'Eggplant', value: '#522546' },
-    { label: 'Charcoal', value: '#2C2C2C' },
-  ];
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  useEffect(() => {
-    const check = () => setIsDarkMode(document.documentElement.classList.contains('dark'));
-    check();
-    const observer = new MutationObserver(check);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
 
-  // Dynamic style for editor header background color
-  let editorHeaderStyle: CSSProperties = {};
-  if (selectedNote?.background_color) {
-    editorHeaderStyle.backgroundColor = selectedNote.background_color;
-  }
-  // Dynamic style for editor body background color (text area)
-  let editorBodyStyle: CSSProperties = {};
-  if (selectedNote?.background_color) {
-    editorBodyStyle.backgroundColor = selectedNote.background_color;
-  }
-  const editorContrastClass = selectedNote?.background_color ? getContrastTextColor(selectedNote.background_color) : '';
-  const isDarkNoteBg = editorContrastClass === 'text-neutral-100';
+  // Get category styling for a note
+  const getCategoryStyle = (category: string | null) => {
+    const cat = noteCategories.find(c => c.value === category);
+    if (!cat || !cat.value) {
+      return {
+        borderLeft: '4px solid transparent',
+        backgroundColor: 'transparent'
+      };
+    }
+    
+    const isDark = document.documentElement.classList.contains('dark');
+    return {
+      borderLeft: `4px solid ${cat.borderColor}`,
+      backgroundColor: isDark ? cat.bgDark : cat.bgLight
+    };
+  };
 
   // Debouncing for auto-save
   const [titleTimeout, setTitleTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -139,10 +211,12 @@ const Notes = () => {
     const html = selectedNote.content || '';
     setTitleValue(title);
     setContentValue(html);
+    setLastServerUpdate(selectedNote.updated_at);
     editor.commands.setContent(html);
     } else {
       setTitleValue('');
       setContentValue('');
+      setLastServerUpdate(null);
       editor.commands.clearContent();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -289,10 +363,6 @@ const Notes = () => {
   };
 
   const deleteNote = async (noteId: number) => {
-    if (!window.confirm('Are you sure you want to delete this note?')) {
-      return;
-    }
-
     try {
       const { error } = await supabase
         .from('notes')
@@ -312,6 +382,10 @@ const Notes = () => {
         const nextNote = updatedNotes[0] || null;
         setSelectedNote(nextNote);
       }
+      
+      toast({ title: 'Note deleted', description: 'The note has been permanently deleted.' });
+      setDeleteConfirmOpen(false);
+      setNoteToDelete(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete note';
       setError(message);
@@ -319,13 +393,65 @@ const Notes = () => {
     }
   };
 
+  const confirmDeleteNote = (note: Note) => {
+    setNoteToDelete(note);
+    setDeleteConfirmOpen(true);
+  };
+
   // Debounced auto-save functions
   const saveField = useCallback(async (noteId: number, field: 'title' | 'content', value: string, previous: string) => {
     try {
       setIsSaving(true);
+      
+      // Check for conflicts before saving (if we have a last known server update time)
+      if (lastServerUpdate) {
+        const { data: serverNote, error: checkError } = await supabase
+          .from('notes')
+          .select('updated_at, title, content')
+          .eq('id', noteId)
+          .single();
+        
+        if (!checkError && serverNote) {
+          const serverTime = new Date(serverNote.updated_at).getTime();
+          const localTime = new Date(lastServerUpdate).getTime();
+          
+          // Only show conflict if server was updated AND the content actually differs
+          // This prevents false positives from our own saves
+          if (serverTime > localTime) {
+            const hasRealConflict = field === 'title' 
+              ? serverNote.title !== previous 
+              : serverNote.content !== previous;
+              
+            if (hasRealConflict) {
+              const shouldOverwrite = window.confirm(
+                'This note was modified by someone else. Your changes will overwrite theirs.\n\n' +
+                'Click OK to save your changes anyway, or Cancel to reload the note.'
+              );
+              
+              if (!shouldOverwrite) {
+                // Reload the note from server
+                setTitleValue(serverNote.title || '');
+                setContentValue(serverNote.content || '');
+                setLastServerUpdate(serverNote.updated_at);
+                if (field === 'content') {
+                  editor?.commands.setContent(serverNote.content || '');
+                }
+                toast({ 
+                  title: 'Note reloaded', 
+                  description: 'Your unsaved changes were discarded to prevent conflicts.',
+                  variant: 'default'
+                });
+                return;
+              }
+            }
+          }
+        }
+      }
+      
       const { error } = await supabase.from('notes').update({ [field]: value }).eq('id', noteId);
       if (error) throw error;
       const now = new Date().toISOString();
+      setLastServerUpdate(now);
   // Update list & selected note with new field value so previews stay fresh
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value, updated_at: now } : n));
       setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value, updated_at: now } : prev);
@@ -336,7 +462,7 @@ const Notes = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [toast]);
+  }, [toast, lastServerUpdate, editor]);
 
   const scheduleTitleSave = useCallback((noteId: number, newValue: string, previous: string) => {
     if (titleTimeout) clearTimeout(titleTimeout);
@@ -402,15 +528,20 @@ const Notes = () => {
     }
   };
 
-  // Change background color of selected note
-  const handleColorChange = async (color: string | null) => {
+  // Change category of selected note
+  const handleCategoryChange = async (category: string | null) => {
     if (!selectedNote) return;
     try {
-      await updateNote(selectedNote.id, { background_color: color });
+      await updateNote(selectedNote.id, { background_color: category });
+      toast({ 
+        title: 'Category updated', 
+        description: `Note marked as ${category || 'default'}`,
+        variant: 'default' 
+      });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to set color';
+      const message = err instanceof Error ? err.message : 'Failed to set category';
       setError(message);
-      toast({ title: 'Error', description: 'Failed to change color.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to change category.', variant: 'destructive' });
     }
   };
 
@@ -484,6 +615,42 @@ const Notes = () => {
     return text.substring(0, maxLength) + '...';
   };
 
+  // Sanitize HTML for preview display (removes scripts and dangerous attributes)
+  const sanitizePreview = (html: string) => {
+    const text = html
+      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
+      .replace(/on\w+="[^"]*"/gi, '')
+      .replace(/on\w+='[^']*'/gi, '')
+      .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<object[\s\S]*?<\/object>/gi, '')
+      .replace(/<embed[\s\S]*?>/gi, '');
+    return text;
+  };
+
+  // Filter notes based on search query
+  const filteredNotes = notes.filter(note => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    const title = (note.title || '').toLowerCase();
+    const contentText = (note.content || '')
+      .replace(/<[^>]+>/g, ' ')
+      .toLowerCase();
+    return title.includes(query) || contentText.includes(query);
+  });
+
+  // Paginate filtered notes
+  const totalPages = Math.ceil(filteredNotes.length / notesPerPage);
+  const paginatedNotes = filteredNotes.slice(
+    (currentPage - 1) * notesPerPage,
+    currentPage * notesPerPage
+  );
+
+  // Reset to page 1 when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
@@ -537,6 +704,24 @@ const Notes = () => {
                       New
                     </Button>
                   </div>
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search notes..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9 pr-8"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -566,14 +751,32 @@ const Notes = () => {
                       Create your first note
                     </Button>
                   </div>
+                ) : filteredNotes.length === 0 ? (
+                  <div className="p-4 text-center">
+                    <Search className="h-12 w-12 mx-auto mb-2 text-muted-foreground/50" />
+                    <p className="text-muted-foreground mb-2">No notes found</p>
+                    <p className="text-sm text-muted-foreground">Try a different search term</p>
+                    <Button onClick={() => setSearchQuery('')} size="sm" variant="ghost" className="mt-2">
+                      Clear search
+                    </Button>
+                  </div>
                 ) : (
                   <motion.div
                     className="space-y-1 p-2"
                     initial="hidden"
                     animate="show"
-                    variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+                    variants={{ 
+                      hidden: { opacity: 0 }, 
+                      show: { 
+                        opacity: 1, 
+                        transition: { 
+                          staggerChildren: 0.04,
+                          delayChildren: 0.1
+                        } 
+                      } 
+                    }}
                   >
-                    {notes.map((note) => (
+                    {paginatedNotes.map((note) => (
                       <motion.div
                         key={note.id}
                         onClick={() => {
@@ -581,12 +784,24 @@ const Notes = () => {
                           if (isMobileView) setShowNoteList(false);
                         }}
                         className={`
-                          p-3 rounded-lg cursor-pointer transition-colors
-                          ${selectedNote?.id === note.id ? 'ring-2 ring-primary' : 'hover:bg-muted'}
-                          ${note.background_color ? getContrastTextColor(note.background_color) : ''}
+                          p-3 rounded-lg cursor-pointer transition-all duration-200 ease-out
+                          ${selectedNote?.id === note.id ? 'ring-2 ring-primary shadow-md' : 'hover:bg-muted hover:shadow-sm'}
                         `}
-                        style={{ backgroundColor: note.background_color || undefined }}
-                        variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
+                        style={getCategoryStyle(note.background_color)}
+                        variants={{ 
+                          hidden: { opacity: 0, y: 8, scale: 0.98 }, 
+                          show: { 
+                            opacity: 1, 
+                            y: 0, 
+                            scale: 1,
+                            transition: {
+                              duration: 0.3,
+                              ease: [0.4, 0, 0.2, 1]
+                            }
+                          } 
+                        }}
+                        whileHover={{ scale: 1.01, transition: { duration: 0.15 } }}
+                        whileTap={{ scale: 0.98 }}
                       >
                         <div className="font-semibold truncate flex items-center gap-2">
                           {note.title === 'Inbox' ? (
@@ -596,14 +811,44 @@ const Notes = () => {
                           ) : null}
                           <span className="truncate">{truncateText(note.title || 'Untitled', 80)}</span>
                         </div>
-                        <div className={`text-sm mt-1 line-clamp-3 ${note.background_color ? getContrastTextColor(note.background_color) : 'text-muted-foreground'} prose dark:prose-invert max-w-none`} 
-                          dangerouslySetInnerHTML={{ __html: note.content || '' }} />
-                        <div className={`text-xs mt-2 ${note.background_color ? getContrastTextColor(note.background_color) : 'text-muted-foreground'}`}>
+                        <div className="text-sm mt-1 line-clamp-3 text-foreground/80 prose dark:prose-invert max-w-none" 
+                          dangerouslySetInnerHTML={{ __html: sanitizePreview(note.content || '') }} />
+                        <div className="text-xs mt-2 text-foreground/60">
                           {formatDate(note.updated_at)}
                         </div>
                       </motion.div>
                     ))}
                   </motion.div>
+                )}
+                
+                {/* Pagination Controls */}
+                {filteredNotes.length > notesPerPage && (
+                  <div className="p-4 border-t border-border flex items-center justify-between text-xs">
+                    <div className="text-muted-foreground">
+                      Showing {((currentPage - 1) * notesPerPage) + 1}-{Math.min(currentPage * notesPerPage, filteredNotes.length)} of {filteredNotes.length}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </Button>
+                      <div className="px-2">
+                        Page {currentPage} of {totalPages}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -620,20 +865,13 @@ const Notes = () => {
                 <>
                   {/* Editor Header (title + actions) */}
                   <div
-                    style={editorHeaderStyle}
-                    className={cn(
-                      "p-4 border-b border-border flex items-center justify-between",
-                      selectedNote?.background_color && getContrastTextColor(selectedNote.background_color)
-                    )}
+                    className="p-4 border-b border-border flex items-center justify-between"
                   >
                     <Input
                       value={titleValue}
                       onChange={(e) => handleTitleChange(e.target.value)}
                       placeholder="Note title..."
-                      className={cn(
-                        "text-xl font-semibold",
-                        isDarkMode ? "text-white placeholder:text-white/70 caret-white" : "text-black placeholder:text-black/70 caret-black"
-                      )}
+                      className="text-xl font-semibold"
                     />
                     <div className="flex items-center gap-1 ml-3">
                       <div className="flex items-center gap-2 text-xs">
@@ -648,27 +886,47 @@ const Notes = () => {
                             <Palette className="h-4 w-4" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent align="end" className="w-52">
-                          <div className="grid grid-cols-6 gap-2">
-                            {[...lightModeColors, ...darkModeColors.filter(c => c.value !== null)].map(c => (
-                              <button
-                                key={c.label}
-                                title={c.label}
-                                onClick={() => handleColorChange(c.value)}
-                                className={cn(
-                                  "w-7 h-7 rounded-full border shadow-sm transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-primary",
-                                  selectedNote.background_color === c.value || (!selectedNote.background_color && c.value === null) ? 'ring-2 ring-primary' : ''
-                                )}
-                                style={{ backgroundColor: c.value || '#ffffff' }}
-                              />
-                            ))}
+                        <PopoverContent align="end" className="w-80">
+                          <div className="space-y-2">
+                            <p className="text-sm font-medium">Note Color</p>
+                            <div className="grid grid-cols-3 gap-2">
+                              {noteCategories.map(cat => {
+                                const isDark = document.documentElement.classList.contains('dark');
+                                const isSelected = selectedNote?.background_color === cat.value;
+                                return (
+                                  <button
+                                    key={cat.value || 'default'}
+                                    onClick={() => {
+                                      handleCategoryChange(cat.value);
+                                      setShowPalette(false);
+                                    }}
+                                    className={cn(
+                                      "flex items-center gap-2 px-3 py-2.5 rounded-lg transition-all text-left border-2",
+                                      "hover:scale-105 hover:shadow-md",
+                                      isSelected ? "border-primary ring-2 ring-primary/20 scale-105 shadow-md" : "border-transparent"
+                                    )}
+                                    style={{
+                                      backgroundColor: cat.value ? (isDark ? cat.bgDark : cat.bgLight) : 'transparent',
+                                      borderLeftWidth: '4px',
+                                      borderLeftColor: cat.borderColor
+                                    }}
+                                  >
+                                    <span className="text-xl">{cat.icon}</span>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate">{cat.label}</p>
+                                      <p className="text-xs text-muted-foreground truncate">{cat.description}</p>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         </PopoverContent>
                       </Popover>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => deleteNote(selectedNote.id)}
+                        onClick={() => selectedNote && confirmDeleteNote(selectedNote)}
                         className="hover:text-destructive"
                         title="Delete note"
                       >
@@ -722,34 +980,29 @@ const Notes = () => {
 
                   {/* Editor Content - Tiptap WYSIWYG */}
                   <div className="flex-1 p-4 flex flex-col gap-4">
-                    <div
-                      className={cn(
-                        "flex-1 flex flex-col border rounded-md overflow-hidden min-h-[calc(100vh-360px)]",
-                        editorContrastClass
-                      )}
-                      style={editorBodyStyle}
-                    >
+                    <div className="flex-1 flex flex-col border rounded-md overflow-hidden min-h-[calc(100vh-360px)]">
                       <div className="flex items-center gap-1 flex-wrap border-b border-border p-1 text-xs">
-                        <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold"><Bold className="h-4 w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic"><Italic className="h-4 w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('underline') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline"><UnderlineIcon className="h-4 w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)"><Bold className="h-4 w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)"><Italic className="h-4 w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('underline') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline (Ctrl+U)"><UnderlineIcon className="h-4 w-4" /></Button>
+                        <div className="w-px h-5 bg-border mx-1" />
                         <Button size="sm" variant={editor?.isActive('bulletList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List"><List className="h-4 w-4" /></Button>
                         <Button size="sm" variant={editor?.isActive('orderedList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Ordered List"><ListOrdered className="h-4 w-4" /></Button>
+                        <div className="w-px h-5 bg-border mx-1" />
+                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo (Ctrl+Z)"><Undo className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo (Ctrl+Y)"><Redo className="h-4 w-4" /></Button>
                       </div>
                       <div className="flex-1 overflow-y-auto p-4 flex">
                         {editor && (
                           <EditorContent
                             editor={editor}
-                            className={cn(
-                              "prose max-w-none focus:outline-none flex-1",
-                              isDarkNoteBg && "prose-invert"
-                            )}
+                            className="prose max-w-none focus:outline-none flex-1 dark:prose-invert"
                           />
                         )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between pt-2 border-t border-border text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2">Autosave every 10s</div>
+                      <div className="flex items-center gap-2">Autosave every 5s</div>
                       <div className="px-2 tabular-nums select-none">Words: {wordCount} | Lines: {lineCount}</div>
                     </div>
                   </div>
@@ -776,6 +1029,27 @@ const Notes = () => {
           </div>
         </div>
       </div>
+      
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{noteToDelete?.title || 'Untitled'}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => noteToDelete && deleteNote(noteToDelete.id)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

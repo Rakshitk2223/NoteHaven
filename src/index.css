@@ -10,22 +10,22 @@ All colors MUST be HSL.
   :root {
     /* Zen Garden Color Palette */
     --background: 40 33% 96%;  /* Antique White #F8F7F4 */
-    --foreground: 0 0% 24%;    /* Soft Charcoal #3D3D3D */
+    --foreground: 0 0% 15%;    /* Darker Charcoal for better visibility */
 
     --card: 40 33% 96%;
-    --card-foreground: 0 0% 24%;
+    --card-foreground: 0 0% 15%;
 
     --popover: 40 33% 96%;
-    --popover-foreground: 0 0% 24%;
+    --popover-foreground: 0 0% 15%;
 
     --primary: 213 34% 37%;     /* Deep Stone Blue #3D5A80 */
     --primary-foreground: 0 0% 100%;
 
     --secondary: 0 0% 88%;      /* Light Gray #E0E0E0 */
-    --secondary-foreground: 0 0% 24%;
+    --secondary-foreground: 0 0% 15%;
 
     --muted: 0 0% 88%;
-    --muted-foreground: 0 0% 66%; /* Muted Gray #A9A9A9 */
+    --muted-foreground: 0 0% 45%; /* Darker muted for better contrast */
 
     --accent: 213 34% 37%;
     --accent-foreground: 0 0% 100%;
@@ -41,15 +41,15 @@ All colors MUST be HSL.
 
     --sidebar-background: 0 0% 98%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-foreground: 0 0% 15%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary: 213 34% 37%;
 
     --sidebar-primary-foreground: 0 0% 98%;
 
     --sidebar-accent: 240 4.8% 95.9%;
 
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-accent-foreground: 0 0% 15%;
 
     --sidebar-border: 220 13% 91%;
 
@@ -104,23 +104,45 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground font-body;
+    transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-heading;
+    @apply font-heading font-bold;
+  }
+  
+  h1 {
+    @apply text-foreground;
+  }
+  
+  h2 {
+    @apply text-foreground;
+  }
+
+  /* Global smooth transitions */
+  button, a, input, textarea, select {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Zen Garden specific styles */
   .zen-card {
     @apply bg-card border border-border rounded-lg shadow-sm;
+    transition: transform 0.2s ease-out, box-shadow 0.3s ease-out, border-color 0.2s ease;
+  }
+
+  .zen-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08), 0 3px 8px rgba(0, 0, 0, 0.1);
   }
 
   .zen-shadow {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+    transition: box-shadow 0.3s ease;
   }
 
   .zen-shadow-lg {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.3s ease;
   }
 
   /* Smooth transitions for zen feel */
@@ -147,6 +169,7 @@ All colors MUST be HSL.
   min-height: 300px;
   outline: none;
   padding: 0.75rem;
+  transition: all 0.2s ease;
 }
 .ProseMirror:focus { outline: none; }
 .ProseMirror p { margin-bottom: 0; }
@@ -165,3 +188,146 @@ All colors MUST be HSL.
   padding-left: 1.5rem;
 }
 .ProseMirror li { margin-bottom: 0.25rem; }
+
+/* Smooth Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInFromLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Utility animation classes */
+.animate-fade-in {
+  animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-fade-in-scale {
+  animation: fadeInScale 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-slide-in-left {
+  animation: slideInFromLeft 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-slide-in-right {
+  animation: slideInFromRight 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Stagger animations for lists */
+.stagger-item {
+  opacity: 0;
+  animation: fadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.stagger-item:nth-child(1) { animation-delay: 0.05s; }
+.stagger-item:nth-child(2) { animation-delay: 0.1s; }
+.stagger-item:nth-child(3) { animation-delay: 0.15s; }
+.stagger-item:nth-child(4) { animation-delay: 0.2s; }
+.stagger-item:nth-child(5) { animation-delay: 0.25s; }
+.stagger-item:nth-child(6) { animation-delay: 0.3s; }
+.stagger-item:nth-child(7) { animation-delay: 0.35s; }
+.stagger-item:nth-child(8) { animation-delay: 0.4s; }
+.stagger-item:nth-child(9) { animation-delay: 0.45s; }
+.stagger-item:nth-child(10) { animation-delay: 0.5s; }
+
+/* Smooth hover effects */
+.hover-lift {
+  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+.hover-scale {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-scale:hover {
+  transform: scale(1.02);
+}
+
+/* Loading shimmer effect */
+.loading-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--muted-foreground) / 0.1) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Smooth focus states */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  transition: outline 0.2s ease;
+}
+
+/* Smooth scroll behavior */
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

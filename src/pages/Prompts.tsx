@@ -373,14 +373,35 @@ const Prompts = () => {
                 className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
                 initial="hidden"
                 animate="show"
-                variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } }}
+                variants={{ 
+                  hidden: { opacity: 0 }, 
+                  show: { 
+                    opacity: 1, 
+                    transition: { 
+                      staggerChildren: 0.05,
+                      delayChildren: 0.1
+                    } 
+                  } 
+                }}
               >
                 {prompts
                   .slice()
                   .sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0))
                   .map((prompt) => (
-                  <motion.div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition relative"
-                    variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
+                  <motion.div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg transition-all duration-300 ease-out relative"
+                    variants={{ 
+                      hidden: { opacity: 0, y: 12, scale: 0.95 }, 
+                      show: { 
+                        opacity: 1, 
+                        y: 0, 
+                        scale: 1,
+                        transition: {
+                          duration: 0.35,
+                          ease: [0.4, 0, 0.2, 1]
+                        }
+                      } 
+                    }}
+                    whileHover={{ y: -4, scale: 1.01, transition: { duration: 0.2 } }}
                   >
                      {prompt.is_pinned && (
                        <div className="absolute -top-2 -right-2 bg-primary text-primary-foreground rounded-full p-1 shadow">

@@ -34,7 +34,7 @@ interface MediaItem {
   title: string;
   // Restrict to the allowed canonical set while keeping string for legacy DB rows
   type: 'Movie' | 'Series' | 'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'KDrama' | 'JDrama' | string;
-  status: 'Watching' | 'Completed' | 'Plan to Read' | 'Plan to Watch' | 'Reading' | string;
+  status: 'Active' | 'Completed' | 'Planned' | string;
   rating?: number;
   current_season?: number;
   current_episode?: number;
@@ -61,6 +61,9 @@ const MediaTracker = () => {
   const [filterType, setFilterType] = useState<string>('All');
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [quickAddTitle, setQuickAddTitle] = useState('');
+  const [quickAddType, setQuickAddType] = useState<MediaItem['type']>('');
+  const [quickAddProgress, setQuickAddProgress] = useState('');
   const [formData, setFormData] = useState({
     title: "",
     type: "" as MediaItem['type'],
@@ -87,6 +90,22 @@ const MediaTracker = () => {
   // Type sets for conditional progress logic
   const readableTypes: MediaItem['type'][] = ['Manga', 'Manhwa', 'Manhua'];
   const watchableTypes: MediaItem['type'][] = ['Series', 'Anime', 'KDrama', 'JDrama'];
+
+  // Normalize legacy status values to new simplified ones
+  const normalizeStatus = (status: string): string => {
+    switch (status) {
+      case 'Watching':
+      case 'Reading':
+        return 'Active';
+      case 'Plan to Watch':
+      case 'Plan to Read':
+        return 'Planned';
+      case 'Completed':
+        return 'Completed';
+      default:
+        return status;
+    }
+  };
 
   // Infinite query for media items
   const pageSize = 50;
@@ -150,11 +169,11 @@ const MediaTracker = () => {
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
     mediaItems.forEach(item => {
-      const key = item.status || 'Uncategorized';
+      const key = normalizeStatus(item.status || 'Uncategorized');
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
     });
-    const order = ['Watching','Reading','Plan to Watch','Plan to Read','Completed'];
+    const order = ['Active', 'Planned', 'Completed'];
     const keys = Object.keys(groups).sort((a,b) => {
       const ia = order.indexOf(a); const ib = order.indexOf(b);
       if (ia === -1 && ib === -1) return a.localeCompare(b);
@@ -196,6 +215,47 @@ const MediaTracker = () => {
       toast({ title: 'Export started', description: 'Download should begin shortly.' });
     } catch (e:any) {
       toast({ title: 'Export failed', description: e.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const handleQuickAdd = async () => {
+    if (!quickAddTitle.trim() || !quickAddType) {
+      toast({ title: 'Missing fields', description: 'Please enter a title and select a type', variant: 'destructive' });
+      return;
+    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      
+      const isReadable = readableTypes.includes(quickAddType);
+      const isWatchable = watchableTypes.includes(quickAddType);
+      const mediaData: any = {
+        title: quickAddTitle.trim(),
+        type: quickAddType,
+        status: 'Active',
+        user_id: user.id
+      };
+      
+      // Add progress if provided
+      if (quickAddProgress && !isNaN(parseInt(quickAddProgress))) {
+        if (isReadable) {
+          mediaData.current_chapter = parseInt(quickAddProgress);
+        } else if (isWatchable) {
+          mediaData.current_episode = parseInt(quickAddProgress);
+        }
+      }
+      
+      const { error } = await supabase.from('media_tracker').insert([mediaData]);
+      
+      if (error) throw error;
+      
+      setQuickAddTitle('');
+      setQuickAddType('' as MediaItem['type']);
+      setQuickAddProgress('');
+      refetch();
+      toast({ title: 'Added!', description: `${quickAddTitle} has been added to your tracker` });
+    } catch (e: any) {
+      toast({ title: 'Failed to add', description: e.message || 'Error', variant: 'destructive' });
     }
   };
 
@@ -349,12 +409,15 @@ const MediaTracker = () => {
 
   const getStatusColor = (status: MediaItem['status']) => {
     switch (status) {
-      case 'Watching': return 'bg-blue-100 text-blue-800';
-      case 'Completed': return 'bg-green-100 text-green-800';
-      case 'Plan to Read': return 'bg-gray-100 text-gray-800';
-      case 'Plan to Watch': return 'bg-yellow-100 text-yellow-800';
-      case 'Reading': return 'bg-cyan-100 text-cyan-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'Active': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+      case 'Completed': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+      case 'Planned': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
+      // Legacy status mappings for backward compatibility
+      case 'Watching':
+      case 'Reading': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+      case 'Plan to Read':
+      case 'Plan to Watch': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
     }
   };
 
@@ -475,22 +538,16 @@ const MediaTracker = () => {
             <Badge className={getStatusColor(statusKey as MediaItem['status'])}>{statusKey}</Badge>
             <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>
           </h2>
-          <motion.div
-            className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            initial="hidden"
-            animate="show"
-            variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
-          >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {groupedByStatus.groups[statusKey].map((item) => (
-              <motion.div
+              <div
                 key={item.id}
                 id={`media-${item.id}`}
-                className="zen-card p-6 zen-shadow hover:zen-shadow-lg zen-transition"
-                variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}
+                className="zen-card p-6 transition-all duration-150 hover:shadow-lg hover:-translate-y-0.5"
               >
                 <div className="flex items-start justify-between mb-3">
                   <Badge className={getTypeColor(item.type)}>{item.type}</Badge>
-                  <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
+                  <Badge className={getStatusColor(normalizeStatus(item.status))}>{normalizeStatus(item.status)}</Badge>
                 </div>
                 <h3 className="text-lg font-semibold text-foreground mb-2 truncate">{item.title}</h3>
                 {item.rating && (
@@ -578,9 +635,9 @@ const MediaTracker = () => {
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-              </motion.div>
+              </div>
             ))}
-          </motion.div>
+          </div>
         </div>
       ))}
     </div>
@@ -605,16 +662,67 @@ const MediaTracker = () => {
             <TableRow key={item.id}>
               <TableCell id={`media-${item.id}`} className="font-medium">{item.title}</TableCell>
               <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
-              <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
+              <TableCell><Badge className={getStatusColor(normalizeStatus(item.status))}>{normalizeStatus(item.status)}</Badge></TableCell>
               <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
               <TableCell>
-                {readableTypes.includes(item.type)
-                  ? (item.current_chapter ? `Ch. ${item.current_chapter}` : '-')
-                  : watchableTypes.includes(item.type)
-                    ? ((item.current_season || item.current_episode)
-                        ? `${item.current_season ? `S${item.current_season} • ` : ''}${item.current_episode ? `E${item.current_episode}` : ''}`
-                        : '-')
-                    : '-'}
+                <div className="flex items-center gap-2">
+                  {readableTypes.includes(item.type) && item.current_chapter ? (
+                    <>
+                      <span className="min-w-[60px]">Ch. {item.current_chapter}</span>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-6 w-6"
+                          disabled={updatingIds.has(item.id)}
+                          onClick={() => handleQuickUpdate(item, 'current_chapter', -1)}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-6 w-6"
+                          disabled={updatingIds.has(item.id)}
+                          onClick={() => handleQuickUpdate(item, 'current_chapter', 1)}
+                        >
+                          <PlusIcon className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </>
+                  ) : watchableTypes.includes(item.type) && (item.current_season || item.current_episode) ? (
+                    <>
+                      <span className="min-w-[80px]">
+                        {item.current_season ? `S${item.current_season} • ` : ''}
+                        {item.current_episode ? `E${item.current_episode}` : ''}
+                      </span>
+                      {item.current_episode && (
+                        <div className="flex gap-1">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            disabled={updatingIds.has(item.id)}
+                            onClick={() => handleQuickUpdate(item, 'current_episode', -1)}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            className="h-6 w-6"
+                            disabled={updatingIds.has(item.id)}
+                            onClick={() => handleQuickUpdate(item, 'current_episode', 1)}
+                          >
+                            <PlusIcon className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span>-</span>
+                  )}
+                </div>
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">
@@ -642,22 +750,14 @@ const MediaTracker = () => {
         />
         
         <div className="flex-1 lg:ml-0">
-          <div className="p-6 border-b border-border">
-            <div className="flex items-center justify-between">
+          <div className="p-6 border-b border-border bg-card">
+            <div className="flex items-center justify-between mb-4">
               <h1 className="text-2xl font-bold font-heading text-foreground">
                 Media Tracker
               </h1>
               <div className="flex items-center gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json"
-                  className="hidden"
-                  onChange={handleJsonImport}
-                  disabled={isImporting}
-                />
                 {/* View toggle */}
-                <div className="hidden sm:flex items-center mr-2">
+                <div className="hidden sm:flex items-center">
                   <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'outline'} onClick={() => setViewMode('grid')} className="mr-1">
                     <LayoutGrid className="h-4 w-4" />
                   </Button>
@@ -665,28 +765,11 @@ const MediaTracker = () => {
                     <ListIcon className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  className="zen-transition hover:shadow-md"
-                  disabled={isImporting}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  {isImporting ? 'Importing...' : 'Import'}
-                </Button>
-                <Button
-                  variant="outline"
-                  className="zen-transition hover:shadow-md"
-                  onClick={handleExportJson}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
-                </Button>
                 <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                   <DialogTrigger asChild>
-                    <Button className="zen-transition hover:shadow-md">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Media
+                    <Button variant="outline" size="sm">
+                      <Edit className="h-4 w-4 mr-2" />
+                      Advanced
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-[500px]">
@@ -742,11 +825,9 @@ const MediaTracker = () => {
                             <SelectValue placeholder="Select status" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Watching">Watching</SelectItem>
-                            <SelectItem value="Reading">Reading</SelectItem>
+                            <SelectItem value="Active">Active</SelectItem>
+                            <SelectItem value="Planned">Planned</SelectItem>
                             <SelectItem value="Completed">Completed</SelectItem>
-                            <SelectItem value="Plan to Read">Plan to Read</SelectItem>
-                            <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -822,80 +903,141 @@ const MediaTracker = () => {
                 </Dialog>
               </div>
             </div>
+
+            {/* Quick Add Bar */}
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Label className="text-sm text-muted-foreground mb-1">Quick Add</Label>
+                <Input
+                  placeholder="Enter title (e.g., One Piece, Breaking Bad)"
+                  value={quickAddTitle}
+                  onChange={(e) => setQuickAddTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && e.ctrlKey) handleQuickAdd();
+                  }}
+                />
+              </div>
+              <div className="w-40">
+                <Label className="text-sm text-muted-foreground mb-1">Type</Label>
+                <Select value={quickAddType} onValueChange={(value) => setQuickAddType(value as MediaItem['type'])}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Anime">Anime</SelectItem>
+                    <SelectItem value="Manga">Manga</SelectItem>
+                    <SelectItem value="Manhwa">Manhwa</SelectItem>
+                    <SelectItem value="Manhua">Manhua</SelectItem>
+                    <SelectItem value="Series">Series</SelectItem>
+                    <SelectItem value="Movie">Movie</SelectItem>
+                    <SelectItem value="KDrama">KDrama</SelectItem>
+                    <SelectItem value="JDrama">JDrama</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="w-32">
+                <Label className="text-sm text-muted-foreground mb-1">
+                  {readableTypes.includes(quickAddType) ? 'Chapter' : watchableTypes.includes(quickAddType) ? 'Episode' : 'Progress'}
+                </Label>
+                <Input
+                  type="number"
+                  min="1"
+                  placeholder={readableTypes.includes(quickAddType) ? 'Ch. #' : watchableTypes.includes(quickAddType) ? 'Ep. #' : '#'}
+                  value={quickAddProgress}
+                  onChange={(e) => setQuickAddProgress(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleQuickAdd();
+                  }}
+                />
+              </div>
+              <Button onClick={handleQuickAdd} className="h-10">
+                <Plus className="h-4 w-4 mr-2" />
+                Add
+              </Button>
+            </div>
           </div>
 
           <div className="p-6">
-            {/* Search Bar */}
-            <div className="mb-4 flex items-center gap-2 max-w-md">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search title..."
-                value={typedSearchTerm}
-                onChange={handleSearchChange}
-              />
-            </div>
-            {error && (
-              <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
-                {error}
-              </div>
-            )}
-
-            {/* Filters */}
-            <div className="mb-6 flex flex-col sm:flex-row gap-4">
+            {/* Search & Filters Collapsible */}
+            <div className="mb-6 space-y-4">
               <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-muted-foreground">Filters:</span>
+                <Search className="h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search titles..."
+                  value={typedSearchTerm}
+                  onChange={handleSearchChange}
+                  className="max-w-md"
+                />
               </div>
               
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="type-filter" className="text-sm">Type:</Label>
-                  <Select value={filterType} onValueChange={setFilterType}>
-                    <SelectTrigger className="w-32">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="All">All</SelectItem>
-                      <SelectItem value="Movie">Movie</SelectItem>
-                      <SelectItem value="Series">Series</SelectItem>
-                      <SelectItem value="Anime">Anime</SelectItem>
-                      <SelectItem value="Manga">Manga</SelectItem>
-                      <SelectItem value="Manhwa">Manhwa</SelectItem>
-                      <SelectItem value="Manhua">Manhua</SelectItem>
-                      <SelectItem value="KDrama">KDrama</SelectItem>
-                      <SelectItem value="JDrama">JDrama</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="flex flex-wrap gap-3 items-center">
+                <span className="text-sm font-medium text-muted-foreground">Filters:</span>
+                
+                <Select value={filterType} onValueChange={setFilterType}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All Types</SelectItem>
+                    <SelectItem value="Anime">Anime</SelectItem>
+                    <SelectItem value="Manga">Manga</SelectItem>
+                    <SelectItem value="Manhwa">Manhwa</SelectItem>
+                    <SelectItem value="Manhua">Manhua</SelectItem>
+                    <SelectItem value="Series">Series</SelectItem>
+                    <SelectItem value="Movie">Movie</SelectItem>
+                    <SelectItem value="KDrama">KDrama</SelectItem>
+                    <SelectItem value="JDrama">JDrama</SelectItem>
+                  </SelectContent>
+                </Select>
 
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="status-filter" className="text-sm">Status:</Label>
-                  <Select value={filterStatus} onValueChange={setFilterStatus}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="All">All</SelectItem>
-                      <SelectItem value="Watching">Watching</SelectItem>
-                      <SelectItem value="Reading">Reading</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
-                      <SelectItem value="Plan to Read">Plan to Read</SelectItem>
-                      <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="sort-order" className="text-sm">Sort:</Label>
-                  <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="asc">Title A → Z</SelectItem>
-                      <SelectItem value="desc">Title Z → A</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                <Select value={filterStatus} onValueChange={setFilterStatus}>
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="All">All Status</SelectItem>
+                    <SelectItem value="Active">Active</SelectItem>
+                    <SelectItem value="Planned">Planned</SelectItem>
+                    <SelectItem value="Completed">Completed</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="asc">A → Z</SelectItem>
+                    <SelectItem value="desc">Z → A</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={handleJsonImport}
+                  disabled={isImporting}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isImporting}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="ml-auto"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  {isImporting ? 'Importing...' : 'Import'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleExportJson}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
               </div>
             </div>
 

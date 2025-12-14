@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { AnimatePresence, motion } from "framer-motion";
+import { getCurrentTheme, applyTheme } from "@/lib/themes";
 import Index from "./pages/Index";
 import Login from "./pages/Login";
 import SignUp from "./pages/SignUp";
@@ -27,43 +27,36 @@ import SharedNote from "./pages/SharedNote.tsx"; // shared note public view
 
 const queryClient = new QueryClient();
 
-const PageTransition = ({ children }: { children: React.ReactNode }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 8 }}
-    animate={{ opacity: 1, y: 0 }}
-    exit={{ opacity: 0, y: -8 }}
-    transition={{ duration: 0.2, ease: "easeOut" }}
-  >
-    {children}
-  </motion.div>
-);
-
 const AppInner = () => {
   useEffect(() => {
-    const saved = localStorage.getItem('theme');
-    if (saved === 'dark') {
+    const savedMode = localStorage.getItem('theme');
+    const savedColorTheme = getCurrentTheme();
+    const mode: 'light' | 'dark' = savedMode === 'dark' ? 'dark' : 'light';
+    
+    if (mode === 'dark') {
       document.documentElement.classList.add('dark');
     }
+    
+    // Apply the saved color theme
+    applyTheme(savedColorTheme, mode);
   }, []);
   const location = useLocation();
   return (
-      <AnimatePresence mode="wait" initial={false}>
-        <Routes location={location} key={location.pathname}>
-          <Route path="/" element={<PageTransition><Index /></PageTransition>} />
-          <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
-          <Route path="/signup" element={<PageTransition><SignUp /></PageTransition>} />
-          <Route path="/dashboard" element={<ProtectedRoute><PageTransition><Dashboard /></PageTransition></ProtectedRoute>} />
-          <Route path="/prompts" element={<ProtectedRoute><PageTransition><Prompts /></PageTransition></ProtectedRoute>} />
-          <Route path="/media" element={<ProtectedRoute><PageTransition><MediaTracker /></PageTransition></ProtectedRoute>} />
-          <Route path="/tasks" element={<ProtectedRoute><PageTransition><Tasks /></PageTransition></ProtectedRoute>} />
-          <Route path="/notes" element={<ProtectedRoute><PageTransition><Notes /></PageTransition></ProtectedRoute>} />
-          <Route path="/notes/share/:shareId" element={<PageTransition><SharedNote /></PageTransition>} />
-          <Route path="/settings" element={<ProtectedRoute><PageTransition><Settings /></PageTransition></ProtectedRoute>} />
-          <Route path="/birthdays" element={<ProtectedRoute><PageTransition><Birthdays /></PageTransition></ProtectedRoute>} />
-          <Route path="/check-email" element={<PageTransition><CheckEmail /></PageTransition>} />
-          <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />
-        </Routes>
-      </AnimatePresence>
+      <Routes location={location} key={location.pathname}>
+        <Route path="/" element={<Index />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<SignUp />} />
+        <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/prompts" element={<ProtectedRoute><Prompts /></ProtectedRoute>} />
+        <Route path="/media" element={<ProtectedRoute><MediaTracker /></ProtectedRoute>} />
+        <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+        <Route path="/notes" element={<ProtectedRoute><Notes /></ProtectedRoute>} />
+        <Route path="/notes/share/:shareId" element={<SharedNote />} />
+        <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/birthdays" element={<ProtectedRoute><Birthdays /></ProtectedRoute>} />
+        <Route path="/check-email" element={<CheckEmail />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
   );
 };
 

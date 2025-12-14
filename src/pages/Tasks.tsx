@@ -263,14 +263,35 @@ const Tasks = () => {
                       className="space-y-2"
                       initial="hidden"
                       animate="show"
-                      variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+                      variants={{ 
+                        hidden: { opacity: 0 }, 
+                        show: { 
+                          opacity: 1, 
+                          transition: { 
+                            staggerChildren: 0.04,
+                            delayChildren: 0.08
+                          } 
+                        } 
+                      }}
                     >
                       {todoTasks.map((task) => (
                         <motion.div
                           key={task.id}
                           id={`task-${task.id}`}
-                          className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg zen-transition"
-                          variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
+                          className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out"
+                          variants={{ 
+                            hidden: { opacity: 0, x: -12, scale: 0.97 }, 
+                            show: { 
+                              opacity: 1, 
+                              x: 0, 
+                              scale: 1,
+                              transition: {
+                                duration: 0.3,
+                                ease: [0.4, 0, 0.2, 1]
+                              }
+                            } 
+                          }}
+                          whileHover={{ scale: 1.005, transition: { duration: 0.15 } }}
                         >
                           <Checkbox
                             checked={task.is_completed}
@@ -334,14 +355,35 @@ const Tasks = () => {
                       className="space-y-2"
                       initial="hidden"
                       animate="show"
-                      variants={{ hidden: { opacity: 1 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } }}
+                      variants={{ 
+                        hidden: { opacity: 0 }, 
+                        show: { 
+                          opacity: 1, 
+                          transition: { 
+                            staggerChildren: 0.04,
+                            delayChildren: 0.08
+                          } 
+                        } 
+                      }}
                     >
                       {completedTasks.map((task) => (
                         <motion.div
                           key={task.id}
                           id={`task-${task.id}`}
-                          className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg zen-transition opacity-75"
-                          variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
+                          className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out opacity-75"
+                          variants={{ 
+                            hidden: { opacity: 0, x: -12, scale: 0.97 }, 
+                            show: { 
+                              opacity: 0.75, 
+                              x: 0, 
+                              scale: 1,
+                              transition: {
+                                duration: 0.3,
+                                ease: [0.4, 0, 0.2, 1]
+                              }
+                            } 
+                          }}
+                          whileHover={{ scale: 1.005, transition: { duration: 0.15 } }}
                         >
                           <Checkbox
                             checked={task.is_completed}

@@ -9,7 +9,8 @@ import {
   LogOut,
   Menu,
   X,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Cake
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,7 +22,7 @@ const navigation = [
   { name: "Media Tracker", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },
-  { name: "Birthdays", href: "/birthdays", icon: SettingsIcon },
+  { name: "Birthdays", href: "/birthdays", icon: Cake },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
