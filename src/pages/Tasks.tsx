@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Pin, Pencil } from "lucide-react";
+import { Plus, Trash2, Pin, Pencil, Menu } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -187,6 +187,19 @@ const Tasks = () => {
         />
         
         <div className="flex-1 lg:ml-0">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="touch-manipulation"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Tasks</h1>
+            <div className="w-10" />
+          </div>
           <div className="p-6 border-b border-border">
             <div className="flex items-center justify-between">
               <h1 className="text-2xl font-bold font-heading text-foreground">
@@ -278,7 +291,7 @@ const Tasks = () => {
                         <motion.div
                           key={task.id}
                           id={`task-${task.id}`}
-                          className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out"
+                          className="zen-card p-3 sm:p-4 flex items-start gap-2 sm:gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out"
                           variants={{ 
                             hidden: { opacity: 0, x: -12, scale: 0.97 }, 
                             show: { 
@@ -296,12 +309,12 @@ const Tasks = () => {
                           <Checkbox
                             checked={task.is_completed}
                             onCheckedChange={() => handleToggleTask(task.id, task.is_completed)}
-                            className="flex-shrink-0"
+                            className="flex-shrink-0 mt-0.5 touch-manipulation"
                           />
-                          <div className="flex-1 text-foreground flex flex-col gap-1">
-                            <span className="flex items-center gap-2">
-                              {task.is_pinned && <Pin className="h-3 w-3 text-primary" />}
-                              {task.task_text}
+                          <div className="flex-1 text-foreground flex flex-col gap-1 min-w-0">
+                            <span className="flex items-center gap-2 break-words">
+                              {task.is_pinned && <Pin className="h-3 w-3 text-primary flex-shrink-0" />}
+                              <span className="break-words">{task.task_text}</span>
                             </span>
                             {task.due_date && (
                               <span className={(() => {
@@ -316,29 +329,35 @@ const Tasks = () => {
                               </span>
                             )}
                           </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleTogglePin(task)}
-                            className={"text-muted-foreground hover:text-foreground" + (task.is_pinned ? ' text-primary' : '')}
-                          >
-                            <Pin className={`h-4 w-4 ${task.is_pinned ? 'fill-current' : ''}`} />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => { setEditTask(task); setEditText(task.task_text); setEditDue(task.due_date || ""); }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleDeleteTask(task.id)}
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleTogglePin(task)}
+                              className={"h-8 w-8 p-0 text-muted-foreground hover:text-foreground touch-manipulation" + (task.is_pinned ? ' text-primary' : '')}
+                              title={task.is_pinned ? 'Unpin' : 'Pin'}
+                            >
+                              <Pin className={`h-4 w-4 ${task.is_pinned ? 'fill-current' : ''}`} />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => { setEditTask(task); setEditText(task.task_text); setEditDue(task.due_date || ""); }}
+                              className="h-8 w-8 p-0 touch-manipulation"
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDeleteTask(task.id)}
+                              className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 touch-manipulation"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </motion.div>
                       ))}
                     </motion.div>

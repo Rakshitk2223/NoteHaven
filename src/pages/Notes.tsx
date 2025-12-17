@@ -206,6 +206,17 @@ const Notes = () => {
   // Load selected note into editor (HTML direct)
   useEffect(() => {
     if (!editor) return;
+    
+    // Save any pending changes before switching notes
+    if (titleTimeout) {
+      clearTimeout(titleTimeout);
+      setTitleTimeout(null);
+    }
+    if (contentTimeout) {
+      clearTimeout(contentTimeout);
+      setContentTimeout(null);
+    }
+    
     if (selectedNote) {
       const title = selectedNote.title || '';
     const html = selectedNote.content || '';
@@ -466,13 +477,13 @@ const Notes = () => {
 
   const scheduleTitleSave = useCallback((noteId: number, newValue: string, previous: string) => {
     if (titleTimeout) clearTimeout(titleTimeout);
-    const timeout = setTimeout(() => saveField(noteId, 'title', newValue, previous), 5000);
+    const timeout = setTimeout(() => saveField(noteId, 'title', newValue, previous), 2000);
     setTitleTimeout(timeout);
   }, [titleTimeout, saveField]);
 
   const scheduleContentSave = useCallback((noteId: number, newValue: string, previous: string) => {
     if (contentTimeout) clearTimeout(contentTimeout);
-    const timeout = setTimeout(() => saveField(noteId, 'content', newValue, previous), 5000);
+    const timeout = setTimeout(() => saveField(noteId, 'content', newValue, previous), 2000);
     setContentTimeout(timeout);
   }, [contentTimeout, saveField]);
 
@@ -662,19 +673,21 @@ const Notes = () => {
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
           {isMobileView && (
-            <div className="flex items-center justify-between p-4 border-b border-border bg-background">
+            <div className="sticky top-0 z-30 flex items-center justify-between p-3 sm:p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowNoteList(!showNoteList)}
+                className="touch-manipulation"
               >
                 <Menu className="h-5 w-5" />
               </Button>
-              <h1 className="font-heading font-bold text-lg">Notes</h1>
+              <h1 className="font-heading font-bold text-base sm:text-lg">{showNoteList ? 'All Notes' : (selectedNote?.title || 'Notes')}</h1>
               <Button
                 size="sm"
                 onClick={createNote}
                 disabled={loading}
+                className="touch-manipulation"
               >
                 <Plus className="h-4 w-4" />
               </Button>
@@ -686,22 +699,23 @@ const Notes = () => {
             <div className={`
               ${isMobileView 
                 ? (showNoteList ? 'w-full' : 'hidden') 
-                : 'w-80 border-r border-border'
+                : 'w-72 md:w-80 lg:w-96 border-r border-border'
               }
               flex flex-col bg-card
             `}>
               {/* Desktop Header */}
               {!isMobileView && (
-                <div className="p-4 border-b border-border">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-foreground">Notes</h2>
+                <div className="p-3 md:p-4 border-b border-border sticky top-0 bg-card z-10">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-base md:text-lg font-semibold text-foreground">Notes</h2>
                     <Button
                       size="sm"
                       onClick={createNote}
                       disabled={loading}
+                      className="touch-manipulation"
                     >
-                      <Plus className="h-4 w-4 mr-1" />
-                      New
+                      <Plus className="h-4 w-4 md:mr-1" />
+                      <span className="hidden md:inline">New</span>
                     </Button>
                   </div>
                   {/* Search Bar */}
@@ -711,12 +725,12 @@ const Notes = () => {
                       placeholder="Search notes..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9 pr-8"
+                      className="pl-9 pr-8 text-sm"
                     />
                     {searchQuery && (
                       <button
                         onClick={() => setSearchQuery('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground touch-manipulation"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -865,15 +879,15 @@ const Notes = () => {
                 <>
                   {/* Editor Header (title + actions) */}
                   <div
-                    className="p-4 border-b border-border flex items-center justify-between"
+                    className="sticky top-0 z-20 p-3 sm:p-4 border-b border-border flex items-center justify-between gap-2 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
                   >
                     <Input
                       value={titleValue}
                       onChange={(e) => handleTitleChange(e.target.value)}
                       placeholder="Note title..."
-                      className="text-xl font-semibold"
+                      className="text-base sm:text-lg md:text-xl font-semibold border-0 focus-visible:ring-0 px-0"
                     />
-                    <div className="flex items-center gap-1 ml-3">
+                    <div className="flex items-center gap-0.5 sm:gap-1 ml-2 flex-shrink-0">
                       <div className="flex items-center gap-2 text-xs">
                         {isSaving && <span>Saving...</span>}
                       </div>
@@ -979,20 +993,20 @@ const Notes = () => {
                   </div>
 
                   {/* Editor Content - Tiptap WYSIWYG */}
-                  <div className="flex-1 p-4 flex flex-col gap-4">
-                    <div className="flex-1 flex flex-col border rounded-md overflow-hidden min-h-[calc(100vh-360px)]">
-                      <div className="flex items-center gap-1 flex-wrap border-b border-border p-1 text-xs">
-                        <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)"><Bold className="h-4 w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)"><Italic className="h-4 w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('underline') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline (Ctrl+U)"><UnderlineIcon className="h-4 w-4" /></Button>
-                        <div className="w-px h-5 bg-border mx-1" />
-                        <Button size="sm" variant={editor?.isActive('bulletList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List"><List className="h-4 w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('orderedList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Ordered List"><ListOrdered className="h-4 w-4" /></Button>
-                        <div className="w-px h-5 bg-border mx-1" />
-                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo (Ctrl+Z)"><Undo className="h-4 w-4" /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo (Ctrl+Y)"><Redo className="h-4 w-4" /></Button>
+                  <div className="flex-1 p-2 sm:p-4 flex flex-col gap-3">
+                    <div className="flex-1 flex flex-col border rounded-md overflow-hidden min-h-[calc(100vh-280px)] sm:min-h-[calc(100vh-320px)]">
+                      <div className="sticky top-0 bg-background z-10 flex items-center gap-0.5 sm:gap-1 flex-wrap border-b border-border p-1 text-xs">
+                        <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Bold className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Italic className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('underline') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline (Ctrl+U)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><UnderlineIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <div className="w-px h-4 sm:h-5 bg-border mx-0.5 sm:mx-1" />
+                        <Button size="sm" variant={editor?.isActive('bulletList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><List className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('orderedList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Ordered List" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><ListOrdered className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <div className="w-px h-4 sm:h-5 bg-border mx-0.5 sm:mx-1" />
+                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo (Ctrl+Z)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Undo className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo (Ctrl+Y)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Redo className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
                       </div>
-                      <div className="flex-1 overflow-y-auto p-4 flex">
+                      <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex">
                         {editor && (
                           <EditorContent
                             editor={editor}
@@ -1001,9 +1015,9 @@ const Notes = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center justify-between pt-2 border-t border-border text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2">Autosave every 5s</div>
-                      <div className="px-2 tabular-nums select-none">Words: {wordCount} | Lines: {lineCount}</div>
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-2 pt-2 border-t border-border text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2"><span className="hidden sm:inline">Autosave every 5s</span><span className="sm:hidden">Autosave</span></div>
+                      <div className="px-2 tabular-nums select-none">Words: {wordCount}<span className="hidden sm:inline"> | Lines: {lineCount}</span></div>
                     </div>
                   </div>
                 </>

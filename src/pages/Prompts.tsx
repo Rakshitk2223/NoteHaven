@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Copy, Edit, Trash2, Check, Star, Pin } from "lucide-react";
+import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -252,14 +252,52 @@ const Prompts = () => {
         />
         
         <div className="flex-1 lg:ml-0">
-          <div className="p-6 border-b border-border">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button variant="ghost" size="sm" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="touch-manipulation">
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Prompts</h1>
+            <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="touch-manipulation">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader>
+                  <DialogTitle>{editingPrompt ? 'Edit Prompt' : 'Create New Prompt'}</DialogTitle>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Title</Label>
+                    <Input id="title" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} placeholder="Enter prompt title" required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="prompt_text">Prompt Text</Label>
+                    <Textarea id="prompt_text" value={formData.prompt_text} onChange={(e) => setFormData({ ...formData, prompt_text: e.target.value })} placeholder="Enter your prompt text" rows={6} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="category">Category (optional)</Label>
+                    <Input id="category" value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} placeholder="e.g. Writing, Code, Marketing" />
+                  </div>
+                  <div className="flex justify-end space-x-2 pt-4">
+                    <Button type="button" variant="outline" onClick={handleModalClose}>Cancel</Button>
+                    <Button type="submit">{editingPrompt ? 'Update' : 'Create'}</Button>
+                  </div>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+          
+          <div className="hidden lg:block p-4 sm:p-6 border-b border-border">
             <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold font-heading text-foreground">
+              <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
                 AI Prompts
               </h1>
               <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
                 <DialogTrigger asChild>
-                  <Button className="zen-transition hover:shadow-md">
+                  <Button className="zen-transition hover:shadow-md touch-manipulation">
                     <Plus className="h-4 w-4 mr-2" />
                     Add New Prompt
                   </Button>

@@ -4,7 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Plus, Trash2, Gift, Edit, Search, Cake, Clock } from 'lucide-react';
+import { Plus, Trash2, Gift, Edit, Search, Cake, Clock, Menu } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
@@ -240,52 +240,135 @@ const Birthdays = () => {
     <div className="min-h-screen bg-background">
       <div className="flex">
         <AppSidebar isCollapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-        <div className="flex-1">
-          {/* Header */}
-          <div className="p-6 border-b border-border">
-            <div className="flex items-center justify-between mb-4">
-              <h1 className="text-3xl font-bold font-heading flex items-center gap-2">
-                <Gift className="h-7 w-7"/> Birthdays
-              </h1>
+        <div className="flex-1 lg:ml-0">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button variant="ghost" size="sm" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="touch-manipulation">
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Birthdays</h1>
+            <Dialog open={showModal} onOpenChange={(open) => {
+              setShowModal(open);
+              if (!open) { setEditingId(null); setNewName(''); setSelectedYear(null); setSelectedMonth(null); setSelectedDay(null); }
+            }}>
+              <DialogTrigger asChild>
+                <Button size="sm" onClick={openAddModal} className="touch-manipulation"><Plus className="h-4 w-4" /></Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[500px]">
+                <DialogHeader><DialogTitle>{editingId == null ? 'Add Birthday' : 'Edit Birthday'}</DialogTitle></DialogHeader>
+                <div className="space-y-4 sm:space-y-5 pt-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Name</label>
+                    <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Person's name" className="h-10 sm:h-11" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Date of Birth</label>
+                    <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                      <div className="space-y-1">
+                        <Select value={selectedYear?.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
+                          <SelectTrigger className="h-10 sm:h-11"><SelectValue placeholder="Year" /></SelectTrigger>
+                          <SelectContent className="max-h-[300px]">
+                            {years.map(year => (
+                              <SelectItem key={year} value={year.toString()}>
+                                {year}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <Select 
+                          value={selectedMonth?.toString()} 
+                          onValueChange={(v) => setSelectedMonth(Number(v))}
+                          disabled={!selectedYear}
+                        >
+                          <SelectTrigger className="h-10 sm:h-11">
+                            <SelectValue placeholder="Month" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {months.map(month => (
+                              <SelectItem key={month.value} value={month.value.toString()}>
+                                {month.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <Select 
+                          value={selectedDay?.toString()} 
+                          onValueChange={(v) => setSelectedDay(Number(v))}
+                          disabled={!selectedMonth}
+                        >
+                          <SelectTrigger className="h-10 sm:h-11">
+                            <SelectValue placeholder="Day" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[300px]">
+                            {days.map(day => (
+                              <SelectItem key={day} value={day.toString()}>
+                                {day}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    {selectedYear && selectedMonth && selectedDay && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Selected: {months.find(m => m.value === selectedMonth)?.label} {selectedDay}, {selectedYear}
+                      </p>
+                    )}
+                  </div>
+                  
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
+                    <Button 
+                      disabled={!newName.trim() || !selectedYear || !selectedMonth || !selectedDay} 
+                      onClick={handleAdd}
+                    >
+                      {editingId == null ? 'Add Birthday' : 'Update Birthday'}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+          
+          {/* Desktop Header */}
+          <div className="hidden lg:flex items-center justify-between p-6 border-b border-border">
+            <h1 className="text-2xl font-bold font-heading text-foreground">Birthdays</h1>
+            <div className="flex items-center gap-4">
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input 
+                  placeholder="Search birthdays by name..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
               <Dialog open={showModal} onOpenChange={(open) => {
                 setShowModal(open);
-                if (!open) {
-                  setEditingId(null);
-                  setNewName('');
-                  setSelectedYear(null);
-                  setSelectedMonth(null);
-                  setSelectedDay(null);
-                }
+                if (!open) { setEditingId(null); setNewName(''); setSelectedYear(null); setSelectedMonth(null); setSelectedDay(null); }
               }}>
                 <DialogTrigger asChild>
-                  <Button onClick={openAddModal}><Plus className="h-4 w-4 mr-2"/>Add Birthday</Button>
+                  <Button onClick={openAddModal}><Plus className="h-4 w-4 mr-2" />Add Birthday</Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[500px]">
-                  <DialogHeader>
-                    <DialogTitle>{editingId == null ? 'Add Birthday' : 'Edit Birthday'}</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-5 pt-4">
+                  <DialogHeader><DialogTitle>{editingId == null ? 'Add Birthday' : 'Edit Birthday'}</DialogTitle></DialogHeader>
+                  <div className="space-y-4 sm:space-y-5 pt-4">
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Name</label>
-                      <Input 
-                        value={newName} 
-                        onChange={e => setNewName(e.target.value)} 
-                        placeholder="Person's name" 
-                        className="h-11"
-                      />
+                      <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Person's name" className="h-10 sm:h-11" />
                     </div>
-                    
                     <div className="space-y-2">
                       <label className="text-sm font-medium">Date of Birth</label>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-3 gap-2 sm:gap-3">
                         <div className="space-y-1">
-                          <Select 
-                            value={selectedYear?.toString()} 
-                            onValueChange={(v) => setSelectedYear(Number(v))}
-                          >
-                            <SelectTrigger className="h-11">
-                              <SelectValue placeholder="Year" />
-                            </SelectTrigger>
+                          <Select value={selectedYear?.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
+                            <SelectTrigger className="h-10 sm:h-11"><SelectValue placeholder="Year" /></SelectTrigger>
                             <SelectContent className="max-h-[300px]">
                               {years.map(year => (
                                 <SelectItem key={year} value={year.toString()}>
@@ -302,7 +385,7 @@ const Birthdays = () => {
                             onValueChange={(v) => setSelectedMonth(Number(v))}
                             disabled={!selectedYear}
                           >
-                            <SelectTrigger className="h-11">
+                            <SelectTrigger className="h-10 sm:h-11">
                               <SelectValue placeholder="Month" />
                             </SelectTrigger>
                             <SelectContent>
@@ -321,7 +404,7 @@ const Birthdays = () => {
                             onValueChange={(v) => setSelectedDay(Number(v))}
                             disabled={!selectedMonth}
                           >
-                            <SelectTrigger className="h-11">
+                            <SelectTrigger className="h-10 sm:h-11">
                               <SelectValue placeholder="Day" />
                             </SelectTrigger>
                             <SelectContent className="max-h-[300px]">
@@ -353,17 +436,6 @@ const Birthdays = () => {
                   </div>
                 </DialogContent>
               </Dialog>
-            </div>
-            
-            {/* Search */}
-            <div className="relative max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                placeholder="Search birthdays by name..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
             </div>
           </div>
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon } from "lucide-react";
+import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -34,7 +40,7 @@ interface MediaItem {
   title: string;
   // Restrict to the allowed canonical set while keeping string for legacy DB rows
   type: 'Movie' | 'Series' | 'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'KDrama' | 'JDrama' | string;
-  status: 'Active' | 'Completed' | 'Planned' | string;
+  status: 'Watching' | 'Reading' | 'Plan to Watch' | 'Plan to Read' | 'Completed' | string;
   rating?: number;
   current_season?: number;
   current_episode?: number;
@@ -91,8 +97,8 @@ const MediaTracker = () => {
   const readableTypes: MediaItem['type'][] = ['Manga', 'Manhwa', 'Manhua'];
   const watchableTypes: MediaItem['type'][] = ['Series', 'Anime', 'KDrama', 'JDrama'];
 
-  // Normalize legacy status values to new simplified ones
-  const normalizeStatus = (status: string): string => {
+  // Map status to display category for UI organization
+  const getStatusCategory = (status: string): string => {
     switch (status) {
       case 'Watching':
       case 'Reading':
@@ -103,7 +109,7 @@ const MediaTracker = () => {
       case 'Completed':
         return 'Completed';
       default:
-        return status;
+        return 'Active';
     }
   };
 
@@ -135,7 +141,16 @@ const MediaTracker = () => {
         query = query.eq('user_id', user.id);
       }
       if (filterType !== 'All') query = query.eq('type', filterType);
-      if (filterStatus !== 'All') query = query.eq('status', filterStatus);
+      if (filterStatus !== 'All') {
+        // Map UI filter categories to actual database statuses
+        if (filterStatus === 'Active') {
+          query = query.in('status', ['Watching', 'Reading']);
+        } else if (filterStatus === 'Planned') {
+          query = query.in('status', ['Plan to Watch', 'Plan to Read']);
+        } else {
+          query = query.eq('status', filterStatus);
+        }
+      }
       if (searchTerm.trim() !== '') query = query.ilike('title', `%${searchTerm.trim()}%`);
       const { data, error, count } = await query;
       if (error) throw error;
@@ -169,7 +184,7 @@ const MediaTracker = () => {
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
     mediaItems.forEach(item => {
-      const key = normalizeStatus(item.status || 'Uncategorized');
+      const key = getStatusCategory(item.status || 'Active');
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
     });
@@ -193,6 +208,20 @@ const MediaTracker = () => {
   // Optimistic local cache update: force refetch for simplicity
   refetch();
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
+    } catch (e:any) {
+      toast({ title: 'Update failed', description: e.message || 'Error', variant: 'destructive' });
+    } finally {
+      setUpdatingIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+    }
+  };
+
+  const handleQuickStatusChange = async (item: MediaItem, newStatus: string) => {
+    setUpdatingIds(prev => new Set(prev).add(item.id));
+    try {
+      const { error } = await supabase.from('media_tracker').update({ status: newStatus }).eq('id', item.id);
+      if (error) throw error;
+      refetch();
+      toast({ title: 'Status updated', description: `Changed to ${newStatus}` });
     } catch (e:any) {
       toast({ title: 'Update failed', description: e.message || 'Error', variant: 'destructive' });
     } finally {
@@ -229,10 +258,14 @@ const MediaTracker = () => {
       
       const isReadable = readableTypes.includes(quickAddType);
       const isWatchable = watchableTypes.includes(quickAddType);
+      
+      // Determine default status based on type
+      const defaultStatus = isReadable ? 'Reading' : 'Watching';
+      
       const mediaData: any = {
         title: quickAddTitle.trim(),
         type: quickAddType,
-        status: 'Active',
+        status: defaultStatus,
         user_id: user.id
       };
       
@@ -407,17 +440,18 @@ const MediaTracker = () => {
     }
   };
 
-  const getStatusColor = (status: MediaItem['status']) => {
+  const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Active': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
-      case 'Completed': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-      case 'Planned': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
-      // Legacy status mappings for backward compatibility
       case 'Watching':
-      case 'Reading': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
-      case 'Plan to Read':
-      case 'Plan to Watch': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
-      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+      case 'Reading': 
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+      case 'Plan to Watch':
+      case 'Plan to Read': 
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
+      case 'Completed': 
+        return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+      default: 
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
     }
   };
 
@@ -547,7 +581,41 @@ const MediaTracker = () => {
               >
                 <div className="flex items-start justify-between mb-3">
                   <Badge className={getTypeColor(item.type)}>{item.type}</Badge>
-                  <Badge className={getStatusColor(normalizeStatus(item.status))}>{normalizeStatus(item.status)}</Badge>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="h-6 px-2 gap-1" disabled={updatingIds.has(item.id)}>
+                        <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
+                        <ChevronDown className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {readableTypes.includes(item.type) ? (
+                        <>
+                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Reading')}>
+                            Reading
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Plan to Read')}>
+                            Plan to Read
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Completed')}>
+                            Completed
+                          </DropdownMenuItem>
+                        </>
+                      ) : (
+                        <>
+                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Watching')}>
+                            Watching
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Plan to Watch')}>
+                            Plan to Watch
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Completed')}>
+                            Completed
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
                 <h3 className="text-lg font-semibold text-foreground mb-2 truncate">{item.title}</h3>
                 {item.rating && (
@@ -662,7 +730,7 @@ const MediaTracker = () => {
             <TableRow key={item.id}>
               <TableCell id={`media-${item.id}`} className="font-medium">{item.title}</TableCell>
               <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
-              <TableCell><Badge className={getStatusColor(normalizeStatus(item.status))}>{normalizeStatus(item.status)}</Badge></TableCell>
+              <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
               <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
@@ -750,9 +818,30 @@ const MediaTracker = () => {
         />
         
         <div className="flex-1 lg:ml-0">
-          <div className="p-6 border-b border-border bg-card">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="touch-manipulation"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Media Tracker</h1>
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 p-0 touch-manipulation">
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant={viewMode === 'list' ? 'default' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 p-0 touch-manipulation">
+                <ListIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          
+          <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
             <div className="flex items-center justify-between mb-4">
-              <h1 className="text-2xl font-bold font-heading text-foreground">
+              <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
                 Media Tracker
               </h1>
               <div className="flex items-center gap-2">
@@ -825,9 +914,27 @@ const MediaTracker = () => {
                             <SelectValue placeholder="Select status" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="Active">Active</SelectItem>
-                            <SelectItem value="Planned">Planned</SelectItem>
-                            <SelectItem value="Completed">Completed</SelectItem>
+                            {readableTypes.includes(formData.type) ? (
+                              <>
+                                <SelectItem value="Reading">Reading</SelectItem>
+                                <SelectItem value="Plan to Read">Plan to Read</SelectItem>
+                                <SelectItem value="Completed">Completed</SelectItem>
+                              </>
+                            ) : watchableTypes.includes(formData.type) || formData.type === 'Movie' ? (
+                              <>
+                                <SelectItem value="Watching">Watching</SelectItem>
+                                <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
+                                <SelectItem value="Completed">Completed</SelectItem>
+                              </>
+                            ) : (
+                              <>
+                                <SelectItem value="Watching">Watching</SelectItem>
+                                <SelectItem value="Reading">Reading</SelectItem>
+                                <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
+                                <SelectItem value="Plan to Read">Plan to Read</SelectItem>
+                                <SelectItem value="Completed">Completed</SelectItem>
+                              </>
+                            )}
                           </SelectContent>
                         </Select>
                       </div>
@@ -905,7 +1012,7 @@ const MediaTracker = () => {
             </div>
 
             {/* Quick Add Bar */}
-            <div className="flex gap-2 items-end">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
               <div className="flex-1">
                 <Label className="text-sm text-muted-foreground mb-1">Quick Add</Label>
                 <Input
@@ -917,7 +1024,7 @@ const MediaTracker = () => {
                   }}
                 />
               </div>
-              <div className="w-40">
+              <div className="w-full sm:w-40">
                 <Label className="text-sm text-muted-foreground mb-1">Type</Label>
                 <Select value={quickAddType} onValueChange={(value) => setQuickAddType(value as MediaItem['type'])}>
                   <SelectTrigger>
@@ -935,7 +1042,7 @@ const MediaTracker = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="w-32">
+              <div className="w-full sm:w-32">
                 <Label className="text-sm text-muted-foreground mb-1">
                   {readableTypes.includes(quickAddType) ? 'Chapter' : watchableTypes.includes(quickAddType) ? 'Episode' : 'Progress'}
                 </Label>
@@ -950,31 +1057,31 @@ const MediaTracker = () => {
                   }}
                 />
               </div>
-              <Button onClick={handleQuickAdd} className="h-10">
+              <Button onClick={handleQuickAdd} className="h-10 w-full sm:w-auto touch-manipulation">
                 <Plus className="h-4 w-4 mr-2" />
                 Add
               </Button>
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {/* Search & Filters Collapsible */}
-            <div className="mb-6 space-y-4">
+            <div className="mb-6 space-y-3">
               <div className="flex items-center gap-2">
-                <Search className="h-4 w-4 text-muted-foreground" />
+                <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <Input
                   placeholder="Search titles..."
                   value={typedSearchTerm}
                   onChange={handleSearchChange}
-                  className="max-w-md"
+                  className="flex-1"
                 />
               </div>
               
-              <div className="flex flex-wrap gap-3 items-center">
-                <span className="text-sm font-medium text-muted-foreground">Filters:</span>
+              <div className="flex flex-wrap gap-2 sm:gap-3 items-center">
+                <span className="text-sm font-medium text-muted-foreground hidden sm:inline">Filters:</span>
                 
                 <Select value={filterType} onValueChange={setFilterType}>
-                  <SelectTrigger className="w-32">
+                  <SelectTrigger className="w-32 sm:w-32">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -991,7 +1098,7 @@ const MediaTracker = () => {
                 </Select>
 
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="w-36">
+                  <SelectTrigger className="w-32 sm:w-36">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1003,7 +1110,7 @@ const MediaTracker = () => {
                 </Select>
 
                 <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
-                  <SelectTrigger className="w-32">
+                  <SelectTrigger className="w-28 sm:w-32">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1025,7 +1132,7 @@ const MediaTracker = () => {
                   size="sm"
                   disabled={isImporting}
                   onClick={() => fileInputRef.current?.click()}
-                  className="ml-auto"
+                  className="ml-auto touch-manipulation"
                 >
                   <Upload className="h-4 w-4 mr-2" />
                   {isImporting ? 'Importing...' : 'Import'}

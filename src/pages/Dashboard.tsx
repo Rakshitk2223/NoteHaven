@@ -477,16 +477,25 @@ const Dashboard = () => {
         
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
-          <div className="lg:hidden flex items-center justify-between p-4 border-b border-border bg-background">
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="touch-manipulation"
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <h1 className="font-heading font-bold text-lg">Dashboard</h1>
-            <div className="w-10" />
+            <h1 className="font-heading font-bold text-base sm:text-lg">Dashboard</h1>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchDashboardData}
+              disabled={isRefreshing}
+              className="touch-manipulation"
+            >
+              <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </Button>
           </div>
 
           {/* Desktop Header */}
@@ -531,9 +540,9 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <div className="p-6 space-y-6 overflow-x-hidden" ref={containerRef}>
+          <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 overflow-x-hidden" ref={containerRef}>
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {statWidgets.map((widget, index) => (
                 <a 
                   key={index}
@@ -924,34 +933,224 @@ const Dashboard = () => {
               </div>
               </GridLayout>
             </div>
-            {/* Fallback stacked layout for mobile */}
-            <div className="lg:hidden space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                {statWidgets.map((w, i) => (
-                  <a key={i} href={w.link} className="zen-card p-3 block">
-                    <div className="text-xs text-muted-foreground">{w.title}</div>
-                    <div className="text-lg font-bold">{loading ? '—' : w.value}</div>
-                  </a>
-                ))}
-              </div>
-              <div className="zen-card p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-sm">Pending Tasks</h3>
-                  <Button size="sm" variant="ghost" className="h-7" onClick={handleViewAllTasks}>View</Button>
+            {/* Fallback stacked layout for mobile/tablet */}
+            <div className="lg:hidden space-y-4">
+              {/* Pending Tasks */}
+              <div className="zen-card zen-shadow p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-base flex items-center gap-2">
+                    <Check className="h-4 w-4" />
+                    Pending Tasks
+                  </h3>
+                  <Button size="sm" variant="ghost" className="h-8 touch-manipulation" onClick={handleViewAllTasks}>View All</Button>
                 </div>
-                {/* Minimal mobile list */}
                 <div className="space-y-2">
                   {loading ? (
-                    [...Array(3)].map((_,i)=>(<div key={i} className="h-3 bg-muted rounded"/>))
+                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
                   ) : pendingTasks.length === 0 ? (
-                    <div className="text-xs text-muted-foreground">All done</div>
+                    <div className="text-center py-6">
+                      <Check className="h-8 w-8 text-green-500 mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">All tasks completed!</p>
+                    </div>
                   ) : (
-                    pendingTasks.slice(0,3).map(t => (
-                      <div key={t.id} className="text-sm">{t.task_text}</div>
+                    pendingTasks.map(t => (
+                      <div key={t.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors touch-manipulation">
+                        <Checkbox checked={false} onCheckedChange={() => handleTaskComplete(t.id)} className="flex-shrink-0" />
+                        <button className="flex-1 text-left text-sm" onClick={() => navigate(`/tasks?task=${t.id}`)}>{t.task_text}</button>
+                      </div>
                     ))
                   )}
                 </div>
               </div>
+              
+              {/* Recent Notes */}
+              <div className="zen-card zen-shadow p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-base flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Recent Notes
+                  </h3>
+                  <Button size="sm" variant="ghost" className="h-8 touch-manipulation" onClick={() => navigate('/notes')}>View All</Button>
+                </div>
+                <div className="space-y-2">
+                  {loading ? (
+                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
+                  ) : recentNotes.length === 0 ? (
+                    <div className="text-center py-6">
+                      <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">No notes yet</p>
+                    </div>
+                  ) : (
+                    recentNotes.map(note => (
+                      <div key={note.id} onClick={() => handleNoteClick(note.id)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer touch-manipulation">
+                        <p className="font-medium text-sm mb-1" dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }} />
+                        <p className="text-xs text-muted-foreground">{new Date(note.updated_at).toLocaleDateString()}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              
+              {/* Currently Watching */}
+              <div className="zen-card zen-shadow p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-base flex items-center gap-2">
+                    <Play className="h-4 w-4" />
+                    Watching
+                  </h3>
+                  <Button size="sm" variant="ghost" className="h-8 touch-manipulation" onClick={() => handleMediaClick()}>View All</Button>
+                </div>
+                <div className="space-y-2">
+                  {loading ? (
+                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
+                  ) : watchingMedia.length === 0 ? (
+                    <div className="text-center py-6">
+                      <Play className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">Nothing watching</p>
+                    </div>
+                  ) : (
+                    watchingMedia.map(item => (
+                      <div key={item.id} onClick={() => handleMediaClick(item.id)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer touch-manipulation">
+                        <p className="font-medium text-sm mb-1">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.type}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              
+              {/* Favorite Prompts */}
+              <div className="zen-card zen-shadow p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-base flex items-center gap-2">
+                    <Star className="h-4 w-4" />
+                    Favorites
+                  </h3>
+                  <Button size="sm" variant="ghost" className="h-8 touch-manipulation" onClick={handlePromptClick}>View All</Button>
+                </div>
+                <div className="space-y-2">
+                  {loading ? (
+                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
+                  ) : favoritePrompts.length === 0 ? (
+                    <div className="text-center py-6">
+                      <Star className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">No favorites yet</p>
+                    </div>
+                  ) : (
+                    favoritePrompts.map(prompt => (
+                      <div key={prompt.id} onClick={handlePromptClick} className="p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer touch-manipulation">
+                        <p className="font-medium text-sm">{prompt.title}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              
+              {/* Pinned Items */}
+              {pinnedItems.length > 0 && (
+                <div className="zen-card zen-shadow p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-base flex items-center gap-2">
+                      <Pin className="h-4 w-4" />
+                      Pinned
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    {pinnedItems.map(item => (
+                      <button key={item.id} onClick={() => handlePinnedItemClick(item)} className="w-full text-left p-2 rounded-lg hover:bg-muted/50 transition-colors touch-manipulation flex items-center gap-2">
+                        <span className="text-xs uppercase text-muted-foreground">{item.type}</span>
+                        <span className="flex-1 text-sm truncate" dangerouslySetInnerHTML={{ __html: item.title }} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Countdowns */}
+              {countdowns.length > 0 && (
+                <div className="zen-card zen-shadow p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-base flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Countdowns
+                    </h3>
+                    <Dialog open={showCountdownModal} onOpenChange={setShowCountdownModal}>
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm" className="touch-manipulation"><Plus className="h-4 w-4" /></Button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-[400px]">
+                        <DialogHeader><DialogTitle>Add Countdown</DialogTitle></DialogHeader>
+                        <div className="space-y-4">
+                          <div className="space-y-1">
+                            <label className="text-sm font-medium">Event Name</label>
+                            <Input value={newCountdown.event_name} onChange={e => setNewCountdown(c => ({ ...c, event_name: e.target.value }))} placeholder="e.g. Launch Day" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-sm font-medium">Event Date</label>
+                            <Input type="date" value={newCountdown.event_date} onChange={e => setNewCountdown(c => ({ ...c, event_date: e.target.value }))} />
+                          </div>
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setShowCountdownModal(false)}>Cancel</Button>
+                            <Button size="sm" onClick={handleAddCountdown} disabled={!newCountdown.event_name.trim() || !newCountdown.event_date}>Save</Button>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                  <div className="space-y-2">
+                    {countdowns.map(c => {
+                      const days = Math.max(0, Math.ceil((new Date(c.event_date).getTime() - Date.now()) / (1000*60*60*24)));
+                      return (
+                        <div key={c.id} className="flex items-center gap-3 text-sm">
+                          <div className="flex-1">
+                            <p className="font-medium truncate">{c.event_name}</p>
+                            <p className="text-xs text-muted-foreground">{days} day{days!==1?'s':''} remaining</p>
+                          </div>
+                          <Button variant="ghost" size="icon" onClick={() => handleDeleteCountdown(c.id)} className="h-8 w-8 text-destructive touch-manipulation">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              
+              {/* Birthdays */}
+              {birthdays.length > 0 && (
+                <div className="zen-card zen-shadow p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-base flex items-center gap-2">
+                      <Gift className="h-4 w-4" />
+                      Birthdays
+                    </h3>
+                    <Button size="sm" variant="ghost" className="h-8 touch-manipulation" onClick={() => navigate('/birthdays')}>View All</Button>
+                  </div>
+                  <div className="space-y-2">
+                    {birthdays
+                      .map(b => {
+                        const base = new Date(b.date_of_birth + 'T00:00:00');
+                        const now = new Date();
+                        const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
+                        if (target.getTime() < now.getTime()) target.setFullYear(now.getFullYear()+1);
+                        const days = Math.ceil((target.getTime() - now.getTime())/(1000*60*60*24));
+                        let message: string;
+                        if (days === 0) message = `${b.name}'s birthday is today! 🎉`;
+                        else if (days === 1) message = `${b.name}'s birthday is tomorrow!`;
+                        else if (days <= 7) message = `${b.name}'s birthday is soon! (${days} days)`;
+                        else message = `${b.name}'s birthday is in ${days} days`;
+                        return { ...b, days, message };
+                      })
+                      .sort((a,b) => a.days - b.days)
+                      .slice(0,5)
+                      .map(b => (
+                        <div key={b.id} className="text-sm">
+                          <span className="font-medium block truncate">{b.message}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

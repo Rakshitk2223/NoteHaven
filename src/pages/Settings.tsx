@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
+import { Menu } from 'lucide-react';
 
 const Settings = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -128,13 +129,22 @@ const Settings = () => {
     <div className="min-h-screen bg-background">
       <div className="flex">
         <AppSidebar isCollapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-        <div className="flex-1">
-          <div className="p-6 border-b border-border flex items-center justify-between">
-            <h1 className="text-2xl font-bold font-heading">Settings</h1>
-            <div className="text-sm text-muted-foreground">Manage your account & preferences</div>
+        <div className="flex-1 lg:ml-0">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button variant="ghost" size="sm" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="touch-manipulation">
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Settings</h1>
+            <div className="w-10" />
+          </div>
+          
+          <div className="hidden lg:block p-4 sm:p-6 border-b border-border">
+            <h1 className="text-xl sm:text-2xl font-bold font-heading">Settings</h1>
+            <p className="text-sm text-muted-foreground">Manage your account & preferences</p>
           </div>
 
-          <div className="p-6 space-y-8 max-w-3xl">
+          <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 max-w-3xl">
             {/* Appearance */}
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Appearance</h2>
