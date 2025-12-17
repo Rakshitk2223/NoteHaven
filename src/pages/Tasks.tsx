@@ -11,6 +11,7 @@ import { motion } from "framer-motion";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 interface Task {
   id: number;
@@ -36,6 +37,7 @@ const Tasks = () => {
   const [editText, setEditText] = useState("");
   const [editDue, setEditDue] = useState("");
   const [editDueObj, setEditDueObj] = useState<Date | undefined>(undefined);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
 
   // Fetch tasks on component mount
   useEffect(() => {
@@ -155,7 +157,10 @@ const Tasks = () => {
     }
   };
 
-  const handleDeleteTask = async (taskId: number) => {
+  const handleDeleteTask = async () => {
+    const taskId = deleteConfirm.id;
+    if (!taskId) return;
+
     try {
       const { error } = await supabase
         .from('tasks')
@@ -168,10 +173,13 @@ const Tasks = () => {
 
       // Remove the task from the local state immediately
       setTasks(tasks.filter(task => task.id !== taskId));
+      toast({ title: 'Deleted', description: 'Task deleted successfully' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete task';
       setError(message);
-      toast({ title: 'Error', description: 'Failed to delete task. Please try again.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Failed to delete task', variant: 'destructive' });
+    } finally {
+      setDeleteConfirm({ open: false, id: null });
     }
   };
 
@@ -217,26 +225,23 @@ const Tasks = () => {
 
             {/* Add Task Form */}
             <div className="mb-8">
-              <form onSubmit={handleAddTask} className="flex flex-col md:flex-row gap-3">
-                <div className="flex-1 flex gap-3">
-                  <Input
-                    value={newTaskText}
-                    onChange={(e) => setNewTaskText(e.target.value)}
-                    placeholder="Add a new task..."
-                    className="flex-1"
-                    disabled={loading}
+              <form onSubmit={handleAddTask} className="flex flex-col sm:flex-row gap-3">
+                <Input
+                  value={newTaskText}
+                  onChange={(e) => setNewTaskText(e.target.value)}
+                  placeholder="Add a new task..."
+                  className="flex-1"
+                  disabled={loading}
+                />
+                <div className="w-full sm:w-48">
+                  <DatePicker
+                    date={newTaskDueObj}
+                    setDate={(d) => { setNewTaskDueObj(d); setNewTaskDue(d ? d.toISOString().slice(0,10) : ''); }}
+                    placeholder="Due date"
+                    showClear={true}
                   />
-                  <div className="w-40">
-                    <DatePicker
-                      date={newTaskDueObj}
-                      setDate={(d) => { setNewTaskDueObj(d); setNewTaskDue(d ? d.toISOString().slice(0,10) : ''); }}
-                      fromYear={new Date().getFullYear() - 1}
-                      toYear={new Date().getFullYear() + 5}
-                      placeholder="Due date"
-                    />
-                  </div>
                 </div>
-                <Button type="submit" disabled={!newTaskText.trim() || loading} className="self-start md:self-auto">
+                <Button type="submit" disabled={!newTaskText.trim() || loading} className="w-full sm:w-auto whitespace-nowrap">
                   <Plus className="h-4 w-4 mr-2" />
                   Add Task
                 </Button>
@@ -351,7 +356,7 @@ const Tasks = () => {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => handleDeleteTask(task.id)}
+                              onClick={() => setDeleteConfirm({ open: true, id: task.id })}
                               className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 touch-manipulation"
                               title="Delete"
                             >
@@ -436,7 +441,7 @@ const Tasks = () => {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => handleDeleteTask(task.id)}
+                            onClick={() => setDeleteConfirm({ open: true, id: task.id })}
                             className="text-destructive hover:text-destructive hover:bg-destructive/10"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -466,9 +471,8 @@ const Tasks = () => {
               <DatePicker
                 date={editDueObj}
                 setDate={(d) => { setEditDueObj(d); setEditDue(d ? d.toISOString().slice(0,10) : ''); }}
-                fromYear={new Date().getFullYear() - 1}
-                toYear={new Date().getFullYear() + 5}
-                placeholder="Pick a date"
+                placeholder="No due date"
+                showClear={true}
               />
             </div>
             <div className="flex justify-end gap-2">
@@ -489,6 +493,14 @@ const Tasks = () => {
           </div>
         </DialogContent>
       </Dialog>
+      
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
+        onConfirm={handleDeleteTask}
+        title="Delete Task"
+        description="Are you sure you want to delete this task? This action cannot be undone."
+      />
     </div>
   );
 };

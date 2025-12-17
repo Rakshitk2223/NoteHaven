@@ -33,6 +33,7 @@ import { motion } from "framer-motion";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useInView } from "react-intersection-observer";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 interface MediaItem {
   id: number;
@@ -86,6 +87,7 @@ const MediaTracker = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   // Save view mode changes
   useEffect(() => {
     try {
@@ -378,10 +380,9 @@ const MediaTracker = () => {
     }
   };
 
-  const handleDeleteMedia = async (id: number) => {
-    if (!window.confirm('Are you sure you want to delete this media item?')) {
-      return;
-    }
+  const handleDeleteMedia = async () => {
+    const id = deleteConfirm.id;
+    if (!id) return;
 
     try {
       const { error } = await supabase
@@ -393,9 +394,13 @@ const MediaTracker = () => {
         throw error;
       }
 
-  refetch();
+      refetch();
+      toast({ title: 'Deleted', description: 'Media item deleted successfully' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete media item');
+      toast({ title: 'Error', description: 'Failed to delete media item', variant: 'destructive' });
+    } finally {
+      setDeleteConfirm({ open: false, id: null });
     }
   };
 
@@ -697,7 +702,7 @@ const MediaTracker = () => {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleDeleteMedia(item.id)}
+                    onClick={() => setDeleteConfirm({ open: true, id: item.id })}
                     className="text-destructive hover:text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -797,7 +802,7 @@ const MediaTracker = () => {
                   <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)}>
                     <Edit className="h-4 w-4 mr-1" /> Edit
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => handleDeleteMedia(item.id)} className="text-destructive hover:text-destructive">
+                  <Button size="sm" variant="outline" onClick={() => setDeleteConfirm({ open: true, id: item.id })} className="text-destructive hover:text-destructive">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -1190,6 +1195,14 @@ const MediaTracker = () => {
           </div>
         </div>
       </div>
+      
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
+        onConfirm={handleDeleteMedia}
+        title="Delete Media Item"
+        description="Are you sure you want to delete this media item? This action cannot be undone."
+      />
     </div>
   );
 };

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Plus, Trash2, Gift, Edit, Search, Cake, Clock, Menu } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 
 interface Birthday { id: number; name: string; date_of_birth: string; }
 
@@ -23,6 +24,7 @@ const Birthdays = () => {
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   
   const { toast } = useToast();
 
@@ -86,7 +88,10 @@ const Birthdays = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async () => {
+    const id = deleteConfirm.id;
+    if (!id) return;
+
     try {
       const { error } = await supabase.from('birthdays').delete().eq('id', id);
       if (error) throw error;
@@ -94,6 +99,8 @@ const Birthdays = () => {
       toast({ title: 'Birthday deleted', variant: 'default' });
     } catch (e:any) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setDeleteConfirm({ open: false, id: null });
     }
   };
 
@@ -225,7 +232,7 @@ const Birthdays = () => {
             <Button 
               size="icon" 
               variant="ghost" 
-              onClick={() => handleDelete(birthday.id)} 
+              onClick={() => setDeleteConfirm({ open: true, id: birthday.id })} 
               className="h-9 w-9 text-destructive hover:bg-destructive/10"
             >
               <Trash2 className="h-4 w-4" />
@@ -528,6 +535,14 @@ const Birthdays = () => {
           </div>
         </div>
       </div>
+      
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
+        onConfirm={handleDelete}
+        title="Delete Birthday"
+        description="Are you sure you want to delete this birthday? This action cannot be undone."
+      />
     </div>
   );
 };

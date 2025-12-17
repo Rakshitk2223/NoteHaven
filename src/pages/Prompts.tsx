@@ -14,6 +14,7 @@ import {
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
@@ -40,6 +41,7 @@ const Prompts = () => {
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [formData, setFormData] = useState({ title: "", prompt_text: "", category: "" });
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   const { toast } = useToast();
 
   // Fetch prompts on component mount
@@ -139,10 +141,9 @@ const Prompts = () => {
     }
   };
 
-  const handleDeletePrompt = async (id: number) => {
-    if (!window.confirm('Are you sure you want to delete this prompt?')) {
-      return;
-    }
+  const handleDeletePrompt = async () => {
+    const id = deleteConfirm.id;
+    if (!id) return;
 
     try {
       const { error } = await supabase
@@ -155,10 +156,13 @@ const Prompts = () => {
       }
 
       setPrompts(prompts.filter(prompt => prompt.id !== id));
+      toast({ title: 'Deleted', description: 'Prompt deleted successfully' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to delete prompt';
       setError(message);
       toast({ title: 'Error', description: 'Failed to delete prompt.', variant: 'destructive' });
+    } finally {
+      setDeleteConfirm({ open: false, id: null });
     }
   };
 
@@ -504,7 +508,7 @@ const Prompts = () => {
                        <Button
                          size="sm"
                          variant="outline"
-                         onClick={() => handleDeletePrompt(prompt.id)}
+                         onClick={() => setDeleteConfirm({ open: true, id: prompt.id })}
                          className="text-destructive hover:text-destructive"
                        >
                          <Trash2 className="h-4 w-4" />
@@ -517,6 +521,14 @@ const Prompts = () => {
           </div>
         </div>
       </div>
+      
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
+        onConfirm={handleDeletePrompt}
+        title="Delete Prompt"
+        description="Are you sure you want to delete this prompt? This action cannot be undone."
+      />
     </div>
   );
 };

@@ -434,26 +434,13 @@ const Notes = () => {
               : serverNote.content !== previous;
               
             if (hasRealConflict) {
-              const shouldOverwrite = window.confirm(
-                'This note was modified by someone else. Your changes will overwrite theirs.\n\n' +
-                'Click OK to save your changes anyway, or Cancel to reload the note.'
-              );
-              
-              if (!shouldOverwrite) {
-                // Reload the note from server
-                setTitleValue(serverNote.title || '');
-                setContentValue(serverNote.content || '');
-                setLastServerUpdate(serverNote.updated_at);
-                if (field === 'content') {
-                  editor?.commands.setContent(serverNote.content || '');
-                }
-                toast({ 
-                  title: 'Note reloaded', 
-                  description: 'Your unsaved changes were discarded to prevent conflicts.',
-                  variant: 'default'
-                });
-                return;
-              }
+              // Just show a toast notification instead of blocking confirmation
+              toast({ 
+                title: 'Note conflict detected', 
+                description: 'This note was modified elsewhere. Saving your changes anyway.', 
+                variant: 'default' 
+              });
+              // Continue with save
             }
           }
         }

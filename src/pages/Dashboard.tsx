@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
@@ -64,6 +65,7 @@ const Dashboard = () => {
   const [birthdays, setBirthdays] = useState<Birthday[]>([]);
   const [showCountdownModal, setShowCountdownModal] = useState(false);
   const [newCountdown, setNewCountdown] = useState({ event_name: '', event_date: '' });
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   const [stats, setStats] = useState({
     prompts: 0,
     media: 0,
@@ -358,9 +360,18 @@ const Dashboard = () => {
     }
   };
 
-  const handleDeleteCountdown = async (id: number) => {
+  const handleDeleteCountdown = async () => {
+    const id = deleteConfirm.id;
+    if (!id) return;
+
     const { error } = await supabase.from('countdowns').delete().eq('id', id);
-    if (!error) setCountdowns(prev => prev.filter(c => c.id !== id));
+    if (!error) {
+      setCountdowns(prev => prev.filter(c => c.id !== id));
+      toast({ title: 'Deleted', description: 'Countdown deleted successfully' });
+    } else {
+      toast({ title: 'Error', description: 'Failed to delete countdown', variant: 'destructive' });
+    }
+    setDeleteConfirm({ open: false, id: null });
   };
 
   const handleTaskComplete = async (taskId: number) => {
@@ -882,7 +893,7 @@ const Dashboard = () => {
                             <p className="font-medium text-foreground truncate">{c.event_name}</p>
                             <p className="text-xs text-muted-foreground">{days} day{days!==1?'s':''} remaining</p>
                           </div>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteCountdown(c.id)} className="h-6 w-6 text-destructive hover:text-destructive">
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteConfirm({ open: true, id: c.id })} className="h-6 w-6 text-destructive hover:text-destructive">
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -1106,7 +1117,7 @@ const Dashboard = () => {
                             <p className="font-medium truncate">{c.event_name}</p>
                             <p className="text-xs text-muted-foreground">{days} day{days!==1?'s':''} remaining</p>
                           </div>
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteCountdown(c.id)} className="h-8 w-8 text-destructive touch-manipulation">
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteConfirm({ open: true, id: c.id })} className="h-8 w-8 text-destructive touch-manipulation">
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -1155,6 +1166,14 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+      
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
+        onConfirm={handleDeleteCountdown}
+        title="Delete Countdown"
+        description="Are you sure you want to delete this countdown? This action cannot be undone."
+      />
     </div>
   );
 };
