@@ -661,14 +661,29 @@ const Notes = () => {
           {/* Mobile Header */}
           {isMobileView && (
             <div className="sticky top-0 z-30 flex items-center justify-between p-3 sm:p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowNoteList(!showNoteList)}
-                className="touch-manipulation"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  className="touch-manipulation"
+                  title="Main menu"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+                {showNoteList && (
+                  <span className="text-muted-foreground text-sm">|</span>
+                )}
+                <Button
+                  variant={showNoteList ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setShowNoteList(!showNoteList)}
+                  className="touch-manipulation"
+                  title="Toggle notes list"
+                >
+                  <List className="h-5 w-5" />
+                </Button>
+              </div>
               <h1 className="font-heading font-bold text-base sm:text-lg">{showNoteList ? 'All Notes' : (selectedNote?.title || 'Notes')}</h1>
               <Button
                 size="sm"
@@ -763,7 +778,7 @@ const Notes = () => {
                   </div>
                 ) : (
                   <motion.div
-                    className="space-y-1 p-2"
+                    className="space-y-1 p-2 w-full"
                     initial="hidden"
                     animate="show"
                     variants={{ 
@@ -787,6 +802,7 @@ const Notes = () => {
                         className={`
                           p-3 rounded-lg cursor-pointer transition-all duration-200 ease-out
                           ${selectedNote?.id === note.id ? 'ring-2 ring-primary shadow-md' : 'hover:bg-muted hover:shadow-sm'}
+                          max-w-full overflow-hidden
                         `}
                         style={getCategoryStyle(note.background_color)}
                         variants={{ 
@@ -804,16 +820,19 @@ const Notes = () => {
                         whileHover={{ scale: 1.01, transition: { duration: 0.15 } }}
                         whileTap={{ scale: 0.98 }}
                       >
-                        <div className="font-semibold truncate flex items-center gap-2">
+                        <div className="font-semibold truncate flex items-center gap-2 min-w-0">
                           {note.title === 'Inbox' ? (
-                            <Lightbulb className="h-3 w-3 text-amber-500" />
+                            <Lightbulb className="h-3 w-3 text-amber-500 flex-shrink-0" />
                           ) : note.is_pinned ? (
-                            <Pin className="h-3 w-3 text-primary" />
+                            <Pin className="h-3 w-3 text-primary flex-shrink-0" />
                           ) : null}
-                          <span className="truncate">{truncateText(note.title || 'Untitled', 80)}</span>
+                          <span className="truncate min-w-0">{truncateText(note.title || 'Untitled', 80)}</span>
                         </div>
-                        <div className="text-sm mt-1 line-clamp-3 text-foreground/80 prose dark:prose-invert max-w-none" 
-                          dangerouslySetInnerHTML={{ __html: sanitizePreview(note.content || '') }} />
+                        <div 
+                          className="text-sm mt-1 line-clamp-3 text-foreground/80 prose dark:prose-invert max-w-none break-words overflow-hidden" 
+                          style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                          dangerouslySetInnerHTML={{ __html: sanitizePreview(note.content || '') }} 
+                        />
                         <div className="text-xs mt-2 text-foreground/60">
                           {formatDate(note.updated_at)}
                         </div>

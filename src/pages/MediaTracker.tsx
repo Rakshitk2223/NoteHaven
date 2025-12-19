@@ -4,6 +4,7 @@ import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -65,7 +66,7 @@ const MediaTracker = () => {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
-  const [filterType, setFilterType] = useState<string>('All');
+  const [filterType, setFilterType] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [quickAddTitle, setQuickAddTitle] = useState('');
@@ -88,6 +89,8 @@ const MediaTracker = () => {
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
+  const [txtExportDialogOpen, setTxtExportDialogOpen] = useState(false);
+  const [txtExportSelectedTypes, setTxtExportSelectedTypes] = useState<string[]>([]);
   // Save view mode changes
   useEffect(() => {
     try {
@@ -142,7 +145,7 @@ const MediaTracker = () => {
       if (user) {
         query = query.eq('user_id', user.id);
       }
-      if (filterType !== 'All') query = query.eq('type', filterType);
+      if (filterType.length > 0) query = query.in('type', filterType);
       if (filterStatus !== 'All') {
         // Map UI filter categories to actual database statuses
         if (filterStatus === 'Active') {
@@ -244,6 +247,55 @@ const MediaTracker = () => {
       a.href = url; a.download = 'notehaven_media_export.json';
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       toast({ title: 'Export started', description: 'Download should begin shortly.' });
+    } catch (e:any) {
+      toast({ title: 'Export failed', description: e.message || 'Error', variant: 'destructive' });
+    }
+  };
+
+  const handleExportTxt = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      
+      let query = supabase.from('media_tracker').select('*').eq('user_id', user.id).order('title', { ascending: true });
+      
+      // Apply type filter if types are selected
+      if (txtExportSelectedTypes.length > 0) {
+        query = query.in('type', txtExportSelectedTypes);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      
+      const lines: string[] = [];
+      (data || []).forEach((item: MediaItem) => {
+        const parts: string[] = [item.title];
+        
+        // Add chapter for readable types
+        if (readableTypes.includes(item.type) && item.current_chapter) {
+          parts.push(`Chapter ${item.current_chapter}`);
+        }
+        // Add episode for watchable types
+        else if (watchableTypes.includes(item.type) && item.current_episode) {
+          parts.push(`Episode ${item.current_episode}`);
+        }
+        
+        // Add season number if present
+        if (item.current_season) {
+          parts.push(`Season ${item.current_season}`);
+        }
+        
+        lines.push(parts.join(' - '));
+      });
+      
+      const text = lines.join('\n');
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'notehaven_media_export.txt';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      toast({ title: 'Export complete', description: `${lines.length} items exported to text file.` });
+      setTxtExportDialogOpen(false);
     } catch (e:any) {
       toast({ title: 'Export failed', description: e.message || 'Error', variant: 'destructive' });
     }
@@ -1082,25 +1134,52 @@ const MediaTracker = () => {
                 />
               </div>
               
-              <div className="flex flex-wrap gap-2 sm:gap-3 items-center">
-                <span className="text-sm font-medium text-muted-foreground hidden sm:inline">Filters:</span>
+              <div className="flex flex-wrap gap-2 sm:gap-3 items-start">
+                <span className="text-sm font-medium text-muted-foreground hidden sm:inline mt-2">Filters:</span>
                 
-                <Select value={filterType} onValueChange={setFilterType}>
-                  <SelectTrigger className="w-32 sm:w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="All">All Types</SelectItem>
-                    <SelectItem value="Anime">Anime</SelectItem>
-                    <SelectItem value="Manga">Manga</SelectItem>
-                    <SelectItem value="Manhwa">Manhwa</SelectItem>
-                    <SelectItem value="Manhua">Manhua</SelectItem>
-                    <SelectItem value="Series">Series</SelectItem>
-                    <SelectItem value="Movie">Movie</SelectItem>
-                    <SelectItem value="KDrama">KDrama</SelectItem>
-                    <SelectItem value="JDrama">JDrama</SelectItem>
-                  </SelectContent>
-                </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-2">
+                      <Filter className="h-4 w-4" />
+                      Type {filterType.length > 0 && `(${filterType.length})`}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-48">
+                    <div className="p-2 space-y-2">
+                      {['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'].map(type => (
+                        <div key={type} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`filter-${type}`}
+                            checked={filterType.includes(type)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setFilterType([...filterType, type]);
+                              } else {
+                                setFilterType(filterType.filter(t => t !== type));
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`filter-${type}`}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            {type}
+                          </label>
+                        </div>
+                      ))}
+                      {filterType.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full mt-2"
+                          onClick={() => setFilterType([])}
+                        >
+                          Clear All
+                        </Button>
+                      )}
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
                   <SelectTrigger className="w-32 sm:w-36">
@@ -1148,8 +1227,85 @@ const MediaTracker = () => {
                   onClick={handleExportJson}
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  Export
+                  JSON
                 </Button>
+                <Dialog open={txtExportDialogOpen} onOpenChange={setTxtExportDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      TXT
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Export to Text File</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <p className="text-sm text-muted-foreground">
+                        Select which types to include in the export:
+                      </p>
+                      <div className="space-y-3">
+                        {['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'].map(type => (
+                          <div key={type} className="flex items-center space-x-2">
+                            <Checkbox
+                              id={`export-${type}`}
+                              checked={txtExportSelectedTypes.includes(type)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setTxtExportSelectedTypes([...txtExportSelectedTypes, type]);
+                                } else {
+                                  setTxtExportSelectedTypes(txtExportSelectedTypes.filter(t => t !== type));
+                                }
+                              }}
+                            />
+                            <label
+                              htmlFor={`export-${type}`}
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                            >
+                              {type}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex gap-2 pt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => setTxtExportSelectedTypes(['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'])}
+                        >
+                          Select All
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => setTxtExportSelectedTypes([])}
+                        >
+                          Clear All
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setTxtExportDialogOpen(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={handleExportTxt}
+                        disabled={txtExportSelectedTypes.length === 0}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export {txtExportSelectedTypes.length > 0 && `(${txtExportSelectedTypes.length})`}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
 
@@ -1173,7 +1329,7 @@ const MediaTracker = () => {
             ) : mediaItems.length === 0 ? (
               <div className="zen-card p-8 text-center">
                 <p className="text-muted-foreground mb-4">
-                  {filterType !== 'All' || filterStatus !== 'All' 
+                  {filterType.length > 0 || filterStatus !== 'All' 
                     ? 'No media found for the selected filters.' 
                     : 'You haven\'t added any media yet. Click \'Add Media\' to start tracking!'}
                 </p>
