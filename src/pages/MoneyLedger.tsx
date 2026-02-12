@@ -14,6 +14,7 @@ import {
   fetchLedgerCategories, 
   fetchLedgerEntries, 
   createLedgerEntry,
+  createLedgerCategory,
   deleteLedgerEntry,
   calculateLedgerSummary,
   formatCurrency,
@@ -58,12 +59,24 @@ const MoneyLedger = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      console.log('Loading ledger data...');
       const [entriesData, categoriesData] = await Promise.all([
         fetchLedgerEntries(),
         fetchLedgerCategories()
       ]);
+      console.log('Entries loaded:', entriesData.length);
+      console.log('Categories loaded:', categoriesData.length);
+      console.log('Categories:', categoriesData);
       setEntries(entriesData);
       setCategories(categoriesData);
+      
+      if (categoriesData.length === 0) {
+        toast({
+          title: 'No categories found',
+          description: 'Please create categories first',
+          variant: 'destructive'
+        });
+      }
     } catch (error) {
       console.error('Error loading ledger data:', error);
       toast({
@@ -73,6 +86,40 @@ const MoneyLedger = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Create default categories if none exist
+  const createDefaultCategories = async () => {
+    try {
+      const defaultCategories = [
+        { name: 'Salary', type: 'income' as const, color: '#10B981' },
+        { name: 'Freelance', type: 'income' as const, color: '#3B82F6' },
+        { name: 'Investments', type: 'income' as const, color: '#8B5CF6' },
+        { name: 'Other Income', type: 'income' as const, color: '#6B7280' },
+        { name: 'Food & Dining', type: 'expense' as const, color: '#EF4444' },
+        { name: 'Transportation', type: 'expense' as const, color: '#F59E0B' },
+        { name: 'Entertainment', type: 'expense' as const, color: '#EC4899' },
+        { name: 'Shopping', type: 'expense' as const, color: '#8B5CF6' },
+        { name: 'Bills & Utilities', type: 'expense' as const, color: '#6366F1' },
+        { name: 'Healthcare', type: 'expense' as const, color: '#14B8A6' },
+        { name: 'Education', type: 'expense' as const, color: '#10B981' },
+        { name: 'Other Expense', type: 'expense' as const, color: '#6B7280' }
+      ];
+
+      for (const cat of defaultCategories) {
+        await createLedgerCategory(cat.name, cat.type, cat.color);
+      }
+      
+      toast({ title: 'Default categories created' });
+      loadData();
+    } catch (error) {
+      console.error('Error creating categories:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to create categories',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -231,13 +278,24 @@ const MoneyLedger = () => {
                     </div>
                     
                     <div className="grid gap-2">
-                      <label className="text-sm font-medium">Category</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium">Category</label>
+                        {categories.length === 0 && (
+                          <button 
+                            onClick={createDefaultCategories}
+                            className="text-xs text-blue-500 hover:underline"
+                          >
+                            Create categories
+                          </button>
+                        )}
+                      </div>
                       <Select 
                         value={newEntry.category_id} 
                         onValueChange={(v) => setNewEntry({...newEntry, category_id: v})}
+                        disabled={categories.length === 0}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
+                          <SelectValue placeholder={categories.length === 0 ? "No categories available" : "Select category"} />
                         </SelectTrigger>
                         <SelectContent>
                           {categories
@@ -249,6 +307,11 @@ const MoneyLedger = () => {
                             ))}
                         </SelectContent>
                       </Select>
+                      {categories.length === 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Categories not loaded. Click "Create categories" above or refresh the page.
+                        </p>
+                      )}
                     </div>
                     
                     <div className="grid gap-2">
@@ -322,6 +385,17 @@ const MoneyLedger = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* Show create categories button if none exist */}
+          {!loading && categories.length === 0 && (
+            <div className="mb-6 p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
+              <p className="text-sm mb-2">No categories found. Create default categories to get started.</p>
+              <Button onClick={createDefaultCategories} variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Default Categories
+              </Button>
+            </div>
+          )}
 
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-4 mb-6">
