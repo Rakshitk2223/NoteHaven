@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
-import { Menu } from 'lucide-react';
+import { Menu, ExternalLink } from 'lucide-react';
 
 const Settings = () => {
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
@@ -229,6 +229,23 @@ const Settings = () => {
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground">Download all your data as JSON (prompts, notes, tasks, media).</p>
                 <Button onClick={handleExportData} disabled={exporting}>{exporting ? 'Exporting...' : 'Export All My Data'}</Button>
+              </div>
+            </Card>
+
+            {/* External Links */}
+            <Card className="p-6 space-y-4">
+              <h2 className="text-lg font-semibold">External Links</h2>
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">Track your anime, manga, and more.</p>
+                <a
+                  href="https://weebslist.netlify.app/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-primary hover:underline"
+                >
+                  Open WeebsList
+                  <ExternalLink className="h-4 w-4" />
+                </a>
               </div>
             </Card>
           </div>

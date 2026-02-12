@@ -9,6 +9,8 @@ import {
   X,
   Settings as SettingsIcon,
   Cake,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +27,71 @@ const navigation = [
   { name: "Birthdays", href: "/birthdays", icon: Cake },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
+
+interface SidebarItemProps {
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  name: string;
+  isActive: boolean;
+  isCollapsed: boolean;
+  isExternal?: boolean;
+}
+
+const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal }: SidebarItemProps) => {
+  const baseClasses = cn(
+    "flex items-center gap-3 rounded-lg font-body font-medium zen-transition relative group",
+    "hover:bg-secondary/50",
+    isActive 
+      ? "bg-primary/10 text-primary border border-primary/20" 
+      : "text-muted-foreground hover:text-foreground",
+    isCollapsed 
+      ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0 lg:mx-auto" 
+      : "px-3 py-2.5"
+  );
+
+  const content = (
+    <>
+      <Icon className={cn(
+        "h-5 w-5 flex-shrink-0",
+        isActive ? "text-primary" : "text-muted-foreground"
+      )} />
+      <span className={cn(
+        "zen-transition whitespace-nowrap",
+        isCollapsed && "lg:hidden"
+      )}>
+        {name}
+      </span>
+      {/* Tooltip for collapsed state */}
+      {isCollapsed && (
+        <span className="lg:hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
+          {name}
+        </span>
+      )}
+    </>
+  );
+
+  if (isExternal) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={baseClasses}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <NavLink
+      to={href}
+      className={baseClasses}
+    >
+      {content}
+    </NavLink>
+  );
+};
 
 const AppSidebar = () => {
   const location = useLocation();
@@ -58,7 +125,10 @@ const AppSidebar = () => {
           : "translate-x-0 w-64 lg:w-64"
       )}>
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
+        <div className={cn(
+          "flex items-center border-b border-border",
+          isCollapsed ? "lg:justify-center lg:p-2" : "justify-between p-4"
+        )}>
           <h1 className={cn(
             "font-heading font-bold text-xl text-foreground zen-transition",
             isCollapsed && "lg:hidden"
@@ -73,78 +143,67 @@ const AppSidebar = () => {
           >
             <X className="h-4 w-4" />
           </Button>
+          {/* Desktop toggle button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggle}
+            className="hidden lg:flex"
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isCollapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </Button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-2">
-          {navigation.map((item) => {
-            const isActive = location.pathname === item.href;
-            return (
-              <NavLink
-                key={item.name}
-                to={item.href}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg font-body font-medium zen-transition",
-                  "hover:bg-secondary/50",
-                  isActive 
-                    ? "bg-primary/10 text-primary border border-primary/20" 
-                    : "text-muted-foreground hover:text-foreground",
-                  isCollapsed && "lg:justify-center lg:px-2"
-                )}
-              >
-                <item.icon className={cn(
-                  "h-5 w-5 flex-shrink-0",
-                  isActive ? "text-primary" : "text-muted-foreground"
-                )} />
-                <span className={cn(
-                  "zen-transition",
-                  isCollapsed && "lg:hidden"
-                )}>
-                  {item.name}
-                </span>
-              </NavLink>
-            );
-          })}
-          
-          {/* WeebsList External Link */}
-          <a
-            href="https://weebslist.netlify.app/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg font-body font-medium zen-transition",
-              "hover:bg-secondary/50",
-              "text-muted-foreground hover:text-foreground",
-              isCollapsed && "lg:justify-center lg:px-2"
-            )}
-          >
-            <ExternalLink className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-            <span className={cn(
-              "zen-transition",
-              isCollapsed && "lg:hidden"
-            )}>
-              WeebsList
-            </span>
-          </a>
+        <nav className={cn(
+          "flex-1 py-4",
+          isCollapsed ? "lg:px-2 lg:space-y-3" : "px-4 space-y-1"
+        )}>
+          {navigation.map((item) => (
+            <SidebarItem
+              key={item.name}
+              href={item.href}
+              icon={item.icon}
+              name={item.name}
+              isActive={location.pathname === item.href}
+              isCollapsed={isCollapsed}
+            />
+          ))}
         </nav>
 
         {/* Logout */}
-        <div className="p-4 border-t border-border mt-auto">
+        <div className={cn(
+          "border-t border-border mt-auto",
+          isCollapsed ? "lg:p-2" : "p-4"
+        )}>
           <button 
             onClick={handleLogout}
             className={cn(
-              "flex items-center justify-start gap-3 px-3 py-2.5 rounded-lg font-body font-medium zen-transition w-full",
+              "flex items-center rounded-lg font-body font-medium zen-transition w-full relative group",
               "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
-              // Keep left alignment even when collapsed on lg for consistent bottom-left placement
+              isCollapsed 
+                ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0 lg:mx-auto" 
+                : "justify-start gap-3 px-3 py-2.5"
             )}
           >
             <LogOut className="h-5 w-5 flex-shrink-0" />
             <span className={cn(
-              "zen-transition",
+              "zen-transition whitespace-nowrap",
               isCollapsed && "lg:hidden"
             )}>
               Logout
             </span>
+            {/* Tooltip for collapsed state */}
+            {isCollapsed && (
+              <span className="lg:hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
+                Logout
+              </span>
+            )}
           </button>
         </div>
       </div>
