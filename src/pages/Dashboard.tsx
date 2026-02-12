@@ -80,6 +80,10 @@ const Dashboard = () => {
   const { user } = useAuth();
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
