@@ -1,17 +1,18 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  MessageSquare, 
-  Monitor, 
-  CheckSquare, 
-  FileText, 
+import {
+  LayoutDashboard,
+  MessageSquare,
+  Monitor,
+  CheckSquare,
+  FileText,
   LogOut,
   X,
   Settings as SettingsIcon,
   Cake,
   ChevronLeft,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Wallet
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,7 @@ const navigation = [
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },
   { name: "Birthdays", href: "/birthdays", icon: Cake },
+  { name: "Money Ledger", href: "/ledger", icon: Wallet },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 

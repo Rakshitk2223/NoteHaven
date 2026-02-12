@@ -321,12 +321,98 @@ export type Database = {
         }
         Relationships: []
       }
+      ledger_categories: {
+        Row: {
+          id: number
+          user_id: string
+          name: string
+          type: string
+          color: string
+          description: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          name: string
+          type: string
+          color?: string
+          description?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          name?: string
+          type?: string
+          color?: string
+          description?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      ledger_entries: {
+        Row: {
+          id: number
+          user_id: string
+          category_id: number | null
+          amount: number
+          type: string
+          description: string | null
+          transaction_date: string
+          is_recurring: boolean
+          recurring_interval: string | null
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          category_id?: number | null
+          amount: number
+          type: string
+          description?: string | null
+          transaction_date?: string
+          is_recurring?: boolean
+          recurring_interval?: string | null
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          category_id?: number | null
+          amount?: number
+          type?: string
+          description?: string | null
+          transaction_date?: string
+          is_recurring?: boolean
+          recurring_interval?: string | null
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_monthly_ledger_summary: {
+        Args: {
+          p_user_id: string
+          p_year: number
+          p_month: number
+        }
+        Returns: {
+          total_income: number
+          total_expense: number
+          net_balance: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
@@ -540,3 +626,41 @@ export const TAG_COLORS = [
 ] as const
 
 export type TagColor = typeof TAG_COLORS[number]['value']
+
+// ============================================
+// MONEY LEDGER TYPES
+// ============================================
+
+export interface LedgerCategory {
+  id: number
+  user_id: string
+  name: string
+  type: 'income' | 'expense'
+  color: string
+  description: string | null
+  created_at: string
+}
+
+export interface LedgerEntry {
+  id: number
+  user_id: string
+  category_id: number | null
+  amount: number
+  type: 'income' | 'expense'
+  description: string | null
+  transaction_date: string
+  is_recurring: boolean
+  recurring_interval: 'daily' | 'weekly' | 'monthly' | 'yearly' | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+  category?: LedgerCategory
+}
+
+export interface LedgerSummary {
+  totalIncome: number
+  totalExpense: number
+  netBalance: number
+}
+
+export type RecurringInterval = 'daily' | 'weekly' | 'monthly' | 'yearly'
