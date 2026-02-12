@@ -234,6 +234,93 @@ export type Database = {
           }
         ]
       }
+      tags: {
+        Row: {
+          id: number
+          user_id: string
+          name: string
+          color: string
+          usage_count: number
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          name: string
+          color?: string
+          usage_count?: number
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          name?: string
+          color?: string
+          usage_count?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      note_tags: {
+        Row: {
+          note_id: number
+          tag_id: number
+        }
+        Insert: {
+          note_id: number
+          tag_id: number
+        }
+        Update: {
+          note_id?: number
+          tag_id?: number
+        }
+        Relationships: []
+      }
+      task_tags: {
+        Row: {
+          task_id: number
+          tag_id: number
+        }
+        Insert: {
+          task_id: number
+          tag_id: number
+        }
+        Update: {
+          task_id?: number
+          tag_id?: number
+        }
+        Relationships: []
+      }
+      media_tags: {
+        Row: {
+          media_id: number
+          tag_id: number
+        }
+        Insert: {
+          media_id: number
+          tag_id: number
+        }
+        Update: {
+          media_id?: number
+          tag_id?: number
+        }
+        Relationships: []
+      }
+      prompt_tags: {
+        Row: {
+          prompt_id: number
+          tag_id: number
+        }
+        Insert: {
+          prompt_id: number
+          tag_id: number
+        }
+        Update: {
+          prompt_id?: number
+          tag_id?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -372,3 +459,84 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// ============================================
+// TAGS SYSTEM TYPES
+// ============================================
+
+export interface Tag {
+  id: number
+  user_id: string
+  name: string
+  color: string
+  usage_count: number
+  created_at: string
+}
+
+export interface NoteWithTags {
+  id: number
+  user_id: string
+  title: string | null
+  content: string | null
+  created_at: string
+  updated_at: string
+  is_pinned: boolean | null
+  background_color: string | null
+  tags?: Tag[]
+}
+
+export interface TaskWithTags {
+  id: number
+  user_id: string
+  task_text: string | null
+  is_completed: boolean | null
+  created_at: string
+  updated_at: string
+  is_pinned: boolean | null
+  due_date: string | null
+  tags?: Tag[]
+}
+
+export interface MediaWithTags {
+  id: number
+  user_id: string
+  title: string | null
+  type: string | null
+  status: string | null
+  rating: number | null
+  current_season: number | null
+  current_episode: number | null
+  current_chapter: number | null
+  image_url: string | null
+  created_at: string
+  updated_at: string
+  tags?: Tag[]
+}
+
+export interface PromptWithTags {
+  id: number
+  user_id: string
+  title: string | null
+  prompt_text: string | null
+  is_favorited: boolean | null
+  category: string | null
+  is_pinned: boolean | null
+  created_at: string
+  tags?: Tag[]
+}
+
+// Tag color palette (preset colors)
+export const TAG_COLORS = [
+  { name: 'Blue', value: '#3B82F6' },
+  { name: 'Red', value: '#EF4444' },
+  { name: 'Green', value: '#10B981' },
+  { name: 'Yellow', value: '#F59E0B' },
+  { name: 'Purple', value: '#8B5CF6' },
+  { name: 'Pink', value: '#EC4899' },
+  { name: 'Orange', value: '#F97316' },
+  { name: 'Teal', value: '#14B8A6' },
+  { name: 'Indigo', value: '#6366F1' },
+  { name: 'Gray', value: '#6B7280' },
+] as const
+
+export type TagColor = typeof TAG_COLORS[number]['value']

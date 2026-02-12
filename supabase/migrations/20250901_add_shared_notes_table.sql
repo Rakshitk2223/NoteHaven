@@ -20,15 +20,34 @@ create policy "shared_notes_public_read" on public.shared_notes
   for select using (true);
 
 -- Policies on notes to allow access via share link.
--- Anyone (even anon) can select a note if a shared_notes row exists with matching id token provided via request header or query param.
--- We rely on pg function current_setting('request.jwt.claims', true) for anon? Instead simpler: join via shared note id passed as a query param not directly accessible.
--- Simpler: open select if note is referenced by any shared_notes row. (If you later want revocation, delete row.)
+-- Anyone (even anon) can select a note ONLY if they provide the correct share_id
+-- The share_id is passed as a setting that the application must set before querying
 create policy "notes_select_via_share" on public.notes
-  for select using (exists (select 1 from public.shared_notes sn where sn.note_id = notes.id));
+  for select using (
+    exists (
+      select 1 from public.shared_notes sn 
+      where sn.note_id = notes.id 
+      and sn.id = coalesce(current_setting('app.share_id', true), '')::uuid
+    )
+  );
 
--- Allow update if allow_edit true for that share link
+-- Allow update if allow_edit true for that specific share link
 create policy "notes_update_via_share" on public.notes
-  for update using (exists (select 1 from public.shared_notes sn where sn.note_id = notes.id and sn.allow_edit))
-  with check (exists (select 1 from public.shared_notes sn where sn.note_id = notes.id and sn.allow_edit));
+  for update using (
+    exists (
+      select 1 from public.shared_notes sn 
+      where sn.note_id = notes.id 
+      and sn.allow_edit
+      and sn.id = coalesce(current_setting('app.share_id', true), '')::uuid
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.shared_notes sn 
+      where sn.note_id = notes.id 
+      and sn.allow_edit
+      and sn.id = coalesce(current_setting('app.share_id', true), '')::uuid
+    )
+  );
 
 -- NOTE: Existing owner policies should still apply; these broaden access for shared notes.

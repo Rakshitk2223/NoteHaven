@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useSidebar } from "@/contexts/SidebarContext";
 import AppSidebar from '@/components/AppSidebar';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 interface Birthday { id: number; name: string; date_of_birth: string; }
 
 const Birthdays = () => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [birthdays, setBirthdays] = useState<Birthday[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -42,8 +43,9 @@ const Birthdays = () => {
         .order('date_of_birth', { ascending: true });
       if (error) throw error;
   setBirthdays(data || []);
-    } catch (e:any) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'An error occurred';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -83,8 +85,9 @@ const Birthdays = () => {
       setSelectedDay(null);
       setShowModal(false);
       toast({ title: editingId ? 'Birthday updated' : 'Birthday added', variant: 'default' });
-    } catch (e:any) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'An error occurred';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
     }
   };
 
@@ -97,8 +100,9 @@ const Birthdays = () => {
       if (error) throw error;
       setBirthdays(prev => prev.filter(b => b.id !== id));
       toast({ title: 'Birthday deleted', variant: 'default' });
-    } catch (e:any) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'An error occurred';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
     } finally {
       setDeleteConfirm({ open: false, id: null });
     }
@@ -192,7 +196,13 @@ const Birthdays = () => {
   const BirthdayCard = ({ birthday, showAge = true }: { birthday: Birthday; showAge?: boolean }) => {
     const date = new Date(birthday.date_of_birth + 'T00:00:00');
     const days = daysDifference(birthday.date_of_birth);
-    const age = new Date().getFullYear() - date.getFullYear();
+    const now = new Date();
+    let age = now.getFullYear() - date.getFullYear();
+    const thisYearBday = new Date(now.getFullYear(), date.getMonth(), date.getDate());
+    // If birthday hasn't occurred yet this year, subtract 1 from age
+    if (thisYearBday.getTime() > now.getTime()) {
+      age -= 1;
+    }
     const isPast = days > 300; // More than 300 days means it was recent past
     
     return (
@@ -246,11 +256,11 @@ const Birthdays = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <AppSidebar isCollapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <AppSidebar />
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="touch-manipulation">
+            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
               <Menu className="h-5 w-5" />
             </Button>
             <h1 className="font-heading font-bold text-base sm:text-lg">Birthdays</h1>

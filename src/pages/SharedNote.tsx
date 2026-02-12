@@ -69,11 +69,20 @@ const SharedNote = () => {
         const newRow = payload.new as NoteRow;
         setNote(prev => prev && prev.id === newRow.id ? { ...prev, ...newRow } : newRow);
         // Update DOM if different from local (avoid overwriting while typing)
+        // Only update if element is not focused AND content actually differs
         if (titleRef.current && document.activeElement !== titleRef.current) {
-          titleRef.current.innerHTML = newRow.title || '';
+          const currentTitle = titleRef.current.innerHTML || '';
+          const newTitle = newRow.title || '';
+          if (currentTitle !== newTitle) {
+            titleRef.current.innerHTML = newTitle;
+          }
         }
         if (contentRef.current && document.activeElement !== contentRef.current) {
-          contentRef.current.innerHTML = newRow.content || '';
+          const currentContent = contentRef.current.innerHTML || '';
+          const newContent = newRow.content || '';
+          if (currentContent !== newContent) {
+            contentRef.current.innerHTML = newContent;
+          }
         }
       })
       .subscribe();

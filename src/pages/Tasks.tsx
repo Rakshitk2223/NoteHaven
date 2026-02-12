@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
 import { Plus, Trash2, Pin, Pencil, Menu } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -12,6 +13,10 @@ import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CompactTagSelector } from "@/components/CompactTagSelector";
+import { TagBadge } from "@/components/TagBadge";
+import { TagFilter } from "@/components/TagFilter";
+import { fetchUserTags, fetchTaskTags, setTaskTags, createTag, type Tag } from "@/lib/tags";
 
 interface Task {
   id: number;
@@ -21,11 +26,12 @@ interface Task {
   created_at: string;
   is_pinned?: boolean;
   due_date?: string | null;
+  tags?: Tag[];
 }
 
 const Tasks = () => {
   const location = useLocation();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [tasks, setTasks] = useState<Task[]>([]);
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -38,11 +44,42 @@ const Tasks = () => {
   const [editDue, setEditDue] = useState("");
   const [editDueObj, setEditDueObj] = useState<Date | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
+  
+  // Tags state
+  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [newTaskTags, setNewTaskTags] = useState<Tag[]>([]);
+  const [editTaskTags, setEditTaskTags] = useState<Tag[]>([]);
+
+  // Load tags when editing a task
+  useEffect(() => {
+    const loadEditTaskTags = async () => {
+      if (editTask?.id) {
+        try {
+          const tags = await fetchTaskTags(editTask.id);
+          setEditTaskTags(tags);
+        } catch (err) {
+          console.error('Failed to load task tags:', err);
+        }
+      }
+    };
+    loadEditTaskTags();
+  }, [editTask]);
 
   // Fetch tasks on component mount
   useEffect(() => {
     fetchTasks();
+    fetchTags();
   }, []);
+
+  const fetchTags = async () => {
+    try {
+      const tags = await fetchUserTags();
+      setAvailableTags(tags);
+    } catch (err) {
+      console.error('Failed to fetch tags:', err);
+    }
+  };
 
   // After tasks load or location changes, if ?task=ID is present, attempt to scroll to it
   useEffect(() => {
@@ -77,7 +114,31 @@ const Tasks = () => {
         throw error;
       }
 
-      setTasks(data || []);
+      let loaded = data || [];
+
+      // Fetch tags for all tasks
+      const taskIds = loaded.map(t => t.id);
+      if (taskIds.length > 0) {
+        const { data: taskTagsData } = await supabase
+          .from('task_tags')
+          .select('task_id, tags(*)')
+          .in('task_id', taskIds);
+
+        // Group tags by task_id
+        const tagsByTask: Record<number, Tag[]> = {};
+        taskTagsData?.forEach((item: any) => {
+          if (!tagsByTask[item.task_id]) tagsByTask[item.task_id] = [];
+          tagsByTask[item.task_id].push(item.tags);
+        });
+
+        // Attach tags to tasks
+        loaded = loaded.map(task => ({
+          ...task,
+          tags: tagsByTask[task.id] || []
+        }));
+      }
+
+      setTasks(loaded);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch tasks');
     } finally {
@@ -98,17 +159,37 @@ const Tasks = () => {
         throw new Error('User not authenticated');
       }
 
-      const { error } = await supabase
+      const { data: newTask, error } = await supabase
         .from('tasks')
-        .insert([{ task_text: newTaskText.trim(), user_id: user.id, due_date: newTaskDue || null }]);
+        .insert([{ task_text: newTaskText.trim(), user_id: user.id, due_date: newTaskDue || null }])
+        .select()
+        .single();
 
       if (error) {
         throw error;
       }
 
-  setNewTaskText("");
-  setNewTaskDue("");
+      // Save tags for the new task
+      if (newTaskTags.length > 0 && newTask) {
+        const tagsToSave: Tag[] = [];
+        for (const tag of newTaskTags) {
+          if (tag.id < 0) {
+            const created = await createTag(tag.name, tag.color);
+            tagsToSave.push(created);
+          } else {
+            tagsToSave.push(tag);
+          }
+        }
+        await setTaskTags(newTask.id, tagsToSave.map(t => t.id));
+      }
+
+      setNewTaskText("");
+      setNewTaskDue("");
+      setNewTaskDueObj(undefined);
+      setNewTaskTags([]);
       fetchTasks();
+      fetchTags(); // Refresh available tags
+      toast({ title: 'Task added', description: 'Your task has been created successfully.' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add task';
       setError(message);
@@ -183,16 +264,22 @@ const Tasks = () => {
     }
   };
 
-  const todoTasks = tasks.filter(task => !task.is_completed).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
-  const completedTasks = tasks.filter(task => task.is_completed).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
+  // Filter tasks by selected tags
+  const filterTasksByTags = (taskList: Task[]) => {
+    if (selectedTags.length === 0) return taskList;
+    return taskList.filter(task => {
+      const taskTagNames = task.tags?.map(t => t.name) || [];
+      return selectedTags.every(tag => taskTagNames.includes(tag));
+    });
+  };
+
+  const todoTasks = filterTasksByTags(tasks.filter(task => !task.is_completed)).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
+  const completedTasks = filterTasksByTags(tasks.filter(task => task.is_completed)).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
 
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <AppSidebar 
-          isCollapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        <AppSidebar />
         
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
@@ -200,7 +287,7 @@ const Tasks = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onClick={toggleSidebar}
               className="touch-manipulation"
             >
               <Menu className="h-5 w-5" />
@@ -223,28 +310,50 @@ const Tasks = () => {
               </div>
             )}
 
+            {/* Tag Filter */}
+            {availableTags.length > 0 && (
+              <div className="mb-4">
+                <TagFilter
+                  availableTags={availableTags}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                />
+              </div>
+            )}
+
             {/* Add Task Form */}
             <div className="mb-8">
-              <form onSubmit={handleAddTask} className="flex flex-col sm:flex-row gap-3">
-                <Input
-                  value={newTaskText}
-                  onChange={(e) => setNewTaskText(e.target.value)}
-                  placeholder="Add a new task..."
-                  className="flex-1"
-                  disabled={loading}
-                />
-                <div className="w-full sm:w-48">
-                  <DatePicker
-                    date={newTaskDueObj}
-                    setDate={(d) => { setNewTaskDueObj(d); setNewTaskDue(d ? d.toISOString().slice(0,10) : ''); }}
-                    placeholder="Due date"
-                    showClear={true}
+              <form onSubmit={handleAddTask} className="space-y-3">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Input
+                    value={newTaskText}
+                    onChange={(e) => setNewTaskText(e.target.value)}
+                    placeholder="Add a new task..."
+                    className="flex-1"
+                    disabled={loading}
+                  />
+                  <div className="w-full sm:w-48">
+                    <DatePicker
+                      date={newTaskDueObj}
+                      setDate={(d) => { setNewTaskDueObj(d); setNewTaskDue(d ? d.toISOString().slice(0,10) : ''); }}
+                      placeholder="Due date"
+                      showClear={true}
+                    />
+                  </div>
+                  <Button type="submit" disabled={!newTaskText.trim() || loading} className="w-full sm:w-auto whitespace-nowrap">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Task
+                  </Button>
+                </div>
+                {/* Tags */}
+                <div className="mt-2">
+                  <CompactTagSelector
+                    selectedTags={newTaskTags}
+                    onChange={setNewTaskTags}
+                    availableTags={availableTags}
+                    maxTags={3}
                   />
                 </div>
-                <Button type="submit" disabled={!newTaskText.trim() || loading} className="w-full sm:w-auto whitespace-nowrap">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Task
-                </Button>
               </form>
             </div>
 
@@ -296,7 +405,7 @@ const Tasks = () => {
                         <motion.div
                           key={task.id}
                           id={`task-${task.id}`}
-                          className="zen-card p-3 sm:p-4 flex items-start gap-2 sm:gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out"
+                          className="zen-card p-3 sm:p-4 flex items-start gap-2 sm:gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out group"
                           variants={{ 
                             hidden: { opacity: 0, x: -12, scale: 0.97 }, 
                             show: { 
@@ -325,13 +434,26 @@ const Tasks = () => {
                               <span className={(() => {
                                 const today = new Date();
                                 today.setHours(0,0,0,0);
-                                const due = new Date(task.due_date + 'T00:00:00');
+                                // Parse YYYY-MM-DD string as local date by using UTC to avoid timezone issues
+                                const [year, month, day] = task.due_date.split('-').map(Number);
+                                const due = new Date(year, month - 1, day);
                                 const diff = due.getTime() - today.getTime();
                                 const isPastOrToday = diff <= 0;
                                 return `text-xs font-medium ${isPastOrToday ? 'text-red-500' : 'text-muted-foreground'}`;
                               })()}>
-                                Due {new Date(task.due_date).toLocaleDateString()}
+                                Due {(() => {
+                                  const [year, month, day] = task.due_date.split('-').map(Number);
+                                  return new Date(year, month - 1, day).toLocaleDateString();
+                                })()}
                               </span>
+                            )}
+                            {/* Tags (show on hover) */}
+                            {task.tags && task.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {task.tags.map(tag => (
+                                  <TagBadge key={tag.id} tag={tag} size="sm" />
+                                ))}
+                              </div>
                             )}
                           </div>
                           <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
@@ -394,7 +516,7 @@ const Tasks = () => {
                         <motion.div
                           key={task.id}
                           id={`task-${task.id}`}
-                          className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out opacity-75"
+                          className="zen-card p-4 flex items-center gap-3 zen-shadow hover:zen-shadow-lg transition-all duration-200 ease-out opacity-75 group"
                           variants={{ 
                             hidden: { opacity: 0, x: -12, scale: 0.97 }, 
                             show: { 
@@ -421,6 +543,14 @@ const Tasks = () => {
                             </span>
                             {task.due_date && (
                               <span className="text-xs">Due {new Date(task.due_date).toLocaleDateString()}</span>
+                            )}
+                            {/* Tags (show on hover) */}
+                            {task.tags && task.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {task.tags.map(tag => (
+                                  <TagBadge key={tag.id} tag={tag} size="sm" />
+                                ))}
+                              </div>
                             )}
                           </div>
                           <Button
@@ -456,7 +586,7 @@ const Tasks = () => {
           </div>
         </div>
       </div>
-      <Dialog open={!!editTask} onOpenChange={(o) => { if (!o) setEditTask(null); }}>
+      <Dialog open={!!editTask} onOpenChange={(o) => { if (!o) { setEditTask(null); setEditTaskTags([]); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Task</DialogTitle>
@@ -475,15 +605,44 @@ const Tasks = () => {
                 showClear={true}
               />
             </div>
+            {/* Tags */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Tags</label>
+              <CompactTagSelector
+                selectedTags={editTaskTags}
+                onChange={setEditTaskTags}
+                availableTags={availableTags}
+                maxTags={3}
+              />
+            </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditTask(null)}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => { setEditTask(null); setEditTaskTags([]); }}>Cancel</Button>
               <Button size="sm" disabled={!editText.trim()} onClick={async () => {
                 if (!editTask) return;
                 try {
                   const { error } = await supabase.from('tasks').update({ task_text: editText.trim(), due_date: editDue || null }).eq('id', editTask.id);
                   if (error) throw error;
-                  setTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, task_text: editText.trim(), due_date: editDue || null } : t));
+                  
+                  // Save tags
+                  if (editTaskTags.length > 0) {
+                    const tagsToSave: Tag[] = [];
+                    for (const tag of editTaskTags) {
+                      if (tag.id < 0) {
+                        const created = await createTag(tag.name, tag.color);
+                        tagsToSave.push(created);
+                      } else {
+                        tagsToSave.push(tag);
+                      }
+                    }
+                    await setTaskTags(editTask.id, tagsToSave.map(t => t.id));
+                  } else {
+                    await setTaskTags(editTask.id, []);
+                  }
+                  
+                  setTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, task_text: editText.trim(), due_date: editDue || null, tags: editTaskTags } : t));
                   setEditTask(null);
+                  setEditTaskTags([]);
+                  fetchTags();
                   toast({ title: 'Task updated', description: 'Your task changes have been saved.' });
                 } catch (e:any) {
                   toast({ title: 'Error', description: e.message || 'Failed to update task.', variant: 'destructive' });

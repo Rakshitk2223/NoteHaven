@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useSidebar } from "@/contexts/SidebarContext";
 import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,10 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
+import { CompactTagSelector } from "@/components/CompactTagSelector";
+import { TagBadge } from "@/components/TagBadge";
+import { TagFilter } from "@/components/TagFilter";
+import { fetchUserTags, fetchPromptTags, setPromptTags, createTag, type Tag } from "@/lib/tags";
 
 interface Prompt {
   id: number;
@@ -28,10 +33,11 @@ interface Prompt {
   category?: string;
   is_pinned?: boolean;
   created_at: string;
+  tags?: Tag[];
 }
 
 const Prompts = () => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('All');
@@ -44,11 +50,42 @@ const Prompts = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   const { toast } = useToast();
 
+  // Tags state
+  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [formTags, setFormTags] = useState<Tag[]>([]);
+  const [editingPromptTags, setEditingPromptTags] = useState<Tag[]>([]);
+
   // Fetch prompts on component mount
   useEffect(() => {
     fetchPrompts("All");
+    fetchTags();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const fetchTags = async () => {
+    try {
+      const tags = await fetchUserTags();
+      setAvailableTags(tags);
+    } catch (err) {
+      console.error('Failed to fetch tags:', err);
+    }
+  };
+
+  // Load tags when editing a prompt
+  useEffect(() => {
+    const loadEditingPromptTags = async () => {
+      if (editingPrompt?.id) {
+        try {
+          const tags = await fetchPromptTags(editingPrompt.id);
+          setEditingPromptTags(tags);
+        } catch (err) {
+          console.error('Failed to load prompt tags:', err);
+        }
+      }
+    };
+    loadEditingPromptTags();
+  }, [editingPrompt]);
 
   const fetchPrompts = async (filter: string = activeFilter) => {
     try {
@@ -70,12 +107,36 @@ const Prompts = () => {
         throw error;
       }
 
-      setPrompts(data || []);
+      let loaded = data || [];
+
+      // Fetch tags for all prompts
+      const promptIds = loaded.map(p => p.id);
+      if (promptIds.length > 0) {
+        const { data: promptTagsData } = await supabase
+          .from('prompt_tags')
+          .select('prompt_id, tags(*)')
+          .in('prompt_id', promptIds);
+
+        // Group tags by prompt_id
+        const tagsByPrompt: Record<number, Tag[]> = {};
+        promptTagsData?.forEach((item: any) => {
+          if (!tagsByPrompt[item.prompt_id]) tagsByPrompt[item.prompt_id] = [];
+          tagsByPrompt[item.prompt_id].push(item.tags);
+        });
+
+        // Attach tags to prompts
+        loaded = loaded.map(prompt => ({
+          ...prompt,
+          tags: tagsByPrompt[prompt.id] || []
+        }));
+      }
+
+      setPrompts(loaded);
 
       // Derive unique categories from the (possibly filtered) list
       const unique = Array.from(
         new Set(
-          (data || [])
+          loaded
             .map(p => p.category?.trim())
             .filter((c): c is string => !!c && c.length > 0)
         )
@@ -99,17 +160,35 @@ const Prompts = () => {
         throw new Error('User not authenticated');
       }
 
-      const { error } = await supabase
+      const { data: newPrompt, error } = await supabase
         .from('prompts')
-        .insert([{ ...formData, user_id: user.id }]);
+        .insert([{ ...formData, user_id: user.id }])
+        .select()
+        .single();
 
       if (error) {
         throw error;
       }
 
+      // Save tags for new prompt
+      if (formTags.length > 0 && newPrompt) {
+        const tagsToSave: Tag[] = [];
+        for (const tag of formTags) {
+          if (tag.id < 0) {
+            const created = await createTag(tag.name, tag.color);
+            tagsToSave.push(created);
+          } else {
+            tagsToSave.push(tag);
+          }
+        }
+        await setPromptTags(newPrompt.id, tagsToSave.map(t => t.id));
+      }
+
       setIsModalOpen(false);
-  setFormData({ title: "", prompt_text: "", category: "" });
-  fetchPrompts(activeFilter); // Refresh the list
+      setFormData({ title: "", prompt_text: "", category: "" });
+      setFormTags([]);
+      fetchPrompts(activeFilter); // Refresh the list
+      fetchTags(); // Refresh available tags
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create prompt';
       setError(message);
@@ -130,10 +209,28 @@ const Prompts = () => {
         throw error;
       }
 
+      // Save tags for edited prompt
+      if (editingPromptTags.length > 0) {
+        const tagsToSave: Tag[] = [];
+        for (const tag of editingPromptTags) {
+          if (tag.id < 0) {
+            const created = await createTag(tag.name, tag.color);
+            tagsToSave.push(created);
+          } else {
+            tagsToSave.push(tag);
+          }
+        }
+        await setPromptTags(editingPrompt.id, tagsToSave.map(t => t.id));
+      } else {
+        await setPromptTags(editingPrompt.id, []);
+      }
+
       setIsModalOpen(false);
       setEditingPrompt(null);
-  setFormData({ title: "", prompt_text: "", category: "" });
-  fetchPrompts(activeFilter); // Refresh the list
+      setEditingPromptTags([]);
+      setFormData({ title: "", prompt_text: "", category: "" });
+      fetchPrompts(activeFilter); // Refresh the list
+      fetchTags(); // Refresh available tags
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update prompt';
       setError(message);
@@ -231,12 +328,23 @@ const Prompts = () => {
     setIsModalOpen(false);
     setEditingPrompt(null);
     setFormData({ title: "", prompt_text: "", category: "" });
+    setFormTags([]);
+    setEditingPromptTags([]);
   };
 
   const handleFilterChange = (filter: string) => {
     setActiveFilter(filter);
     fetchPrompts(filter);
   };
+
+  // Filter prompts by selected tags
+  const filteredPrompts = useMemo(() => {
+    if (selectedTags.length === 0) return prompts;
+    return prompts.filter(prompt => {
+      const promptTagNames = prompt.tags?.map(t => t.name) || [];
+      return selectedTags.every(tag => promptTagNames.includes(tag));
+    });
+  }, [prompts, selectedTags]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -250,15 +358,12 @@ const Prompts = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <AppSidebar 
-          isCollapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        <AppSidebar />
         
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="touch-manipulation">
+            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
               <Menu className="h-5 w-5" />
             </Button>
             <h1 className="font-heading font-bold text-base sm:text-lg">Prompts</h1>
@@ -343,6 +448,16 @@ const Prompts = () => {
                         placeholder="e.g. Writing, Code, Marketing"
                       />
                     </div>
+                    {/* Tags */}
+                    <div className="space-y-2">
+                      <Label>Tags</Label>
+                      <CompactTagSelector
+                        selectedTags={editingPrompt ? editingPromptTags : formTags}
+                        onChange={editingPrompt ? setEditingPromptTags : setFormTags}
+                        availableTags={availableTags}
+                        maxTags={3}
+                      />
+                    </div>
                     <div className="flex justify-end space-x-2 pt-4">
                       <Button
                         type="button"
@@ -369,7 +484,7 @@ const Prompts = () => {
             )}
 
             {/* Filter Buttons */}
-            <div className="mb-6 flex flex-wrap gap-2">
+            <div className="mb-4 flex flex-wrap gap-2">
               <Button
                 variant={activeFilter === 'All' ? 'default' : 'outline'}
                 size="sm"
@@ -388,6 +503,17 @@ const Prompts = () => {
                 </Button>
               ))}
             </div>
+
+            {/* Tag Filter */}
+            {availableTags.length > 0 && (
+              <div className="mb-6">
+                <TagFilter
+                  availableTags={availableTags}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                />
+              </div>
+            )}
 
             {loading ? (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -410,6 +536,12 @@ const Prompts = () => {
                   You haven't created any prompts yet. Click 'Add New Prompt' to start!
                 </p>
               </div>
+            ) : filteredPrompts.length === 0 ? (
+              <div className="zen-card p-8 text-center">
+                <p className="text-muted-foreground mb-4">
+                  No prompts match your filters.
+                </p>
+              </div>
             ) : (
               <motion.div
                 className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
@@ -426,11 +558,11 @@ const Prompts = () => {
                   } 
                 }}
               >
-                {prompts
+                {filteredPrompts
                   .slice()
                   .sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0))
                   .map((prompt) => (
-                  <motion.div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg transition-all duration-300 ease-out relative"
+                  <motion.div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg transition-all duration-300 ease-out relative group"
                     variants={{ 
                       hidden: { opacity: 0, y: 12, scale: 0.95 }, 
                       show: { 
@@ -460,10 +592,18 @@ const Prompts = () => {
                          </Badge>
                        )}
                      </div>
-                     <p className="text-muted-foreground mb-4 text-sm overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
-                       {prompt.prompt_text}
-                     </p>
-                     <div className="flex space-x-2">
+                      <p className="text-muted-foreground mb-4 text-sm overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
+                        {prompt.prompt_text}
+                      </p>
+                      {/* Tags (show on hover) */}
+                      {prompt.tags && prompt.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {prompt.tags.map(tag => (
+                            <TagBadge key={tag.id} tag={tag} size="sm" />
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex space-x-2">
                        <Button
                          size="sm"
                          variant="outline"

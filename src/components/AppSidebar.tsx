@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { 
   LayoutDashboard, 
@@ -7,7 +6,6 @@ import {
   CheckSquare, 
   FileText, 
   LogOut,
-  Menu,
   X,
   Settings as SettingsIcon,
   Cake,
@@ -16,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { useSidebar } from "@/contexts/SidebarContext";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -27,14 +26,10 @@ const navigation = [
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
-interface AppSidebarProps {
-  isCollapsed: boolean;
-  onToggle: () => void;
-}
-
-const AppSidebar = ({ isCollapsed, onToggle }: AppSidebarProps) => {
+const AppSidebar = () => {
   const location = useLocation();
   const { signOut } = useAuth();
+  const { isCollapsed, toggle } = useSidebar();
 
   const handleLogout = async () => {
     try {
@@ -50,7 +45,7 @@ const AppSidebar = ({ isCollapsed, onToggle }: AppSidebarProps) => {
       {!isCollapsed && (
         <div 
           className="lg:hidden fixed inset-0 bg-black/20 z-40"
-          onClick={onToggle}
+          onClick={toggle}
         />
       )}
       
@@ -73,7 +68,7 @@ const AppSidebar = ({ isCollapsed, onToggle }: AppSidebarProps) => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={onToggle}
+            onClick={toggle}
             className="lg:hidden"
           >
             <X className="h-4 w-4" />

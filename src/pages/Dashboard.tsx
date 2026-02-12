@@ -1,8 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import GridLayout, { Layout } from "react-grid-layout";
-import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
-import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin, Clock, Trash2, Gift, RotateCcw, RefreshCw } from "lucide-react";
+import { Plus, Menu, Check, Star, ExternalLink, FileText, Play, Sparkles, Pin, Clock, Trash2, Gift, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,6 +11,9 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useToast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useSidebar } from "@/contexts/SidebarContext";
+import { TagCloud } from "@/components/TagCloud";
+import { fetchUserTags, type Tag } from "@/lib/tags";
 
 interface Task {
   id: number;
@@ -54,7 +54,7 @@ interface Countdown {
 interface Birthday { id: number; name: string; date_of_birth: string; }
 
 const Dashboard = () => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [loading, setLoading] = useState(true);
   const [pendingTasks, setPendingTasks] = useState<Task[]>([]);
   const [recentNotes, setRecentNotes] = useState<Note[]>([]);
@@ -74,92 +74,11 @@ const Dashboard = () => {
     completedTasks: 0
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [userTags, setUserTags] = useState<Tag[]>([]);
   const { toast } = useToast();
   const navigate = useNavigate();
   const { user } = useAuth();
-  // Layout state for draggable widgets
-  const defaultLayout: Layout[] = [
-    { i: 'pendingTasks', x: 0, y: 0, w: 6, h: 8 },
-    { i: 'recentNotes', x: 6, y: 0, w: 6, h: 8 },
-    { i: 'watchingMedia', x: 0, y: 8, w: 6, h: 8 },
-    { i: 'favoritePrompts', x: 6, y: 8, w: 6, h: 8 },
-    { i: 'pinnedItems', x: 0, y: 16, w: 6, h: 8 },
-    { i: 'countdowns', x: 6, y: 16, w: 6, h: 8 },
-    { i: 'birthdays', x: 0, y: 24, w: 12, h: 6 },
-  ];
-  const [layout, setLayout] = useState<Layout[]>(defaultLayout);
-  const appliedSavedRef = useRef(false); // track if saved layout applied
-  const initialLayoutEventSkipped = useRef(false); // skip first onLayoutChange fire
-  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [gridWidth, setGridWidth] = useState<number>(1200);
-
-  // Responsive width using ResizeObserver
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const el = containerRef.current;
-    const update = () => {
-      // subtract padding (p-6 = 24px each side) to keep inside and avoid horizontal scroll
-      const inner = el.clientWidth - 48;
-      setGridWidth(inner > 320 ? inner : 320);
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Reconcile saved layout with current widgets
-  const reconcileLayout = (saved: Layout[]): Layout[] => {
-    const requiredKeys = new Set(defaultLayout.map(d => d.i));
-    const filtered = saved.filter(item => requiredKeys.has(item.i));
-    const existingKeys = new Set(filtered.map(f => f.i));
-    const missing = defaultLayout.filter(d => !existingKeys.has(d.i));
-    return [...filtered, ...missing];
-  };
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  // Load saved layout from user metadata if present
-  useEffect(() => {
-    if (user) {
-      const saved = (user.user_metadata as any)?.dashboard_layout as Layout[] | undefined;
-      if (Array.isArray(saved) && saved.every(i => i.i)) {
-        const reconciled = reconcileLayout(saved);
-        setLayout(reconciled);
-        appliedSavedRef.current = true;
-      } else {
-        appliedSavedRef.current = true; // no saved layout, treat default as applied
-      }
-    }
-  }, [user]);
-
-  const persistLayout = async (newLayout: Layout[]) => {
-    try {
-      await supabase.auth.updateUser({ data: { dashboard_layout: newLayout } });
-    } catch (e) {
-      console.error('Failed to save layout', e);
-    }
-  };
-
-  const handleLayoutChange = (newLayout: Layout[]) => {
-    setLayout(newLayout);
-    // Skip if saved layout not yet applied or initial mount event
-    if (!appliedSavedRef.current || !initialLayoutEventSkipped.current) {
-      initialLayoutEventSkipped.current = true;
-      return;
-    }
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => persistLayout(newLayout), 800);
-  };
-
-  const handleResetLayout = () => {
-    setLayout(defaultLayout);
-    persistLayout(defaultLayout);
-    toast({ title: 'Layout reset', description: 'Dashboard layout restored.' });
-  };
 
   const fetchDashboardData = async () => {
     try {
@@ -203,6 +122,14 @@ const Dashboard = () => {
   setPinnedItems(pinnedResult);
   setCountdowns(countdownResult);
   setBirthdays(birthdaysResult);
+  
+      // Fetch tags separately
+      try {
+        const tags = await fetchUserTags();
+        setUserTags(tags);
+      } catch (err) {
+        console.error('Failed to fetch tags:', err);
+      }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast({
@@ -481,10 +408,7 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <AppSidebar 
-          isCollapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        <AppSidebar />
         
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
@@ -492,7 +416,7 @@ const Dashboard = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onClick={toggleSidebar}
               className="touch-manipulation"
             >
               <Menu className="h-5 w-5" />
@@ -516,7 +440,7 @@ const Dashboard = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  onClick={toggleSidebar}
                 >
                   <Menu className="h-5 w-5" />
                 </Button>
@@ -566,8 +490,8 @@ const Dashboard = () => {
                     </div>
                     <ExternalLink className="h-3 w-3 text-muted-foreground" />
                   </div>
-                  <p className="text-2xl font-bold text-primary mb-1 min-h-[1.75rem] flex items-center">
-                    {loading ? <Skeleton className="h-6 w-10" /> : widget.value}
+                  <p className="text-2xl font-bold text-primary mb-1 min-h-[2rem] flex items-center">
+                    {loading ? <Skeleton className="h-8 w-12" /> : widget.value}
                   </p>
                   <p className="text-sm font-medium text-foreground mb-1">
                     {widget.title}
@@ -579,40 +503,11 @@ const Dashboard = () => {
               ))}
             </div>
 
-            {/* Reset layout button (desktop) */}
-            <div className="hidden lg:flex justify-end -mb-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleResetLayout}
-                className="h-8 gap-1 opacity-60 hover:opacity-100"
-                title="Reset dashboard layout"
-              >
-                <RotateCcw className="h-4 w-4" />
-                <span className="text-xs">Reset Layout</span>
-              </Button>
-            </div>
-
-            {/* Draggable Widgets */}
-            <div className="relative hidden lg:block">
-              <GridLayout
-                className="layout"
-                layout={layout}
-                cols={12}
-                rowHeight={30}
-                width={Math.min(gridWidth, 1280)}
-                margin={[16,16]}
-                containerPadding={[0,16]} // remove horizontal padding so cards go edge-to-edge while keeping vertical breathing space
-                onLayoutChange={handleLayoutChange}
-                draggableHandle=".drag-handle"
-                compactType="vertical"
-                preventCollision={false}
-                isResizable
-                autoSize
-              >
+            {/* Widgets Grid */}
+            <div className="hidden lg:grid grid-cols-2 gap-4">
               <div key="pendingTasks" className="zen-card zen-shadow p-6 h-full overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="drag-handle cursor-move text-lg font-semibold text-foreground flex items-center gap-2">
+                  <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Check className="h-5 w-5" />
                     Pending Tasks
                   </h3>
@@ -629,9 +524,9 @@ const Dashboard = () => {
                 {loading ? (
                   <div className="space-y-3">
                     {[...Array(3)].map((_, i) => (
-                      <div key={i} className="flex items-center gap-3 animate-pulse">
-                        <div className="h-4 w-4 bg-muted rounded"></div>
-                        <div className="h-4 bg-muted rounded flex-1"></div>
+                      <div key={i} className="flex items-center gap-3">
+                        <Skeleton className="h-4 w-4" />
+                        <Skeleton className="h-4 flex-1" />
                       </div>
                     ))}
                   </div>
@@ -666,7 +561,7 @@ const Dashboard = () => {
         </div>
         <div key="recentNotes" className="zen-card zen-shadow p-6 h-full overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
-          <h3 className="drag-handle cursor-move text-lg font-semibold text-foreground flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <FileText className="h-5 w-5" />
                     Recent Notes
                   </h3>
@@ -683,9 +578,9 @@ const Dashboard = () => {
                 {loading ? (
                   <div className="space-y-3">
                     {[...Array(3)].map((_, i) => (
-                      <div key={i} className="animate-pulse">
-                        <div className="h-4 bg-muted rounded mb-1"></div>
-                        <div className="h-3 bg-muted rounded w-1/2"></div>
+                      <div key={i}>
+                        <Skeleton className="h-4 mb-1" />
+                        <Skeleton className="h-3 w-1/2" />
                       </div>
                     ))}
                   </div>
@@ -716,7 +611,7 @@ const Dashboard = () => {
         </div>
         <div key="watchingMedia" className="zen-card zen-shadow p-6 h-full overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
-          <h3 className="drag-handle cursor-move text-lg font-semibold text-foreground flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Play className="h-5 w-5" />
                     Currently Watching
                   </h3>
@@ -733,9 +628,9 @@ const Dashboard = () => {
                 {loading ? (
                   <div className="space-y-3">
                     {[...Array(4)].map((_, i) => (
-                      <div key={i} className="animate-pulse">
-                        <div className="h-4 bg-muted rounded mb-1"></div>
-                        <div className="h-3 bg-muted rounded w-1/3"></div>
+                      <div key={i}>
+                        <Skeleton className="h-4 mb-1" />
+                        <Skeleton className="h-3 w-1/3" />
                       </div>
                     ))}
                   </div>
@@ -765,7 +660,7 @@ const Dashboard = () => {
         </div>
         <div key="favoritePrompts" className="zen-card zen-shadow p-6 h-full overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
-          <h3 className="drag-handle cursor-move text-lg font-semibold text-foreground flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Star className="h-5 w-5" />
                     Favorite Prompts
                   </h3>
@@ -782,9 +677,7 @@ const Dashboard = () => {
                 {loading ? (
                   <div className="space-y-3">
                     {[...Array(4)].map((_, i) => (
-                      <div key={i} className="animate-pulse">
-                        <div className="h-4 bg-muted rounded"></div>
-                      </div>
+                      <Skeleton key={i} className="h-4" />
                     ))}
                   </div>
                 ) : favoritePrompts.length === 0 ? (
@@ -810,7 +703,7 @@ const Dashboard = () => {
         </div>
         <div key="pinnedItems" className="zen-card zen-shadow p-6 h-full overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
-          <h3 className="drag-handle cursor-move text-lg font-semibold text-foreground flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Pin className="h-5 w-5" />
                     Pinned
                   </h3>
@@ -818,7 +711,7 @@ const Dashboard = () => {
                 {loading ? (
                   <div className="space-y-3">
                     {[...Array(4)].map((_, i) => (
-                      <div key={i} className="animate-pulse h-4 bg-muted rounded"></div>
+                      <Skeleton key={i} className="h-4" />
                     ))}
                   </div>
                 ) : pinnedItems.length === 0 ? (
@@ -846,9 +739,38 @@ const Dashboard = () => {
                   </div>
                 )}
         </div>
+        <div key="tags" className="zen-card zen-shadow p-4 h-full overflow-hidden">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <span className="text-primary">#</span>
+              Your Tags
+            </h3>
+          </div>
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => (
+                <Skeleton key={i} className="h-3" />
+              ))}
+            </div>
+          ) : userTags.length === 0 ? (
+            <div className="text-center py-3">
+              <p className="text-xs text-muted-foreground">No tags yet. Add tags to your items!</p>
+            </div>
+          ) : (
+            <TagCloud
+              tags={userTags.slice(0, 10)}
+              selectedTags={[]}
+              onTagClick={(tag) => {
+                navigate(`/notes?tag=${encodeURIComponent(tag.name)}`);
+              }}
+              showCount={true}
+              className="max-h-32"
+            />
+          )}
+        </div>
         <div key="countdowns" className="zen-card zen-shadow p-6 h-full overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
-          <h3 className="drag-handle cursor-move text-lg font-semibold text-foreground flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Clock className="h-5 w-5" />
                     Countdowns
                   </h3>
@@ -879,7 +801,7 @@ const Dashboard = () => {
                 </div>
                 {loading ? (
                   <div className="space-y-3">
-                    {[...Array(2)].map((_, i) => <div key={i} className="h-4 bg-muted rounded animate-pulse" />)}
+                    {[...Array(2)].map((_, i) => <Skeleton key={i} className="h-4" />)}
                   </div>
                 ) : countdowns.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No countdowns yet</div>
@@ -904,7 +826,7 @@ const Dashboard = () => {
         </div>
         <div key="birthdays" className="zen-card zen-shadow p-6 h-full overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
-          <h3 className="drag-handle cursor-move text-lg font-semibold text-foreground flex items-center gap-2">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                     <Gift className="h-5 w-5" />
                     Upcoming Birthdays
                   </h3>
@@ -912,7 +834,7 @@ const Dashboard = () => {
                 </div>
                 {loading ? (
                   <div className="space-y-3">
-                    {[...Array(3)].map((_,i)=><div key={i} className="h-4 bg-muted rounded animate-pulse" />)}
+                    {[...Array(3)].map((_,i)=><Skeleton key={i} className="h-4" />)}
                   </div>
                 ) : birthdays.length === 0 ? (
                   <div className="text-sm text-muted-foreground">No birthdays added</div>
@@ -942,7 +864,6 @@ const Dashboard = () => {
                   </div>
                 )}
               </div>
-              </GridLayout>
             </div>
             {/* Fallback stacked layout for mobile/tablet */}
             <div className="lg:hidden space-y-4">
@@ -957,7 +878,7 @@ const Dashboard = () => {
                 </div>
                 <div className="space-y-2">
                   {loading ? (
-                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
+                    [...Array(3)].map((_,i)=>(<Skeleton key={i} className="h-4"/>))
                   ) : pendingTasks.length === 0 ? (
                     <div className="text-center py-6">
                       <Check className="h-8 w-8 text-green-500 mx-auto mb-2" />
@@ -985,7 +906,7 @@ const Dashboard = () => {
                 </div>
                 <div className="space-y-2">
                   {loading ? (
-                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
+                    [...Array(3)].map((_,i)=>(<Skeleton key={i} className="h-4"/>))
                   ) : recentNotes.length === 0 ? (
                     <div className="text-center py-6">
                       <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
@@ -1013,7 +934,7 @@ const Dashboard = () => {
                 </div>
                 <div className="space-y-2">
                   {loading ? (
-                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
+                    [...Array(3)].map((_,i)=>(<Skeleton key={i} className="h-4"/>))
                   ) : watchingMedia.length === 0 ? (
                     <div className="text-center py-6">
                       <Play className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
@@ -1041,7 +962,7 @@ const Dashboard = () => {
                 </div>
                 <div className="space-y-2">
                   {loading ? (
-                    [...Array(3)].map((_,i)=>(<div key={i} className="h-4 bg-muted rounded animate-pulse"/>))
+                    [...Array(3)].map((_,i)=>(<Skeleton key={i} className="h-4"/>))
                   ) : favoritePrompts.length === 0 ? (
                     <div className="text-center py-6">
                       <Star className="h-8 w-8 text-muted-foreground mx-auto mb-2" />

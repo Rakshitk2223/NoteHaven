@@ -1,18 +1,15 @@
-import { useState } from "react";
+import { useSidebar } from "@/contexts/SidebarContext";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AppSidebar from "@/components/AppSidebar";
 
 const SimplePrompts = () => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
 
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <AppSidebar 
-          isCollapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        <AppSidebar />
         
         <div className="flex-1 lg:ml-0">
           <div className="p-6 border-b border-border">

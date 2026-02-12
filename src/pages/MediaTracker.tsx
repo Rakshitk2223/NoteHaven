@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
 import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,10 +32,14 @@ import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useInView } from "react-intersection-observer";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { CompactTagSelector } from "@/components/CompactTagSelector";
+import { TagBadge } from "@/components/TagBadge";
+import { TagFilter } from "@/components/TagFilter";
+import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 
 interface MediaItem {
   id: number;
@@ -49,17 +54,40 @@ interface MediaItem {
   current_chapter?: number;
   created_at: string;
   updated_at?: string;
+  tags?: Tag[];
 }
+
+// Valid types and statuses for runtime validation
+const VALID_TYPES = ['Movie', 'Series', 'Anime', 'Manga', 'Manhwa', 'Manhua', 'KDrama', 'JDrama'] as const;
+const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 'Completed'] as const;
+
+// Normalize media item to ensure valid types and statuses
+const normalizeMediaItem = (item: MediaItem): MediaItem => {
+  const type = VALID_TYPES.includes(item.type as typeof VALID_TYPES[number]) ? item.type : 'Movie';
+  const status = VALID_STATUSES.includes(item.status as typeof VALID_STATUSES[number]) ? item.status : 'Plan to Watch';
+  
+  if (type !== item.type) {
+    console.warn(`Invalid media type "${item.type}" for item ${item.id}, defaulting to 'Movie'`);
+  }
+  if (status !== item.status) {
+    console.warn(`Invalid media status "${item.status}" for item ${item.id}, defaulting to 'Plan to Watch'`);
+  }
+  
+  return { ...item, type, status };
+};
 
 const MediaTracker = () => {
   const location = useLocation();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const queryClient = useQueryClient();
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   // Persisted view mode (grid = categorized, list = table). Initialize from localStorage.
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
     try {
       const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerViewMode') : null;
       if (stored === 'grid' || stored === 'list') return stored;
-    } catch {}
+    } catch {
+      // Ignore localStorage errors and use default
+    }
     return 'grid';
   });
   const [loading, setLoading] = useState(true); // retained for create/update flows
@@ -91,11 +119,20 @@ const MediaTracker = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   const [txtExportDialogOpen, setTxtExportDialogOpen] = useState(false);
   const [txtExportSelectedTypes, setTxtExportSelectedTypes] = useState<string[]>([]);
+
+  // Tags state
+  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [formTags, setFormTags] = useState<Tag[]>([]);
+  const [editingItemTags, setEditingItemTags] = useState<Tag[]>([]);
+
   // Save view mode changes
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') localStorage.setItem('mediaTrackerViewMode', viewMode);
-    } catch {}
+    } catch {
+      // Ignore localStorage errors
+    }
   }, [viewMode]);
 
   // Type sets for conditional progress logic
@@ -170,7 +207,10 @@ const MediaTracker = () => {
   });
 
   // Expose combined items
-  const mediaItems: MediaItem[] = useMemo(() => (data?.pages.flatMap(p => p.items) ?? []), [data]);
+  const mediaItems: MediaItem[] = useMemo(() => 
+    (data?.pages.flatMap(p => p.items.map(normalizeMediaItem)) ?? []), 
+    [data]
+  );
 
   // Intersection observer to load more
   const { ref: loadMoreRef, inView } = useInView({ rootMargin: '200px' });
@@ -186,9 +226,48 @@ const MediaTracker = () => {
     setError(queryError ? (queryError as any).message || 'Failed to fetch media items' : null);
   }, [isLoading, queryError]);
 
+  // Fetch user tags
+  const fetchTags = async () => {
+    try {
+      const tags = await fetchUserTags();
+      setAvailableTags(tags);
+    } catch (err) {
+      console.error('Failed to fetch tags:', err);
+    }
+  };
+
+  // Fetch tags on mount
+  useEffect(() => {
+    fetchTags();
+  }, []);
+
+  // Load tags when editing an item
+  useEffect(() => {
+    const loadEditingItemTags = async () => {
+      if (editingItem?.id) {
+        try {
+          const tags = await fetchMediaTags(editingItem.id);
+          setEditingItemTags(tags);
+        } catch (err) {
+          console.error('Failed to load media tags:', err);
+        }
+      }
+    };
+    loadEditingItemTags();
+  }, [editingItem]);
+
+  // Filter media items by selected tags
+  const filteredByTagsMediaItems = useMemo(() => {
+    if (selectedTags.length === 0) return mediaItems;
+    return mediaItems.filter(item => {
+      const itemTagNames = item.tags?.map(t => t.name) || [];
+      return selectedTags.every(tag => itemTagNames.includes(tag));
+    });
+  }, [mediaItems, selectedTags]);
+
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
-    mediaItems.forEach(item => {
+    filteredByTagsMediaItems.forEach(item => {
       const key = getStatusCategory(item.status || 'Active');
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
@@ -200,21 +279,45 @@ const MediaTracker = () => {
       if (ia === -1) return 1; if (ib === -1) return -1; return ia - ib;
     });
     return { keys, groups };
-  }, [mediaItems]);
+  }, [filteredByTagsMediaItems]);
 
   const handleQuickUpdate = async (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => {
-    const currentVal = (item as any)[field];
+    const currentVal = item[field];
     if (currentVal == null && amount < 0) return;
     const newValue = Math.max((currentVal || 0) + amount, 1);
     setUpdatingIds(prev => new Set(prev).add(item.id));
+
+    // Optimistic update - update cache immediately
+    interface QueryPage {
+      items: MediaItem[];
+      count: number;
+      page: number;
+    }
+    interface QueryData {
+      pages: QueryPage[];
+    }
+    queryClient.setQueryData<QueryData>(['mediaItems', filterType, filterStatus, searchTerm, sortOrder], (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          items: page.items.map((i) =>
+            i.id === item.id ? { ...i, [field]: newValue } : i
+          )
+        }))
+      };
+    });
+
     try {
       const { error } = await supabase.from('media_tracker').update({ [field]: newValue }).eq('id', item.id);
       if (error) throw error;
-  // Optimistic local cache update: force refetch for simplicity
-  refetch();
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
-    } catch (e:any) {
-      toast({ title: 'Update failed', description: e.message || 'Error', variant: 'destructive' });
+    } catch (e: unknown) {
+      // Revert optimistic update on error
+      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterType, filterStatus, searchTerm, sortOrder] });
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Update failed', description: message, variant: 'destructive' });
     } finally {
       setUpdatingIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
     }
@@ -222,13 +325,38 @@ const MediaTracker = () => {
 
   const handleQuickStatusChange = async (item: MediaItem, newStatus: string) => {
     setUpdatingIds(prev => new Set(prev).add(item.id));
+
+    // Optimistic update - update cache immediately
+    interface QueryPage {
+      items: MediaItem[];
+      count: number;
+      page: number;
+    }
+    interface QueryData {
+      pages: QueryPage[];
+    }
+    queryClient.setQueryData<QueryData>(['mediaItems', filterType, filterStatus, searchTerm, sortOrder], (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          items: page.items.map((i) =>
+            i.id === item.id ? { ...i, status: newStatus } : i
+          )
+        }))
+      };
+    });
+
     try {
       const { error } = await supabase.from('media_tracker').update({ status: newStatus }).eq('id', item.id);
       if (error) throw error;
-      refetch();
       toast({ title: 'Status updated', description: `Changed to ${newStatus}` });
-    } catch (e:any) {
-      toast({ title: 'Update failed', description: e.message || 'Error', variant: 'destructive' });
+    } catch (e: unknown) {
+      // Revert optimistic update on error
+      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterType, filterStatus, searchTerm, sortOrder] });
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Update failed', description: message, variant: 'destructive' });
     } finally {
       setUpdatingIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
     }
@@ -247,8 +375,9 @@ const MediaTracker = () => {
       a.href = url; a.download = 'notehaven_media_export.json';
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       toast({ title: 'Export started', description: 'Download should begin shortly.' });
-    } catch (e:any) {
-      toast({ title: 'Export failed', description: e.message || 'Error', variant: 'destructive' });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Export failed', description: message, variant: 'destructive' });
     }
   };
 
@@ -296,8 +425,9 @@ const MediaTracker = () => {
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       toast({ title: 'Export complete', description: `${lines.length} items exported to text file.` });
       setTxtExportDialogOpen(false);
-    } catch (e:any) {
-      toast({ title: 'Export failed', description: e.message || 'Error', variant: 'destructive' });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Export failed', description: message, variant: 'destructive' });
     }
   };
 
@@ -316,7 +446,14 @@ const MediaTracker = () => {
       // Determine default status based on type
       const defaultStatus = isReadable ? 'Reading' : 'Watching';
       
-      const mediaData: any = {
+      const mediaData: {
+        title: string;
+        type: string;
+        status: string;
+        user_id: string;
+        current_chapter?: number;
+        current_episode?: number;
+      } = {
         title: quickAddTitle.trim(),
         type: quickAddType,
         status: defaultStatus,
@@ -341,8 +478,9 @@ const MediaTracker = () => {
       setQuickAddProgress('');
       refetch();
       toast({ title: 'Added!', description: `${quickAddTitle} has been added to your tracker` });
-    } catch (e: any) {
-      toast({ title: 'Failed to add', description: e.message || 'Error', variant: 'destructive' });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Failed to add', description: message, variant: 'destructive' });
     }
   };
 
@@ -357,7 +495,16 @@ const MediaTracker = () => {
 
       const isReadable = readableTypes.includes(formData.type);
       const isWatchable = watchableTypes.includes(formData.type);
-      const mediaData: any = {
+      const mediaData: {
+        title: string;
+        type: string;
+        status: string;
+        rating: number | null;
+        current_season: number | null;
+        current_episode: number | null;
+        current_chapter: number | null;
+        user_id: string;
+      } = {
         title: formData.title,
         type: formData.type,
         status: formData.status,
@@ -375,16 +522,34 @@ const MediaTracker = () => {
         mediaData.current_episode = formData.current_episode ? parseInt(formData.current_episode) : null;
       }
 
-      const { error } = await supabase
+      const { data: newMedia, error } = await supabase
         .from('media_tracker')
-        .insert([mediaData]);
+        .insert([mediaData])
+        .select()
+        .single();
 
       if (error) {
         throw error;
       }
 
+      // Save tags for new media item
+      if (formTags.length > 0 && newMedia) {
+        const tagsToSave: Tag[] = [];
+        for (const tag of formTags) {
+          if (tag.id < 0) {
+            const created = await createTag(tag.name, tag.color);
+            tagsToSave.push(created);
+          } else {
+            tagsToSave.push(tag);
+          }
+        }
+        await setMediaTags(newMedia.id, tagsToSave.map(t => t.id));
+      }
+
       setIsModalOpen(false);
       resetForm();
+      setFormTags([]);
+      fetchTags();
   refetch();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create media item');
@@ -397,7 +562,15 @@ const MediaTracker = () => {
     try {
       const isReadable = readableTypes.includes(formData.type);
       const isWatchable = watchableTypes.includes(formData.type);
-      const mediaData: any = {
+      const mediaData: {
+        title: string;
+        type: string;
+        status: string;
+        rating: number | null;
+        current_season: number | null;
+        current_episode: number | null;
+        current_chapter: number | null;
+      } = {
         title: formData.title,
         type: formData.type,
         status: formData.status,
@@ -423,9 +596,27 @@ const MediaTracker = () => {
         throw error;
       }
 
+      // Save tags for edited media item
+      if (editingItemTags.length > 0) {
+        const tagsToSave: Tag[] = [];
+        for (const tag of editingItemTags) {
+          if (tag.id < 0) {
+            const created = await createTag(tag.name, tag.color);
+            tagsToSave.push(created);
+          } else {
+            tagsToSave.push(tag);
+          }
+        }
+        await setMediaTags(editingItem.id, tagsToSave.map(t => t.id));
+      } else {
+        await setMediaTags(editingItem.id, []);
+      }
+
       setIsModalOpen(false);
       setEditingItem(null);
+      setEditingItemTags([]);
       resetForm();
+      fetchTags();
   refetch();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update media item');
@@ -549,30 +740,45 @@ const MediaTracker = () => {
     setIsImporting(true);
     try {
       const text = await file.text();
-      let data: any[] = [];
+      let data: unknown[] = [];
       try {
-        data = JSON.parse(text);
-        if (!Array.isArray(data)) throw new Error('JSON root must be an array');
-      } catch (e:any) {
-        setError(e.message || 'Invalid JSON');
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed)) throw new Error('JSON root must be an array');
+        data = parsed;
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : 'Invalid JSON';
+        setError(message);
         setIsImporting(false);
         return;
       }
       toast({ title: 'Import started', description: 'Your media is being imported in the background.' });
       const batchSize = 50;
-      const successfulImports: any[] = [];
-      const failedImports: any[] = [];
+      const successfulImports: { title: string }[] = [];
+      const failedImports: { title: string }[] = [];
+      interface ImportItem {
+        title: string;
+        type: string;
+        status: string;
+        rating: number | null;
+        current_season: number | null;
+        current_episode: number | null;
+        current_chapter: number | null;
+        user_id: string;
+      }
       for (let i = 0; i < data.length; i += batchSize) {
-        const batch = data.slice(i, i + batchSize).map(item => ({
-          title: item.title || '',
-          type: item.type || 'Movie',
-          status: item.status || 'Plan to Read',
-          rating: item.rating ?? null,
-          current_season: item.current_season ?? null,
-          current_episode: item.current_episode ?? null,
-          current_chapter: item.current_chapter ?? null,
-          user_id: item.user_id || undefined // will be overridden by RLS / server if needed
-        }));
+        const batch: ImportItem[] = data.slice(i, i + batchSize).map((item: unknown) => {
+          const record = item as Record<string, unknown>;
+          return {
+            title: String(record.title || ''),
+            type: String(record.type || 'Movie'),
+            status: String(record.status || 'Plan to Read'),
+            rating: typeof record.rating === 'number' ? record.rating : null,
+            current_season: typeof record.current_season === 'number' ? record.current_season : null,
+            current_episode: typeof record.current_episode === 'number' ? record.current_episode : null,
+            current_chapter: typeof record.current_chapter === 'number' ? record.current_chapter : null,
+            user_id: String(record.user_id || '') // will be overridden by RLS / server if needed
+          };
+        });
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Not authenticated');
         batch.forEach(b => b.user_id = user.id);
@@ -591,10 +797,11 @@ const MediaTracker = () => {
         toast({ title: 'Import Partially Complete', description: `${successfulImports.length} items imported. ${failedImports.length} failed. Failed titles: ${failedTitles}${failedImports.length>20?', ...':''}`, variant: 'destructive' });
       }
   refetch();
-    } catch (e:any) {
+    } catch (e: unknown) {
       console.error('Import error', e);
-      setError(e.message || 'Import failed');
-      toast({ title: 'Import failed', description: e.message || 'An error occurred', variant: 'destructive' });
+      const message = e instanceof Error ? e.message : 'Import failed';
+      setError(message);
+      toast({ title: 'Import failed', description: message, variant: 'destructive' });
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -869,10 +1076,7 @@ const MediaTracker = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <AppSidebar 
-          isCollapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        <AppSidebar />
         
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
@@ -880,7 +1084,7 @@ const MediaTracker = () => {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              onClick={toggleSidebar}
               className="touch-manipulation"
             >
               <Menu className="h-5 w-5" />

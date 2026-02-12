@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useSidebar } from "@/contexts/SidebarContext";
 import AppSidebar from '@/components/AppSidebar';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,7 @@ import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
 import { Menu } from 'lucide-react';
 
 const Settings = () => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'));
   const [colorTheme, setColorTheme] = useState(() => getCurrentTheme());
   const [displayName, setDisplayName] = useState('');
@@ -128,11 +129,11 @@ const Settings = () => {
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
-        <AppSidebar isCollapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <AppSidebar />
         <div className="flex-1 lg:ml-0">
           {/* Mobile Header */}
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="touch-manipulation">
+            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
               <Menu className="h-5 w-5" />
             </Button>
             <h1 className="font-heading font-bold text-base sm:text-lg">Settings</h1>

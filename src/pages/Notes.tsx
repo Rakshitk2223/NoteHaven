@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
+import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
 import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered, Search, X, Undo, Redo } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,13 @@ import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { cn, getContrastTextColor } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
+import { CompactTagSelector } from "@/components/CompactTagSelector";
+import { TagBadge } from "@/components/TagBadge";
+import { TagFilter } from "@/components/TagFilter";
+import { fetchUserTags, fetchNoteTags, setNoteTags, createTag, type Tag } from "@/lib/tags";
 // Removed markdown rendering libraries; now storing & rendering raw HTML
 import { useEditor, EditorContent } from '@tiptap/react';
+import DOMPurify from 'dompurify';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Gapcursor from '@tiptap/extension-gapcursor';
@@ -31,13 +37,14 @@ interface Note {
   updated_at: string;
   is_pinned?: boolean;
   background_color?: string | null;
+  tags?: Tag[];
 }
 
 // HTML-only persistence: any legacy markdown handling removed
 
 const Notes = () => {
   const location = useLocation();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,6 +62,9 @@ const Notes = () => {
   const [lineCount, setLineCount] = useState(0);
   const [lastServerUpdate, setLastServerUpdate] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
+  const [currentNoteTags, setCurrentNoteTags] = useState<Tag[]>([]);
   const [notesPerPage] = useState(50); // Pagination: load 50 notes at a time
   const [currentPage, setCurrentPage] = useState(1);
   const { toast } = useToast();
@@ -185,7 +195,35 @@ const Notes = () => {
   // Fetch notes on component mount
   useEffect(() => {
     fetchNotes();
+    fetchTags();
   }, []);
+
+  // Fetch all user tags
+  const fetchTags = async () => {
+    try {
+      const tags = await fetchUserTags();
+      setAvailableTags(tags);
+    } catch (err) {
+      console.error('Failed to fetch tags:', err);
+    }
+  };
+
+  // Load tags for current note when selected
+  useEffect(() => {
+    const loadNoteTags = async () => {
+      if (selectedNote?.id) {
+        try {
+          const tags = await fetchNoteTags(selectedNote.id);
+          setCurrentNoteTags(tags);
+        } catch (err) {
+          console.error('Failed to load note tags:', err);
+        }
+      } else {
+        setCurrentNoteTags([]);
+      }
+    };
+    loadNoteTags();
+  }, [selectedNote]);
 
   // Initialize Tiptap editor (v2) once (HTML internal & persisted)
   const editor = useEditor({
@@ -198,7 +236,9 @@ const Notes = () => {
     content: '',
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
-    if (html !== contentValue) handleContentChange(html);
+      // Only trigger save if content actually changed from last saved value
+      // Don't compare to contentValue state to avoid unnecessary re-renders
+      handleContentChange(html);
     }
   });
   editorRef.current = editor;
@@ -252,7 +292,7 @@ const Notes = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const { data, error } = await supabase
         .from('notes')
         .select('*')
@@ -264,6 +304,28 @@ const Notes = () => {
       }
 
       let loaded = data || [];
+
+      // Fetch tags for all notes
+      const noteIds = loaded.map(n => n.id);
+      if (noteIds.length > 0) {
+        const { data: noteTagsData } = await supabase
+          .from('note_tags')
+          .select('note_id, tags(*)')
+          .in('note_id', noteIds);
+
+        // Group tags by note_id
+        const tagsByNote: Record<number, Tag[]> = {};
+        noteTagsData?.forEach((item: any) => {
+          if (!tagsByNote[item.note_id]) tagsByNote[item.note_id] = [];
+          tagsByNote[item.note_id].push(item.tags);
+        });
+
+        // Attach tags to notes
+        loaded = loaded.map(note => ({
+          ...note,
+          tags: tagsByNote[note.id] || []
+        }));
+      }
 
       // 1. Locate existing Inbox (exact title match only now)
       let inboxNote = loaded.find(n => (n.title || '') === 'Inbox');
@@ -285,7 +347,7 @@ const Notes = () => {
       }
 
       // 3. Separate inbox from others explicitly
-      const otherNotes = loaded.filter(n => n !== inboxNote);
+      const otherNotes = loaded.filter(n => n.id !== inboxNote?.id);
 
       // 4. Sort remaining notes: pinned first, then by updated_at desc
       otherNotes.sort((a,b) => {
@@ -297,7 +359,7 @@ const Notes = () => {
       // 5. Compose final list ensuring Inbox is always at index 0
       const finalList = inboxNote ? [inboxNote, ...otherNotes] : otherNotes;
       setNotes(finalList);
-      
+
       // Select the first note by default
       if (finalList.length > 0 && !selectedNote) {
         setSelectedNote(finalList[0]);
@@ -308,6 +370,66 @@ const Notes = () => {
       setLoading(false);
     }
   };
+
+  // Realtime subscription for multi-tab sync
+  useEffect(() => {
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Subscribe to changes on notes table for current user
+      const channel = supabase
+        .channel('notes-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*', // Listen to all events: INSERT, UPDATE, DELETE
+            schema: 'public',
+            table: 'notes',
+            filter: `user_id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log('Realtime update received:', payload);
+            
+            if (payload.eventType === 'INSERT') {
+              const newNote = payload.new as Note;
+              setNotes(prev => {
+                // Avoid duplicates
+                if (prev.find(n => n.id === newNote.id)) return prev;
+                return [newNote, ...prev];
+              });
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedNote = payload.new as Note;
+              setNotes(prev => prev.map(note => 
+                note.id === updatedNote.id ? updatedNote : note
+              ));
+              
+              // If the currently selected note was updated, update it
+              // but DON'T reset the editor content to avoid cursor jumping
+              setSelectedNote(prev => {
+                if (prev?.id === updatedNote.id) {
+                  // Only update metadata (title, pinned, color), not content
+                  // Content sync is handled separately to avoid cursor issues
+                  return { ...prev, ...updatedNote };
+                }
+                return prev;
+              });
+            } else if (payload.eventType === 'DELETE') {
+              const deletedNote = payload.old as Note;
+              setNotes(prev => prev.filter(note => note.id !== deletedNote.id));
+              setSelectedNote(prev => prev?.id === deletedNote.id ? null : prev);
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+
+    setupRealtime();
+  }, []);
 
   const createNote = async () => {
     try {
@@ -488,8 +610,48 @@ const Notes = () => {
       const previous = selectedNote.content || '';
       if (html !== previous) scheduleContentSave(selectedNote.id, html, previous);
     }
-    if (editor && editor.getHTML() !== html) {
-      editor.commands.setContent(html);
+    // Note: We do NOT call editor.commands.setContent(html) here because
+    // that would reset the cursor position. The editor's content is already
+    // up-to-date from the user's typing, we just need to save it.
+  };
+
+  // Handle tag changes for the current note
+  const handleTagsChange = async (newTags: Tag[]) => {
+    if (!selectedNote) return;
+
+    setCurrentNoteTags(newTags);
+
+    try {
+      // Create any new tags that have negative IDs (temporary)
+      const tagsToSave: Tag[] = [];
+      for (const tag of newTags) {
+        if (tag.id < 0) {
+          // New tag - create it
+          const created = await createTag(tag.name, tag.color);
+          tagsToSave.push(created);
+        } else {
+          tagsToSave.push(tag);
+        }
+      }
+
+      // Save tags to note
+      await setNoteTags(selectedNote.id, tagsToSave.map(t => t.id));
+
+      // Refresh available tags to include any new ones
+      await fetchTags();
+
+      // Update the note in the list with new tags
+      setNotes(prev => prev.map(n =>
+        n.id === selectedNote.id ? { ...n, tags: tagsToSave } : n
+      ));
+
+      toast({ title: 'Tags saved', description: 'Tags updated successfully' });
+    } catch (err) {
+      console.error('Failed to save tags:', err);
+      toast({ title: 'Error', description: 'Failed to save tags', variant: 'destructive' });
+      // Revert to previous tags
+      const previousTags = await fetchNoteTags(selectedNote.id);
+      setCurrentNoteTags(previousTags);
     }
   };
 
@@ -613,28 +775,37 @@ const Notes = () => {
     return text.substring(0, maxLength) + '...';
   };
 
-  // Sanitize HTML for preview display (removes scripts and dangerous attributes)
+  // Sanitize HTML for preview display using DOMPurify
   const sanitizePreview = (html: string) => {
-    const text = html
-      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
-      .replace(/on\w+="[^"]*"/gi, '')
-      .replace(/on\w+='[^']*'/gi, '')
-      .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-      .replace(/<object[\s\S]*?<\/object>/gi, '')
-      .replace(/<embed[\s\S]*?>/gi, '');
-    return text;
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre', 'span', 'div'],
+      ALLOWED_ATTR: ['class', 'style'],
+      ALLOW_DATA_ATTR: false,
+      SANITIZE_DOM: true,
+    });
   };
 
-  // Filter notes based on search query
+  // Filter notes based on search query and selected tags
   const filteredNotes = notes.filter(note => {
-    if (!searchQuery.trim()) return true;
-    const query = searchQuery.toLowerCase();
-    const title = (note.title || '').toLowerCase();
-    const contentText = (note.content || '')
-      .replace(/<[^>]+>/g, ' ')
-      .toLowerCase();
-    return title.includes(query) || contentText.includes(query);
+    // Search query filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      const title = (note.title || '').toLowerCase();
+      const contentText = (note.content || '')
+        .replace(/<[^>]+>/g, ' ')
+        .toLowerCase();
+      const matchesSearch = title.includes(query) || contentText.includes(query);
+      if (!matchesSearch) return false;
+    }
+
+    // Tag filter
+    if (selectedTags.length > 0) {
+      const noteTagNames = note.tags?.map(t => t.name) || [];
+      const matchesTags = selectedTags.every(tag => noteTagNames.includes(tag));
+      if (!matchesTags) return false;
+    }
+
+    return true;
   });
 
   // Paginate filtered notes
@@ -644,20 +815,17 @@ const Notes = () => {
     currentPage * notesPerPage
   );
 
-  // Reset to page 1 when search changes
+  // Reset to page 1 when search or tags change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery]);
+  }, [searchQuery, selectedTags]);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar 
-          isCollapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+    <div className="h-screen bg-background overflow-hidden">
+      <div className="flex h-full">
+        <AppSidebar />
         
-        <div className="flex-1 lg:ml-0">
+        <div className="flex-1 lg:ml-0 h-full overflow-hidden">
           {/* Mobile Header */}
           {isMobileView && (
             <div className="sticky top-0 z-30 flex items-center justify-between p-3 sm:p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -665,7 +833,7 @@ const Notes = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  onClick={toggleSidebar}
                   className="touch-manipulation"
                   title="Main menu"
                 >
@@ -696,14 +864,14 @@ const Notes = () => {
             </div>
           )}
 
-          <div className="flex h-[calc(100vh-4rem)]">
+          <div className="flex h-full overflow-hidden">
             {/* Notes List Pane */}
             <div className={`
               ${isMobileView 
                 ? (showNoteList ? 'w-full' : 'hidden') 
                 : 'w-72 md:w-80 lg:w-96 border-r border-border'
               }
-              flex flex-col bg-card
+              flex flex-col bg-card h-full overflow-hidden
             `}>
               {/* Desktop Header */}
               {!isMobileView && (
@@ -721,7 +889,7 @@ const Notes = () => {
                     </Button>
                   </div>
                   {/* Search Bar */}
-                  <div className="relative">
+                  <div className="relative mb-2">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       placeholder="Search notes..."
@@ -738,6 +906,12 @@ const Notes = () => {
                       </button>
                     )}
                   </div>
+                  {/* Tag Filter */}
+                  <TagFilter
+                    availableTags={availableTags}
+                    selectedTags={selectedTags}
+                    onChange={setSelectedTags}
+                  />
                 </div>
               )}
 
@@ -800,7 +974,7 @@ const Notes = () => {
                           if (isMobileView) setShowNoteList(false);
                         }}
                         className={`
-                          p-3 rounded-lg cursor-pointer transition-all duration-200 ease-out
+                          p-3 rounded-lg cursor-pointer transition-all duration-200 ease-out group
                           ${selectedNote?.id === note.id ? 'ring-2 ring-primary shadow-md' : 'hover:bg-muted hover:shadow-sm'}
                           max-w-full overflow-hidden
                         `}
@@ -828,18 +1002,26 @@ const Notes = () => {
                           ) : null}
                           <span className="truncate min-w-0">{truncateText(note.title || 'Untitled', 80)}</span>
                         </div>
-                        <div 
-                          className="text-sm mt-1 line-clamp-3 text-foreground/80 prose dark:prose-invert max-w-none break-words overflow-hidden" 
-                          style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
-                          dangerouslySetInnerHTML={{ __html: sanitizePreview(note.content || '') }} 
-                        />
-                        <div className="text-xs mt-2 text-foreground/60">
-                          {formatDate(note.updated_at)}
-                        </div>
-                      </motion.div>
-                    ))}
-                  </motion.div>
-                )}
+                         <div 
+                           className="text-sm mt-1 line-clamp-3 text-foreground/80 prose dark:prose-invert max-w-none break-words overflow-hidden" 
+                           style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+                           dangerouslySetInnerHTML={{ __html: sanitizePreview(note.content || '') }} 
+                         />
+                         {/* Tags (show on hover) */}
+                         {note.tags && note.tags.length > 0 && (
+                           <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-wrap gap-1">
+                             {note.tags.map(tag => (
+                               <TagBadge key={tag.id} tag={tag} size="sm" />
+                             ))}
+                           </div>
+                         )}
+                         <div className="text-xs mt-2 text-foreground/60">
+                           {formatDate(note.updated_at)}
+                         </div>
+                       </motion.div>
+                     ))}
+                   </motion.div>
+                 )}
                 
                 {/* Pagination Controls */}
                 {filteredNotes.length > notesPerPage && (
@@ -879,7 +1061,7 @@ const Notes = () => {
                 ? (showNoteList ? 'hidden' : 'flex-1') 
                 : 'flex-1'
               }
-              flex flex-col
+              flex flex-col h-full overflow-hidden
             `}>
               {selectedNote ? (
                 <>
@@ -887,12 +1069,23 @@ const Notes = () => {
                   <div
                     className="sticky top-0 z-20 p-3 sm:p-4 border-b border-border flex items-center justify-between gap-2 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
                   >
-                    <Input
-                      value={titleValue}
-                      onChange={(e) => handleTitleChange(e.target.value)}
-                      placeholder="Note title..."
-                      className="text-base sm:text-lg md:text-xl font-semibold border-0 focus-visible:ring-0 px-0"
-                    />
+                    <div className="flex-1 min-w-0">
+                      <Input
+                        value={titleValue}
+                        onChange={(e) => handleTitleChange(e.target.value)}
+                        placeholder="Note title..."
+                        className="text-base sm:text-lg md:text-xl font-semibold border-0 focus-visible:ring-0 px-0 w-full"
+                      />
+                      {/* Tags */}
+                      <div className="mt-2">
+                        <CompactTagSelector
+                          selectedTags={currentNoteTags}
+                          onChange={handleTagsChange}
+                          availableTags={availableTags}
+                          maxTags={3}
+                        />
+                      </div>
+                    </div>
                     <div className="flex items-center gap-0.5 sm:gap-1 ml-2 flex-shrink-0">
                       <div className="flex items-center gap-2 text-xs">
                         {isSaving && <span>Saving...</span>}
@@ -999,8 +1192,8 @@ const Notes = () => {
                   </div>
 
                   {/* Editor Content - Tiptap WYSIWYG */}
-                  <div className="flex-1 p-2 sm:p-4 flex flex-col gap-3">
-                    <div className="flex-1 flex flex-col border rounded-md overflow-hidden min-h-[calc(100vh-280px)] sm:min-h-[calc(100vh-320px)]">
+                  <div className="flex-1 p-2 sm:p-4 flex flex-col gap-3 overflow-hidden">
+                    <div className="flex-1 flex flex-col border rounded-md overflow-hidden">
                       <div className="sticky top-0 bg-background z-10 flex items-center gap-0.5 sm:gap-1 flex-wrap border-b border-border p-1 text-xs">
                         <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Bold className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
                         <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Italic className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
@@ -1021,7 +1214,7 @@ const Notes = () => {
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-2 pt-2 border-t border-border text-xs text-muted-foreground">
+                    <div className="flex-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-2 pt-2 border-t border-border text-xs text-muted-foreground">
                       <div className="flex items-center gap-2"><span className="hidden sm:inline">Autosave every 5s</span><span className="sm:hidden">Autosave</span></div>
                       <div className="px-2 tabular-nums select-none">Words: {wordCount}<span className="hidden sm:inline"> | Lines: {lineCount}</span></div>
                     </div>
