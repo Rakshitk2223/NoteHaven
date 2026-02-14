@@ -58,45 +58,36 @@ export async function createSubscription(
     );
   }
 
-  // Get or create an expense category in the ledger
+  // Get or create the "Subscriptions" expense category in the ledger
   let ledgerCategoryId = subscription.ledger_category_id;
   if (!ledgerCategoryId) {
-    // Try to find an existing expense category
-    const { data: expenseCats } = await supabase
+    // Try to find an existing "Subscriptions" expense category
+    const { data: subscriptionCat } = await supabase
       .from('ledger_categories')
       .select('id')
       .eq('user_id', user.id)
       .eq('type', 'expense')
-      .order('id', { ascending: true })
-      .limit(1);
+      .eq('name', 'Subscriptions')
+      .single();
     
-    if (expenseCats && expenseCats.length > 0) {
-      ledgerCategoryId = expenseCats[0].id;
+    if (subscriptionCat) {
+      ledgerCategoryId = subscriptionCat.id;
     } else {
-      // Create default expense categories if none exist
-      const defaultExpenseCats = [
-        { name: 'Food & Dining', color: '#EF4444' },
-        { name: 'Transportation', color: '#F59E0B' },
-        { name: 'Entertainment', color: '#EC4899' },
-        { name: 'Shopping', color: '#8B5CF6' },
-        { name: 'Bills & Utilities', color: '#6366F1' },
-        { name: 'Healthcare', color: '#14B8A6' },
-        { name: 'Education', color: '#10B981' },
-        { name: 'Other Expense', color: '#6B7280' }
-      ];
-      
-      const { data: newCats, error: catError } = await supabase
+      // Create "Subscriptions" expense category in red
+      const { data: newCat, error: catError } = await supabase
         .from('ledger_categories')
-        .insert(defaultExpenseCats.map(cat => ({
+        .insert({
           user_id: user.id,
+          name: 'Subscriptions',
           type: 'expense',
-          ...cat
-        })))
-        .select('id');
+          color: '#EF4444'
+        })
+        .select('id')
+        .single();
       
       if (catError) throw catError;
-      if (newCats && newCats.length > 0) {
-        ledgerCategoryId = newCats[0].id;
+      if (newCat) {
+        ledgerCategoryId = newCat.id;
       }
     }
   }
