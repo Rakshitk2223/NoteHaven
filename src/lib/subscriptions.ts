@@ -138,6 +138,36 @@ export async function updateSubscription(
 }
 
 export async function deleteSubscription(id: number): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  // Fetch subscription details to find associated ledger entry
+  const { data: subscription, error: fetchError } = await supabase
+    .from('subscriptions')
+    .select('name, billing_cycle')
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  // Delete associated ledger entries
+  if (subscription) {
+    const description = `${subscription.name} (${subscription.billing_cycle} subscription)`;
+    const { error: ledgerError } = await supabase
+      .from('ledger_entries')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('description', description)
+      .eq('type', 'expense');
+
+    if (ledgerError) {
+      console.warn('Failed to delete associated ledger entries:', ledgerError);
+      // Continue with subscription deletion even if ledger cleanup fails
+    }
+  }
+
+  // Delete the subscription
   const { error } = await supabase
     .from('subscriptions')
     .delete()
