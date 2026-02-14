@@ -11,10 +11,8 @@ import { useToast } from '@/components/ui/use-toast';
 import AppSidebar from '@/components/AppSidebar';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { 
-  fetchLedgerCategories, 
   fetchLedgerEntries, 
   createLedgerEntry,
-  createLedgerCategory,
   deleteLedgerEntry,
   calculateLedgerSummary,
   formatCurrency,
@@ -25,6 +23,7 @@ import {
   type LedgerEntry,
   type LedgerCategory
 } from '@/lib/ledger';
+import { ensureLedgerCategoriesExist } from '@/lib/category-init';
 import { TagBadge } from '@/components/TagBadge';
 
 const MoneyLedger = () => {
@@ -60,23 +59,17 @@ const MoneyLedger = () => {
     try {
       setLoading(true);
       console.log('Loading ledger data...');
+      
+      // Fetch entries and ensure categories exist
       const [entriesData, categoriesData] = await Promise.all([
         fetchLedgerEntries(),
-        fetchLedgerCategories()
+        ensureLedgerCategoriesExist()
       ]);
+      
       console.log('Entries loaded:', entriesData.length);
       console.log('Categories loaded:', categoriesData.length);
-      console.log('Categories:', categoriesData);
       setEntries(entriesData);
       setCategories(categoriesData);
-      
-      if (categoriesData.length === 0) {
-        toast({
-          title: 'No categories found',
-          description: 'Please create categories first',
-          variant: 'destructive'
-        });
-      }
     } catch (error) {
       console.error('Error loading ledger data:', error);
       toast({
@@ -89,35 +82,17 @@ const MoneyLedger = () => {
     }
   };
 
-  // Create default categories if none exist
-  const createDefaultCategories = async () => {
+  // Refresh categories (reload from server)
+  const refreshCategories = async () => {
     try {
-      const defaultCategories = [
-        { name: 'Salary', type: 'income' as const, color: '#10B981' },
-        { name: 'Freelance', type: 'income' as const, color: '#3B82F6' },
-        { name: 'Investments', type: 'income' as const, color: '#8B5CF6' },
-        { name: 'Other Income', type: 'income' as const, color: '#6B7280' },
-        { name: 'Food & Dining', type: 'expense' as const, color: '#EF4444' },
-        { name: 'Transportation', type: 'expense' as const, color: '#F59E0B' },
-        { name: 'Entertainment', type: 'expense' as const, color: '#EC4899' },
-        { name: 'Shopping', type: 'expense' as const, color: '#8B5CF6' },
-        { name: 'Bills & Utilities', type: 'expense' as const, color: '#6366F1' },
-        { name: 'Healthcare', type: 'expense' as const, color: '#14B8A6' },
-        { name: 'Education', type: 'expense' as const, color: '#10B981' },
-        { name: 'Other Expense', type: 'expense' as const, color: '#6B7280' }
-      ];
-
-      for (const cat of defaultCategories) {
-        await createLedgerCategory(cat.name, cat.type, cat.color);
-      }
-      
-      toast({ title: 'Default categories created' });
-      loadData();
+      const categoriesData = await ensureLedgerCategoriesExist();
+      setCategories(categoriesData);
+      toast({ title: 'Categories refreshed' });
     } catch (error) {
-      console.error('Error creating categories:', error);
+      console.error('Error refreshing categories:', error);
       toast({
         title: 'Error',
-        description: 'Failed to create categories',
+        description: 'Failed to refresh categories',
         variant: 'destructive'
       });
     }
@@ -282,7 +257,7 @@ const MoneyLedger = () => {
                         <label className="text-sm font-medium">Category</label>
                         {categories.length === 0 && (
                           <button 
-                            onClick={createDefaultCategories}
+                            onClick={refreshCategories}
                             className="text-xs text-blue-500 hover:underline"
                           >
                             Create categories
@@ -386,13 +361,13 @@ const MoneyLedger = () => {
             </Card>
           </div>
 
-          {/* Show create categories button if none exist */}
+          {/* Show loading state while categories are being initialized */}
           {!loading && categories.length === 0 && (
-            <div className="mb-6 p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
-              <p className="text-sm mb-2">No categories found. Create default categories to get started.</p>
-              <Button onClick={createDefaultCategories} variant="outline">
+            <div className="mb-6 p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+              <p className="text-sm mb-2">Loading categories...</p>
+              <Button onClick={refreshCategories} variant="outline">
                 <Plus className="h-4 w-4 mr-2" />
-                Create Default Categories
+                Refresh Categories
               </Button>
             </div>
           )}

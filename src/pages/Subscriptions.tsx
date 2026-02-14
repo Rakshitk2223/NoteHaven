@@ -10,8 +10,7 @@ import { useToast } from '@/components/ui/use-toast';
 import AppSidebar from '@/components/AppSidebar';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { 
-  fetchSubscriptions, 
-  fetchSubscriptionCategories,
+  fetchSubscriptions,
   createSubscription,
   updateSubscription,
   deleteSubscription,
@@ -23,6 +22,7 @@ import {
   type Subscription,
   type SubscriptionCategory
 } from '@/lib/subscriptions';
+import { ensureSubscriptionCategoriesExist } from '@/lib/category-init';
 import { TagBadge } from '@/components/TagBadge';
 import { formatCurrency } from '@/lib/ledger';
 
@@ -53,10 +53,16 @@ const Subscriptions = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      console.log('Loading subscriptions data...');
+      
+      // Fetch subscriptions and ensure categories exist
       const [subsData, catsData] = await Promise.all([
         fetchSubscriptions(),
-        fetchSubscriptionCategories()
+        ensureSubscriptionCategoriesExist()
       ]);
+      
+      console.log('Subscriptions loaded:', subsData.length);
+      console.log('Categories loaded:', catsData.length);
       setSubscriptions(subsData);
       setCategories(catsData);
     } catch (error) {
@@ -68,6 +74,22 @@ const Subscriptions = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Refresh categories (reload from server)
+  const refreshCategories = async () => {
+    try {
+      const categoriesData = await ensureSubscriptionCategoriesExist();
+      setCategories(categoriesData);
+      toast({ title: 'Categories refreshed' });
+    } catch (error) {
+      console.error('Error refreshing categories:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to refresh categories',
+        variant: 'destructive'
+      });
     }
   };
 
@@ -350,6 +372,17 @@ const Subscriptions = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* Show loading state while categories are being initialized */}
+          {!loading && categories.length === 0 && (
+            <div className="mb-6 p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+              <p className="text-sm mb-2">Loading categories...</p>
+              <Button onClick={refreshCategories} variant="outline">
+                <Plus className="h-4 w-4 mr-2" />
+                Refresh Categories
+              </Button>
+            </div>
+          )}
 
           {/* Subscriptions List */}
           <Card>
