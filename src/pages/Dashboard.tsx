@@ -14,6 +14,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { TagCloud } from "@/components/TagCloud";
 import { fetchUserTags, type Tag } from "@/lib/tags";
+import { getUpcomingRenewals, type UpcomingRenewal } from "@/lib/subscriptions";
+import { CreditCard } from "lucide-react";
+import { formatCurrency } from "@/lib/ledger";
 
 interface Task {
   id: number;
@@ -75,6 +78,7 @@ const Dashboard = () => {
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [userTags, setUserTags] = useState<Tag[]>([]);
+  const [upcomingRenewals, setUpcomingRenewals] = useState<UpcomingRenewal[]>([]);
   const { toast } = useToast();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -133,6 +137,14 @@ const Dashboard = () => {
         setUserTags(tags);
       } catch (err) {
         console.error('Failed to fetch tags:', err);
+      }
+      
+      // Fetch upcoming renewals
+      try {
+        const renewals = await getUpcomingRenewals(4);
+        setUpcomingRenewals(renewals);
+      } catch (err) {
+        console.error('Failed to fetch renewals:', err);
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -1084,6 +1096,42 @@ const Dashboard = () => {
                           <span className="font-medium block truncate">{b.message}</span>
                         </div>
                       ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Upcoming Renewals */}
+              {upcomingRenewals.length > 0 && (
+                <div className="zen-card zen-shadow p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-base flex items-center gap-2">
+                      <CreditCard className="h-4 w-4" />
+                      Renewals (4d)
+                    </h3>
+                    <Button size="sm" variant="ghost" className="h-8 touch-manipulation" onClick={() => navigate('/subscriptions')}>View All</Button>
+                  </div>
+                  <div className="space-y-2">
+                    {upcomingRenewals.map(renewal => (
+                      <div key={renewal.id} className="flex items-center justify-between text-sm">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{renewal.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {renewal.days_until === 0 ? 'Today' :
+                             renewal.days_until === 1 ? 'Tomorrow' :
+                             `In ${renewal.days_until} days`} • {formatCurrency(renewal.amount)}
+                          </p>
+                        </div>
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          renewal.status === 'renew' ? 'bg-blue-100 text-blue-800' :
+                          renewal.status === 'cancel' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {renewal.status === 'renew' ? 'Renew' :
+                           renewal.status === 'cancel' ? 'Cancel' :
+                           'Active'}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

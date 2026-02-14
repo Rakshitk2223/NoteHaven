@@ -12,7 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
-  Wallet
+  Wallet,
+  CreditCard
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,7 @@ const navigation = [
   { name: "Notes", href: "/notes", icon: FileText },
   { name: "Birthdays", href: "/birthdays", icon: Cake },
   { name: "Money Ledger", href: "/ledger", icon: Wallet },
+  { name: "Subscriptions", href: "/subscriptions", icon: CreditCard },
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
