@@ -333,6 +333,7 @@ const Subscriptions = () => {
                 <div className="text-2xl font-bold">
                   {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.monthlyTotal)}
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">Active & Renew only</p>
               </CardContent>
             </Card>
             
@@ -345,6 +346,7 @@ const Subscriptions = () => {
                 <div className="text-2xl font-bold">
                   {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.yearlyTotal)}
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">Active & Renew only</p>
               </CardContent>
             </Card>
             
@@ -357,6 +359,7 @@ const Subscriptions = () => {
                 <div className="text-2xl font-bold">
                   {loading ? <Skeleton className="h-8 w-12" /> : summary.activeCount}
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">Active + Renew</p>
               </CardContent>
             </Card>
             
@@ -367,8 +370,9 @@ const Subscriptions = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.monthlyTotal)}
+                  {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.monthlyTotal / (summary.activeCount || 1))}
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">Per subscription</p>
               </CardContent>
             </Card>
           </div>

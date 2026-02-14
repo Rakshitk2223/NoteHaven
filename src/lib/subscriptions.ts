@@ -58,18 +58,77 @@ export async function createSubscription(
     );
   }
 
+  // Get or create an expense category in the ledger
+  let ledgerCategoryId = subscription.ledger_category_id;
+  if (!ledgerCategoryId) {
+    // Try to find an existing expense category
+    const { data: expenseCats } = await supabase
+      .from('ledger_categories')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('type', 'expense')
+      .order('id', { ascending: true })
+      .limit(1);
+    
+    if (expenseCats && expenseCats.length > 0) {
+      ledgerCategoryId = expenseCats[0].id;
+    } else {
+      // Create default expense categories if none exist
+      const defaultExpenseCats = [
+        { name: 'Food & Dining', color: '#EF4444' },
+        { name: 'Transportation', color: '#F59E0B' },
+        { name: 'Entertainment', color: '#EC4899' },
+        { name: 'Shopping', color: '#8B5CF6' },
+        { name: 'Bills & Utilities', color: '#6366F1' },
+        { name: 'Healthcare', color: '#14B8A6' },
+        { name: 'Education', color: '#10B981' },
+        { name: 'Other Expense', color: '#6B7280' }
+      ];
+      
+      const { data: newCats, error: catError } = await supabase
+        .from('ledger_categories')
+        .insert(defaultExpenseCats.map(cat => ({
+          user_id: user.id,
+          type: 'expense',
+          ...cat
+        })))
+        .select('id');
+      
+      if (catError) throw catError;
+      if (newCats && newCats.length > 0) {
+        ledgerCategoryId = newCats[0].id;
+      }
+    }
+  }
+
   const { data, error } = await supabase
     .from('subscriptions')
     .insert([{
       ...subscription,
-      user_id: user.id
+      user_id: user.id,
+      ledger_category_id: ledgerCategoryId
     }])
     .select('*, category:subscription_categories(*)')
     .single();
 
   if (error) throw error;
   
-  // Note: The database trigger will automatically create a ledger entry
+  // Manually create ledger entry (in case trigger fails or doesn't exist)
+  try {
+    await supabase.from('ledger_entries').insert({
+      user_id: user.id,
+      category_id: ledgerCategoryId,
+      amount: subscription.amount,
+      type: 'expense',
+      description: `${subscription.name} (${subscription.billing_cycle} subscription)`,
+      transaction_date: subscription.start_date,
+      notes: subscription.notes || ''
+    });
+  } catch (ledgerError) {
+    console.warn('Failed to create ledger entry:', ledgerError);
+    // Don't throw - subscription was created successfully
+  }
+  
   return data as unknown as Subscription;
 }
 
@@ -202,7 +261,7 @@ export function getStatusLabel(status: string): string {
     case 'renew':
       return 'Renew';
     case 'cancel':
-      return 'Cancel';
+      return 'Will Cancel';
     case 'cancelled':
       return 'Cancelled';
     default:
