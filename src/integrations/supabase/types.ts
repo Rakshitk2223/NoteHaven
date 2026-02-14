@@ -396,6 +396,78 @@ export type Database = {
         }
         Relationships: []
       }
+      subscription_categories: {
+        Row: {
+          id: number
+          user_id: string
+          name: string
+          color: string
+          created_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          name: string
+          color?: string
+          created_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          name?: string
+          color?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      subscriptions: {
+        Row: {
+          id: number
+          user_id: string
+          name: string
+          amount: number
+          billing_cycle: string
+          category_id: number | null
+          start_date: string
+          next_renewal_date: string
+          status: string
+          notes: string | null
+          ledger_category_id: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          name: string
+          amount: number
+          billing_cycle: string
+          category_id?: number | null
+          start_date: string
+          next_renewal_date: string
+          status?: string
+          notes?: string | null
+          ledger_category_id?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          name?: string
+          amount?: number
+          billing_cycle?: string
+          category_id?: number | null
+          start_date?: string
+          next_renewal_date?: string
+          status?: string
+          notes?: string | null
+          ledger_category_id?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -411,6 +483,21 @@ export type Database = {
           total_income: number
           total_expense: number
           net_balance: number
+        }[]
+      }
+      get_upcoming_renewals: {
+        Args: {
+          p_user_id: string
+          p_days?: number
+        }
+        Returns: {
+          id: number
+          name: string
+          amount: number
+          billing_cycle: string
+          next_renewal_date: string
+          days_until: number
+          status: string
         }[]
       }
     }
@@ -664,3 +751,49 @@ export interface LedgerSummary {
 }
 
 export type RecurringInterval = 'daily' | 'weekly' | 'monthly' | 'yearly'
+
+// ============================================
+// SUBSCRIPTION TYPES
+// ============================================
+
+export interface SubscriptionCategory {
+  id: number
+  user_id: string
+  name: string
+  color: string
+  created_at: string
+}
+
+export interface Subscription {
+  id: number
+  user_id: string
+  name: string
+  amount: number
+  billing_cycle: 'monthly' | 'yearly'
+  category_id: number | null
+  start_date: string
+  next_renewal_date: string
+  status: 'active' | 'renew' | 'cancel' | 'cancelled'
+  notes: string | null
+  ledger_category_id: number | null
+  created_at: string
+  updated_at: string
+  category?: SubscriptionCategory
+}
+
+export interface UpcomingRenewal {
+  id: number
+  name: string
+  amount: number
+  billing_cycle: string
+  next_renewal_date: string
+  days_until: number
+  status: string
+}
+
+export interface SubscriptionSummary {
+  monthlyTotal: number
+  yearlyTotal: number
+  activeCount: number
+  upcomingRenewals: number
+}
