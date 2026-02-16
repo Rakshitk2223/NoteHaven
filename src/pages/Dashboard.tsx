@@ -17,6 +17,7 @@ import { fetchUserTags, type Tag } from "@/lib/tags";
 import { getUpcomingRenewals, type UpcomingRenewal } from "@/lib/subscriptions";
 import { CreditCard } from "lucide-react";
 import { formatCurrency } from "@/lib/ledger";
+import DOMPurify from 'dompurify';
 
 interface Task {
   id: number;
@@ -55,6 +56,11 @@ interface Countdown {
   event_date: string; // ISO date
 }
 interface Birthday { id: number; name: string; date_of_birth: string; }
+
+// Helper function to sanitize HTML content
+const sanitizeHtml = (html: string): string => {
+  return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br'] });
+};
 
 const Dashboard = () => {
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
@@ -99,7 +105,6 @@ const Dashboard = () => {
         throw new Error('User not authenticated');
       }
 
-      console.log('User authenticated:', user.id);
       
       // Fetch all data in parallel
       const [
@@ -615,7 +620,7 @@ const Dashboard = () => {
                       >
                         <p
                           className="font-medium text-sm text-foreground mb-1"
-                          dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }}
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(note.title || 'Untitled') }}
                         />
                         <p className="text-xs text-muted-foreground">
                           {new Date(note.updated_at).toLocaleDateString()}
@@ -748,7 +753,7 @@ const Dashboard = () => {
                         </span>
                         <span
                           className="flex-1 text-sm text-foreground truncate"
-                          dangerouslySetInnerHTML={{ __html: item.title }}
+                          dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.title) }}
                         />
                       </button>
                     ))}
@@ -931,7 +936,7 @@ const Dashboard = () => {
                   ) : (
                     recentNotes.map(note => (
                       <div key={note.id} onClick={() => handleNoteClick(note.id)} className="p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer touch-manipulation">
-                        <p className="font-medium text-sm mb-1" dangerouslySetInnerHTML={{ __html: note.title || 'Untitled' }} />
+                         <p className="font-medium text-sm mb-1" dangerouslySetInnerHTML={{ __html: sanitizeHtml(note.title || 'Untitled') }} />
                         <p className="text-xs text-muted-foreground">{new Date(note.updated_at).toLocaleDateString()}</p>
                       </div>
                     ))
@@ -1007,7 +1012,7 @@ const Dashboard = () => {
                     {pinnedItems.map(item => (
                       <button key={item.id} onClick={() => handlePinnedItemClick(item)} className="w-full text-left p-2 rounded-lg hover:bg-muted/50 transition-colors touch-manipulation flex items-center gap-2">
                         <span className="text-xs uppercase text-muted-foreground">{item.type}</span>
-                        <span className="flex-1 text-sm truncate" dangerouslySetInnerHTML={{ __html: item.title }} />
+                         <span className="flex-1 text-sm truncate" dangerouslySetInnerHTML={{ __html: sanitizeHtml(item.title) }} />
                       </button>
                     ))}
                   </div>

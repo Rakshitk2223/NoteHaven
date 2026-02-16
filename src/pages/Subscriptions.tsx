@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 import AppSidebar from '@/components/AppSidebar';
-import { useSidebar } from '@/contexts/SidebarContext';
 import { 
   fetchSubscriptions,
   createSubscription,
@@ -28,7 +27,6 @@ import { TagBadge } from '@/components/TagBadge';
 import { formatCurrency } from '@/lib/ledger';
 
 const Subscriptions = () => {
-  const { isCollapsed: sidebarCollapsed } = useSidebar();
   const { toast } = useToast();
   
   const [loading, setLoading] = useState(true);
@@ -55,7 +53,6 @@ const Subscriptions = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      console.log('Loading subscriptions data...');
       
       // Fetch subscriptions and ensure categories exist
       const [subsData, catsData] = await Promise.all([
@@ -63,8 +60,6 @@ const Subscriptions = () => {
         ensureSubscriptionCategoriesExist()
       ]);
       
-      console.log('Subscriptions loaded:', subsData.length);
-      console.log('Categories loaded:', catsData.length);
       setSubscriptions(subsData);
       setCategories(catsData);
     } catch (error) {

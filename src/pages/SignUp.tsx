@@ -9,25 +9,30 @@ import { useAuth } from "@/hooks/useAuth";
 const SignUp = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) return;
+    if (!email || !password || !confirmPassword) return;
+    
+    if (password !== confirmPassword) {
+      alert("Passwords do not match");
+      return;
+    }
     
     setLoading(true);
     try {
-  await signUp(email, password);
-  navigate('/check-email');
+      await signUp(email, password);
+      navigate('/check-email');
     } catch (error) {
       console.error('SignUp error:', error);
     } finally {
       setLoading(false);
     }
   };
-  const [confirmPassword, setConfirmPassword] = useState("");
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">

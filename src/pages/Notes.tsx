@@ -177,9 +177,9 @@ const Notes = () => {
     };
   };
 
-  // Debouncing for auto-save
-  const [titleTimeout, setTitleTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [contentTimeout, setContentTimeout] = useState<NodeJS.Timeout | null>(null);
+  // Debouncing for auto-save - using refs to avoid re-renders and memory leaks
+  const titleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const contentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Check if we're on mobile
   useEffect(() => {
@@ -248,13 +248,13 @@ const Notes = () => {
     if (!editor) return;
     
     // Save any pending changes before switching notes
-    if (titleTimeout) {
-      clearTimeout(titleTimeout);
-      setTitleTimeout(null);
+    if (titleTimeoutRef.current) {
+      clearTimeout(titleTimeoutRef.current);
+      titleTimeoutRef.current = null;
     }
-    if (contentTimeout) {
-      clearTimeout(contentTimeout);
-      setContentTimeout(null);
+    if (contentTimeoutRef.current) {
+      clearTimeout(contentTimeoutRef.current);
+      contentTimeoutRef.current = null;
     }
     
     if (selectedNote) {
@@ -389,7 +389,6 @@ const Notes = () => {
             filter: `user_id=eq.${user.id}`
           },
           (payload) => {
-            console.log('Realtime update received:', payload);
             
             if (payload.eventType === 'INSERT') {
               const newNote = payload.new as Note;
@@ -585,16 +584,14 @@ const Notes = () => {
   }, [toast, lastServerUpdate, editor]);
 
   const scheduleTitleSave = useCallback((noteId: number, newValue: string, previous: string) => {
-    if (titleTimeout) clearTimeout(titleTimeout);
-    const timeout = setTimeout(() => saveField(noteId, 'title', newValue, previous), 2000);
-    setTitleTimeout(timeout);
-  }, [titleTimeout, saveField]);
+    if (titleTimeoutRef.current) clearTimeout(titleTimeoutRef.current);
+    titleTimeoutRef.current = setTimeout(() => saveField(noteId, 'title', newValue, previous), 2000);
+  }, [saveField]);
 
   const scheduleContentSave = useCallback((noteId: number, newValue: string, previous: string) => {
-    if (contentTimeout) clearTimeout(contentTimeout);
-    const timeout = setTimeout(() => saveField(noteId, 'content', newValue, previous), 2000);
-    setContentTimeout(timeout);
-  }, [contentTimeout, saveField]);
+    if (contentTimeoutRef.current) clearTimeout(contentTimeoutRef.current);
+    contentTimeoutRef.current = setTimeout(() => saveField(noteId, 'content', newValue, previous), 2000);
+  }, [saveField]);
 
   const handleTitleChange = (val: string) => {
     setTitleValue(val);
@@ -751,10 +748,10 @@ const Notes = () => {
   // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
-      if (titleTimeout) clearTimeout(titleTimeout);
-      if (contentTimeout) clearTimeout(contentTimeout);
+      if (titleTimeoutRef.current) clearTimeout(titleTimeoutRef.current);
+      if (contentTimeoutRef.current) clearTimeout(contentTimeoutRef.current);
     };
-  }, [titleTimeout, contentTimeout]);
+  }, []);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);

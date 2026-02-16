@@ -350,5 +350,4 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
 export async function cleanupEmptyTags(): Promise<void> {
   // Use raw SQL via REST or implement client-side
   // For now, this is a placeholder - empty tags auto-cleanup via trigger
-  console.log('Cleanup scheduled - tags with 0 usage are auto-deleted after 24 hours');
 }

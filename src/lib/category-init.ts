@@ -48,12 +48,10 @@ export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
 
   // If categories exist, return them
   if (existingCategories && existingCategories.length > 0) {
-    console.log(`Found ${existingCategories.length} existing ledger categories`);
     return existingCategories as LedgerCategory[];
   }
 
   // No categories found, create defaults
-  console.log('No ledger categories found, creating defaults...');
   
   const categoriesToCreate = DEFAULT_LEDGER_CATEGORIES.map(cat => ({
     user_id: user.id,
@@ -70,7 +68,6 @@ export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
     throw insertError;
   }
 
-  console.log(`Created ${newCategories?.length || 0} default ledger categories`);
   return (newCategories || []) as LedgerCategory[];
 }
 
@@ -95,12 +92,10 @@ export async function ensureSubscriptionCategoriesExist(): Promise<SubscriptionC
 
   // If categories exist, return them
   if (existingCategories && existingCategories.length > 0) {
-    console.log(`Found ${existingCategories.length} existing subscription categories`);
     return existingCategories as SubscriptionCategory[];
   }
 
   // No categories found, create defaults
-  console.log('No subscription categories found, creating defaults...');
   
   const categoriesToCreate = DEFAULT_SUBSCRIPTION_CATEGORIES.map(cat => ({
     user_id: user.id,
@@ -117,7 +112,6 @@ export async function ensureSubscriptionCategoriesExist(): Promise<SubscriptionC
     throw insertError;
   }
 
-  console.log(`Created ${newCategories?.length || 0} default subscription categories`);
   return (newCategories || []) as SubscriptionCategory[];
 }
 

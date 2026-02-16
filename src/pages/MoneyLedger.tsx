@@ -30,7 +30,6 @@ import { TagBadge } from '@/components/TagBadge';
 
 const MoneyLedger = () => {
   const navigate = useNavigate();
-  const { isCollapsed: sidebarCollapsed } = useSidebar();
   const { toast } = useToast();
   
   // State
@@ -70,7 +69,6 @@ const MoneyLedger = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      console.log('Loading ledger data...');
       
       // Fetch entries and ensure categories exist
       const [entriesData, categoriesData] = await Promise.all([
@@ -78,8 +76,6 @@ const MoneyLedger = () => {
         ensureLedgerCategoriesExist()
       ]);
       
-      console.log('Entries loaded:', entriesData.length);
-      console.log('Categories loaded:', categoriesData.length);
       setEntries(entriesData);
       setCategories(categoriesData);
     } catch (error) {
