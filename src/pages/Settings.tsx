@@ -137,8 +137,9 @@ const Settings = () => {
       const { error } = await supabase.auth.updateUser({ data: { display_name: name || null } });
       if (error) throw error;
       toast({ title: 'Display name updated' });
-    } catch (e:any) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'An error occurred';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
     }
   };
 
@@ -160,8 +161,9 @@ const Settings = () => {
       if (error) throw error;
       toast({ title: 'Password updated' });
       setPw1(''); setPw2('');
-    } catch (e:any) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'An error occurred';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
     }
   };
 
@@ -196,8 +198,9 @@ const Settings = () => {
       a.click();
       URL.revokeObjectURL(url);
       toast({ title: 'Export ready', description: 'Downloaded notehaven_export.json' });
-    } catch (e:any) {
-      toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'An error occurred';
+      toast({ title: 'Export failed', description: message, variant: 'destructive' });
     } finally {
       setExporting(false);
     }

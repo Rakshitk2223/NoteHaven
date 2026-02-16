@@ -644,8 +644,9 @@ const Tasks = () => {
                   setEditTaskTags([]);
                   fetchTags();
                   toast({ title: 'Task updated', description: 'Your task changes have been saved.' });
-                } catch (e:any) {
-                  toast({ title: 'Error', description: e.message || 'Failed to update task.', variant: 'destructive' });
+                } catch (e) {
+                  const message = e instanceof Error ? e.message : 'Failed to update task.';
+                  toast({ title: 'Error', description: message, variant: 'destructive' });
                 }
               }}>Save</Button>
             </div>

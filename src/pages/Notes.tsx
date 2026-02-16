@@ -574,10 +574,11 @@ const Notes = () => {
   // Update list & selected note with new field value so previews stay fresh
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value, updated_at: now } : n));
       setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value, updated_at: now } : prev);
-    } catch (e:any) {
+    } catch (e) {
       // Revert field in list (do NOT touch local editor state; user keeps typing)
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: previous } : n));
-      toast({ title: 'Save failed', description: e.message || 'Could not save note', variant: 'destructive' });
+      const message = e instanceof Error ? e.message : 'Could not save note';
+      toast({ title: 'Save failed', description: message, variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
@@ -736,8 +737,9 @@ const Notes = () => {
       const full = `${origin}/notes/share/${shareId}`;
       setShareLink(full);
       toast({ title: 'Share link ready', description: allowEditShare ? 'Editing enabled' : 'Read-only link created' });
-    } catch (e:any) {
-      toast({ title: 'Share failed', description: e.message || 'Could not create share link', variant: 'destructive' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not create share link';
+      toast({ title: 'Share failed', description: message, variant: 'destructive' });
     } finally {
       setGeneratingShare(false);
     }

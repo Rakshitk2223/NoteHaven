@@ -52,8 +52,9 @@ const SharedNote = () => {
           if (titleRef.current) titleRef.current.innerHTML = noteData.title || '';
           if (contentRef.current) contentRef.current.innerHTML = noteData.content || '';
         });
-      } catch (e:any) {
-        toast({ title: 'Error', description: e.message || 'Unable to load shared note', variant: 'destructive' });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Unable to load shared note';
+        toast({ title: 'Error', description: message, variant: 'destructive' });
       } finally {
         setLoading(false);
       }
@@ -95,9 +96,9 @@ const SharedNote = () => {
       setSaving(true);
       const { error } = await supabase.from('notes').update({ [field]: value }).eq('id', note.id);
       if (error) throw error;
-    } catch (e:any) {
-      console.error('Save failed', e);
-      toast({ title: 'Save failed', description: e.message || 'Could not save change', variant: 'destructive' });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not save change';
+      toast({ title: 'Save failed', description: message, variant: 'destructive' });
     } finally {
       setSaving(false);
     }

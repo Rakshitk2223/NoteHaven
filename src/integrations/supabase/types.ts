@@ -698,25 +698,11 @@ export interface PromptWithTags {
   tags?: Tag[]
 }
 
-// Tag color palette (preset colors)
-export const TAG_COLORS = [
-  { name: 'Blue', value: '#3B82F6' },
-  { name: 'Red', value: '#EF4444' },
-  { name: 'Green', value: '#10B981' },
-  { name: 'Yellow', value: '#F59E0B' },
-  { name: 'Purple', value: '#8B5CF6' },
-  { name: 'Pink', value: '#EC4899' },
-  { name: 'Orange', value: '#F97316' },
-  { name: 'Teal', value: '#14B8A6' },
-  { name: 'Indigo', value: '#6366F1' },
-  { name: 'Gray', value: '#6B7280' },
-] as const
-
-export type TagColor = typeof TAG_COLORS[number]['value']
-
 // ============================================
 // MONEY LEDGER TYPES
 // ============================================
+
+// Note: TAG_COLORS is defined in @/lib/tags for single source of truth
 
 export interface LedgerCategory {
   id: number
