@@ -72,7 +72,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
       ? "bg-primary/10 text-primary border border-primary/20" 
       : "text-muted-foreground hover:text-foreground",
     isCollapsed 
-      ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0 lg:mx-auto" 
+      ? "lg:justify-start lg:w-10 lg:h-10 lg:p-0" 
       : "px-3 py-2.5"
   );
 

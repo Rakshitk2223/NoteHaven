@@ -60,7 +60,7 @@ BEGIN
       NEW.amount,
       'expense',
       v_description,
-      NEW.start_date,
+      COALESCE(NEW.start_date, CURRENT_DATE),
       COALESCE(NEW.notes, '')
     )
     RETURNING id INTO v_entry_id;
@@ -79,7 +79,7 @@ BEGIN
         amount = NEW.amount,
         category_id = v_category_id,
         description = v_description,
-        transaction_date = NEW.start_date,
+        transaction_date = COALESCE(NEW.start_date, CURRENT_DATE),
         notes = COALESCE(NEW.notes, '')
       WHERE id = OLD.ledger_entry_id
         AND user_id = NEW.user_id;
@@ -99,7 +99,7 @@ BEGIN
         NEW.amount,
         'expense',
         v_description,
-        NEW.start_date,
+        COALESCE(NEW.start_date, CURRENT_DATE),
         COALESCE(NEW.notes, '')
       )
       RETURNING id INTO v_entry_id;
