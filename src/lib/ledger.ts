@@ -241,6 +241,16 @@ export function getMonthName(month: number): string {
   return new Date(2000, month - 1).toLocaleString('default', { month: 'long' });
 }
 
+// Date formatting utility - dd/mm/yyyy
+export function formatDateDDMMYYYY(dateString: string | null): string {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
 export function getWeekNumber(date: Date): number {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;

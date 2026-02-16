@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
-import { Menu, ExternalLink, GripVertical, Save, RotateCcw } from 'lucide-react';
+import { Menu, ExternalLink, GripVertical, Save, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface SidebarItem {
   name: string;
@@ -88,6 +88,9 @@ const Settings = () => {
       }
     }
   }, []);
+
+  // Sidebar section expansion state - collapsed by default
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
   // Sidebar drag and drop handlers
   const handleDragStart = (index: number) => {
@@ -266,37 +269,54 @@ const Settings = () => {
 
             {/* Sidebar Order */}
             <Card className="p-6 space-y-4">
-              <h2 className="text-lg font-semibold">Sidebar Order</h2>
-              <p className="text-sm text-muted-foreground">
-                Drag and drop items to reorder your sidebar navigation.
-              </p>
+              <div
+                className="flex items-center justify-between cursor-pointer"
+                onClick={() => setSidebarExpanded(!sidebarExpanded)}
+              >
+                <h2 className="text-lg font-semibold">Sidebar Order</h2>
+                <Button variant="ghost" size="sm">
+                  {sidebarExpanded ? (
+                    <ChevronDown className="h-5 w-5" />
+                  ) : (
+                    <ChevronRight className="h-5 w-5" />
+                  )}
+                </Button>
+              </div>
+              
+              {sidebarExpanded && (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Drag and drop items to reorder your sidebar navigation.
+                  </p>
 
-              <div className="space-y-2">
-                {sidebarItems.map((item, index) => (
-                  <div
-                    key={item.name}
-                    draggable
-                    onDragStart={() => handleDragStart(index)}
-                    onDragOver={(e) => handleDragOver(e, index)}
-                    onDragEnd={handleDragEnd}
-                    className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg cursor-move hover:bg-secondary transition-colors"
-                  >
-                    <GripVertical className="h-5 w-5 text-muted-foreground" />
-                    <span className="font-medium">{item.name}</span>
+                  <div className="space-y-2">
+                    {sidebarItems.map((item, index) => (
+                      <div
+                        key={item.name}
+                        draggable
+                        onDragStart={() => handleDragStart(index)}
+                        onDragOver={(e) => handleDragOver(e, index)}
+                        onDragEnd={handleDragEnd}
+                        className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg cursor-move hover:bg-secondary transition-colors"
+                      >
+                        <GripVertical className="h-5 w-5 text-muted-foreground" />
+                        <span className="font-medium">{item.name}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
 
-              <div className="flex gap-2 pt-2">
-                <Button onClick={handleSaveSidebarOrder}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Order
-                </Button>
-                <Button variant="outline" onClick={handleResetSidebarOrder}>
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  Reset to Default
-                </Button>
-              </div>
+                  <div className="flex gap-2 pt-2">
+                    <Button onClick={handleSaveSidebarOrder}>
+                      <Save className="h-4 w-4 mr-2" />
+                      Save Order
+                    </Button>
+                    <Button variant="outline" onClick={handleResetSidebarOrder}>
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Reset to Default
+                    </Button>
+                  </div>
+                </>
+              )}
             </Card>
 
             {/* Profile */}

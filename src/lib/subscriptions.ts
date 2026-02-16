@@ -57,11 +57,22 @@ export async function createSubscription(
 
   // Calculate next renewal date if not provided
   if (!subscription.next_renewal_date) {
-    const refDate = subscription.start_date || subscription.end_date!;
-    subscription.next_renewal_date = calculateNextRenewalDate(
-      refDate,
-      subscription.billing_cycle
-    );
+    const refDate = subscription.start_date || subscription.end_date;
+    if (refDate) {
+      subscription.next_renewal_date = calculateNextRenewalDate(
+        refDate,
+        subscription.billing_cycle
+      );
+    } else {
+      // Default to 1 month/year from today if no dates provided
+      const today = new Date();
+      if (subscription.billing_cycle === 'monthly') {
+        today.setMonth(today.getMonth() + 1);
+      } else {
+        today.setFullYear(today.getFullYear() + 1);
+      }
+      subscription.next_renewal_date = today.toISOString().split('T')[0];
+    }
   }
 
   const { data, error } = await supabase
@@ -121,10 +132,10 @@ export async function getUpcomingRenewals(days: number = 4): Promise<UpcomingRen
   return (data as UpcomingRenewal[]) || [];
 }
 
-export function calculateNextRenewalDate(startDate: string, billingCycle: 'monthly' | 'yearly'): string {
-  const start = new Date(startDate);
+export function calculateNextRenewalDate(refDate: string, billingCycle: 'monthly' | 'yearly'): string {
+  const ref = new Date(refDate);
   const today = new Date();
-  let nextDate = new Date(start);
+  let nextDate = new Date(ref);
 
   if (billingCycle === 'monthly') {
     // Add months until we get a date in the future
@@ -215,4 +226,14 @@ export function getStatusLabel(status: string): string {
     default:
       return status;
   }
+}
+
+// Date formatting utility - dd/mm/yyyy
+export function formatDateDDMMYYYY(dateString: string | null): string {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
 }

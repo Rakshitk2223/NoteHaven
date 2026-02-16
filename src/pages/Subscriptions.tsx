@@ -19,6 +19,7 @@ import {
   formatAmount,
   getStatusBadgeColor,
   getStatusLabel,
+  formatDateDDMMYYYY,
   type Subscription,
   type SubscriptionCategory
 } from '@/lib/subscriptions';
@@ -483,8 +484,13 @@ const Subscriptions = () => {
                                `Renews in ${daysUntil} days`}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {sub.next_renewal_date}
+                              {formatDateDDMMYYYY(sub.next_renewal_date)}
                             </p>
+                            {sub.end_date && (
+                              <p className="text-xs text-muted-foreground">
+                                Ends: {formatDateDDMMYYYY(sub.end_date)}
+                              </p>
+                            )}
                           </div>
                           
                           <div 

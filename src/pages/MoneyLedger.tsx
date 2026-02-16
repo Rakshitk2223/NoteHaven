@@ -13,9 +13,11 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { 
   fetchLedgerEntries, 
   createLedgerEntry,
+  updateLedgerEntry,
   deleteLedgerEntry,
   calculateLedgerSummary,
   formatCurrency,
+  formatDateDDMMYYYY,
   getMonthName,
   exportToCSV,
   exportToJSON,
@@ -41,12 +43,22 @@ const MoneyLedger = () => {
   
   // Modal state
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
   const [newEntry, setNewEntry] = useState({
     type: 'expense' as 'income' | 'expense',
     amount: '',
     category_id: '',
     description: '',
     transaction_date: new Date().toISOString().split('T')[0],
+    notes: ''
+  });
+  const [editFormData, setEditFormData] = useState({
+    type: 'expense' as 'income' | 'expense',
+    amount: '',
+    category_id: '',
+    description: '',
+    transaction_date: '',
     notes: ''
   });
 
@@ -169,6 +181,56 @@ const MoneyLedger = () => {
       toast({
         title: 'Error',
         description: 'Failed to delete entry',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  // Handle edit
+  const handleEdit = (entry: LedgerEntry) => {
+    setEditingEntry(entry);
+    setEditFormData({
+      type: entry.type,
+      amount: entry.amount.toString(),
+      category_id: entry.category_id?.toString() || '',
+      description: entry.description || '',
+      transaction_date: entry.transaction_date,
+      notes: entry.notes || ''
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateEntry = async () => {
+    if (!editingEntry) return;
+
+    try {
+      if (!editFormData.amount || !editFormData.category_id) {
+        toast({
+          title: 'Missing fields',
+          description: 'Please enter amount and select a category',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      await updateLedgerEntry(editingEntry.id, {
+        type: editFormData.type,
+        amount: parseFloat(editFormData.amount),
+        category_id: parseInt(editFormData.category_id),
+        description: editFormData.description,
+        transaction_date: editFormData.transaction_date,
+        notes: editFormData.notes
+      });
+
+      toast({ title: 'Entry updated successfully' });
+      setIsEditDialogOpen(false);
+      setEditingEntry(null);
+      loadData();
+    } catch (error) {
+      console.error('Error updating entry:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update entry',
         variant: 'destructive'
       });
     }
@@ -319,6 +381,92 @@ const MoneyLedger = () => {
                   <Button onClick={handleAddEntry} className="w-full">Add Entry</Button>
                 </DialogContent>
               </Dialog>
+
+              {/* Edit Dialog */}
+              <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Edit Entry</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Type</label>
+                      <Select 
+                        value={editFormData.type} 
+                        onValueChange={(v: 'income' | 'expense') => setEditFormData({...editFormData, type: v})}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="income">Income</SelectItem>
+                          <SelectItem value="expense">Expense</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Amount</label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={editFormData.amount}
+                        onChange={(e) => setEditFormData({...editFormData, amount: e.target.value})}
+                      />
+                    </div>
+                    
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Category</label>
+                      <Select 
+                        value={editFormData.category_id} 
+                        onValueChange={(v) => setEditFormData({...editFormData, category_id: v})}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categories
+                            .filter(c => c.type === editFormData.type)
+                            .map(category => (
+                              <SelectItem key={category.id} value={category.id.toString()}>
+                                {category.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Date</label>
+                      <Input
+                        type="date"
+                        value={editFormData.transaction_date}
+                        onChange={(e) => setEditFormData({...editFormData, transaction_date: e.target.value})}
+                      />
+                    </div>
+                    
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Description</label>
+                      <Input
+                        placeholder="What was this for?"
+                        value={editFormData.description}
+                        onChange={(e) => setEditFormData({...editFormData, description: e.target.value})}
+                      />
+                    </div>
+                    
+                    <div className="grid gap-2">
+                      <label className="text-sm font-medium">Notes (optional)</label>
+                      <Input
+                        placeholder="Additional notes..."
+                        value={editFormData.notes}
+                        onChange={(e) => setEditFormData({...editFormData, notes: e.target.value})}
+                      />
+                    </div>
+                  </div>
+                  <Button onClick={handleUpdateEntry} className="w-full">Update Entry</Button>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
 
@@ -452,7 +600,7 @@ const MoneyLedger = () => {
                     <tbody>
                       {filteredEntries.map((entry) => (
                         <tr key={entry.id} className="border-b hover:bg-muted/50">
-                          <td className="py-3 px-4">{entry.transaction_date}</td>
+                          <td className="py-3 px-4">{formatDateDDMMYYYY(entry.transaction_date)}</td>
                           <td className="py-3 px-4">
                             {entry.category && (
                               <TagBadge 
@@ -475,6 +623,14 @@ const MoneyLedger = () => {
                             {entry.type === 'income' ? '+' : '-'}{formatCurrency(Number(entry.amount))}
                           </td>
                           <td className="py-3 px-4 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEdit(entry)}
+                              className="mr-1"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"

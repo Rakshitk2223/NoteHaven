@@ -229,8 +229,10 @@ const AppSidebar = () => {
 
         {/* Bottom Actions - Settings & Logout */}
         <div className={cn(
-          "border-t border-border mt-auto",
-          isCollapsed ? "lg:p-2 lg:space-y-3" : "p-4 space-y-1"
+          "border-t border-border mt-auto flex flex-col",
+          isCollapsed 
+            ? "lg:p-2 lg:items-start lg:space-y-2" 
+            : "p-4 space-y-1"
         )}>
           {/* Settings */}
           {bottomNavigation.map((item) => (
@@ -251,7 +253,7 @@ const AppSidebar = () => {
               "flex items-center rounded-lg font-body font-medium zen-transition w-full relative group",
               "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
               isCollapsed 
-                ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0 lg:mx-auto" 
+                ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0" 
                 : "justify-start gap-3 px-3 py-2.5"
             )}
           >
