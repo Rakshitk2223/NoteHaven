@@ -16,6 +16,7 @@ const DEFAULT_LEDGER_CATEGORIES = [
   { name: 'Bills & Utilities', type: 'expense' as const, color: '#6366F1' },
   { name: 'Healthcare', type: 'expense' as const, color: '#14B8A6' },
   { name: 'Education', type: 'expense' as const, color: '#10B981' },
+  { name: 'Savings', type: 'expense' as const, color: '#FCD34D' },
   { name: 'Other Expense', type: 'expense' as const, color: '#6B7280' }
 ];
 

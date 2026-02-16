@@ -9,7 +9,25 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
-import { Menu, ExternalLink } from 'lucide-react';
+import { Menu, ExternalLink, GripVertical, Save, RotateCcw } from 'lucide-react';
+
+interface SidebarItem {
+  name: string;
+  href: string;
+}
+
+const DEFAULT_ORDER: SidebarItem[] = [
+  { name: 'Dashboard', href: '/dashboard' },
+  { name: 'Prompts', href: '/prompts' },
+  { name: 'Media', href: '/media' },
+  { name: 'Tasks', href: '/tasks' },
+  { name: 'Notes', href: '/notes' },
+  { name: 'Birthdays', href: '/birthdays' },
+  { name: 'Money Ledger', href: '/ledger' },
+  { name: 'Subscriptions', href: '/subscriptions' },
+];
+
+const STORAGE_KEY = 'sidebar-order';
 
 const Settings = () => {
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
@@ -21,6 +39,10 @@ const Settings = () => {
   const [pw2, setPw2] = useState('');
   const [exporting, setExporting] = useState(false);
   const { toast } = useToast();
+
+  // Sidebar ordering state
+  const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>(DEFAULT_ORDER);
+  const [draggedItem, setDraggedItem] = useState<number | null>(null);
 
   // Theme effect
   useEffect(() => {
@@ -53,6 +75,58 @@ const Settings = () => {
     };
     loadProfile();
   }, []);
+
+  // Load saved sidebar order
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setSidebarItems(parsed);
+      } catch (e) {
+        console.error('Failed to parse sidebar order:', e);
+      }
+    }
+  }, []);
+
+  // Sidebar drag and drop handlers
+  const handleDragStart = (index: number) => {
+    setDraggedItem(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedItem === null || draggedItem === index) return;
+
+    const newItems = [...sidebarItems];
+    const dragged = newItems[draggedItem];
+    newItems.splice(draggedItem, 1);
+    newItems.splice(index, 0, dragged);
+
+    setSidebarItems(newItems);
+    setDraggedItem(index);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+  };
+
+  const handleSaveSidebarOrder = () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sidebarItems));
+    toast({
+      title: 'Sidebar order saved',
+      description: 'Refresh the page to see the new order.',
+    });
+  };
+
+  const handleResetSidebarOrder = () => {
+    setSidebarItems(DEFAULT_ORDER);
+    localStorage.removeItem(STORAGE_KEY);
+    toast({
+      title: 'Sidebar order reset',
+      description: 'Sidebar has been reset to default order.',
+    });
+  };
 
   const handleSaveDisplayName = async () => {
     try {
@@ -149,7 +223,7 @@ const Settings = () => {
             {/* Appearance */}
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Appearance</h2>
-              
+
               {/* Color Theme Selector */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">Color Theme</label>
@@ -187,6 +261,41 @@ const Settings = () => {
                   <Switch checked={theme === 'dark'} onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')} />
                   <span className="text-xs text-muted-foreground">Dark</span>
                 </div>
+              </div>
+            </Card>
+
+            {/* Sidebar Order */}
+            <Card className="p-6 space-y-4">
+              <h2 className="text-lg font-semibold">Sidebar Order</h2>
+              <p className="text-sm text-muted-foreground">
+                Drag and drop items to reorder your sidebar navigation.
+              </p>
+
+              <div className="space-y-2">
+                {sidebarItems.map((item, index) => (
+                  <div
+                    key={item.name}
+                    draggable
+                    onDragStart={() => handleDragStart(index)}
+                    onDragOver={(e) => handleDragOver(e, index)}
+                    onDragEnd={handleDragEnd}
+                    className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg cursor-move hover:bg-secondary transition-colors"
+                  >
+                    <GripVertical className="h-5 w-5 text-muted-foreground" />
+                    <span className="font-medium">{item.name}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button onClick={handleSaveSidebarOrder}>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Order
+                </Button>
+                <Button variant="outline" onClick={handleResetSidebarOrder}>
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Reset to Default
+                </Button>
               </div>
             </Card>
 

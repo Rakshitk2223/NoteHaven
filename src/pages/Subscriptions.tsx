@@ -42,6 +42,7 @@ const Subscriptions = () => {
     billing_cycle: 'monthly' as 'monthly' | 'yearly',
     category_id: '',
     start_date: new Date().toISOString().split('T')[0],
+    end_date: '',
     status: 'active' as 'active' | 'renew' | 'cancel',
     notes: ''
   });
@@ -108,13 +109,25 @@ const Subscriptions = () => {
         return;
       }
 
+      // Validation: Either start_date or end_date must be provided
+      if (!formData.start_date && !formData.end_date) {
+        toast({
+          title: 'Date required',
+          description: 'Please provide either a start date or an end date',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      const refDate = formData.start_date || formData.end_date;
       const subscriptionData = {
         name: formData.name,
         amount: parseFloat(formData.amount),
         billing_cycle: formData.billing_cycle,
         category_id: parseInt(formData.category_id),
-        start_date: formData.start_date,
-        next_renewal_date: calculateNextRenewalDate(formData.start_date, formData.billing_cycle),
+        start_date: formData.start_date || null,
+        end_date: formData.end_date || null,
+        next_renewal_date: calculateNextRenewalDate(refDate, formData.billing_cycle),
         status: formData.status,
         notes: formData.notes || null,
         ledger_category_id: null
@@ -165,6 +178,7 @@ const Subscriptions = () => {
       billing_cycle: subscription.billing_cycle,
       category_id: subscription.category_id?.toString() || '',
       start_date: subscription.start_date,
+      end_date: subscription.end_date || '',
       status: subscription.status as 'active' | 'renew' | 'cancel',
       notes: subscription.notes || ''
     });
@@ -178,6 +192,7 @@ const Subscriptions = () => {
       billing_cycle: 'monthly',
       category_id: '',
       start_date: new Date().toISOString().split('T')[0],
+      end_date: '',
       status: 'active',
       notes: ''
     });
@@ -278,12 +293,24 @@ const Subscriptions = () => {
                   </div>
                   
                   <div className="grid gap-2">
-                    <label className="text-sm font-medium">Start Date *</label>
+                    <label className="text-sm font-medium">Start Date (Optional)</label>
                     <Input
                       type="date"
                       value={formData.start_date}
                       onChange={(e) => setFormData({...formData, start_date: e.target.value})}
                     />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <label className="text-sm font-medium">End Date (Optional)</label>
+                    <Input
+                      type="date"
+                      value={formData.end_date}
+                      onChange={(e) => setFormData({...formData, end_date: e.target.value})}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      At least one date (start or end) is required
+                    </p>
                   </div>
                   
                   <div className="grid gap-2">

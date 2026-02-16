@@ -50,6 +50,7 @@ BEGIN
     (NEW.id, 'Bills & Utilities', 'expense', '#6366F1'),
     (NEW.id, 'Healthcare', 'expense', '#14B8A6'),
     (NEW.id, 'Education', 'expense', '#10B981'),
+    (NEW.id, 'Savings', 'expense', '#FCD34D'),
     (NEW.id, 'Other Expense', 'expense', '#6B7280');
   
   RETURN NEW;

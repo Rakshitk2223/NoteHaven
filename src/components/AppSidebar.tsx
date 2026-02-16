@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from "react-router-dom";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -20,15 +21,37 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebar } from "@/contexts/SidebarContext";
 
-const navigation = [
+const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  "Dashboard": LayoutDashboard,
+  "Prompts": MessageSquare,
+  "Media": Monitor,
+  "Tasks": CheckSquare,
+  "Notes": FileText,
+  "Birthdays": Cake,
+  "Money Ledger": Wallet,
+  "Subscriptions": CreditCard,
+};
+
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const defaultMainNavigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Prompts", href: "/prompts", icon: MessageSquare },
-  { name: "Media Tracker", href: "/media", icon: Monitor },
+  { name: "Media", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },
   { name: "Birthdays", href: "/birthdays", icon: Cake },
   { name: "Money Ledger", href: "/ledger", icon: Wallet },
   { name: "Subscriptions", href: "/subscriptions", icon: CreditCard },
+];
+
+const STORAGE_KEY = 'sidebar-order';
+
+const bottomNavigation: NavItem[] = [
   { name: "Settings", href: "/settings", icon: SettingsIcon },
 ];
 
@@ -101,6 +124,30 @@ const AppSidebar = () => {
   const location = useLocation();
   const { signOut } = useAuth();
   const { isCollapsed, toggle } = useSidebar();
+  const [mainNavigation, setMainNavigation] = useState<NavItem[]>(defaultMainNavigation);
+
+  useEffect(() => {
+    // Load custom sidebar order from localStorage
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Map saved items to full nav items with icons
+        const orderedNav = parsed
+          .map((item: { name: string; href: string }) => {
+            const fullItem = defaultMainNavigation.find(nav => nav.name === item.name);
+            return fullItem || null;
+          })
+          .filter(Boolean) as NavItem[];
+        
+        if (orderedNav.length > 0) {
+          setMainNavigation(orderedNav);
+        }
+      } catch (e) {
+        console.error('Failed to parse sidebar order:', e);
+      }
+    }
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -163,12 +210,12 @@ const AppSidebar = () => {
           </Button>
         </div>
 
-        {/* Navigation */}
+        {/* Main Navigation */}
         <nav className={cn(
           "flex-1 py-4",
           isCollapsed ? "lg:px-2 lg:space-y-3" : "px-4 space-y-1"
         )}>
-          {navigation.map((item) => (
+          {mainNavigation.map((item) => (
             <SidebarItem
               key={item.name}
               href={item.href}
@@ -180,11 +227,24 @@ const AppSidebar = () => {
           ))}
         </nav>
 
-        {/* Logout */}
+        {/* Bottom Actions - Settings & Logout */}
         <div className={cn(
           "border-t border-border mt-auto",
-          isCollapsed ? "lg:p-2" : "p-4"
+          isCollapsed ? "lg:p-2 lg:space-y-3" : "p-4 space-y-1"
         )}>
+          {/* Settings */}
+          {bottomNavigation.map((item) => (
+            <SidebarItem
+              key={item.name}
+              href={item.href}
+              icon={item.icon}
+              name={item.name}
+              isActive={location.pathname === item.href}
+              isCollapsed={isCollapsed}
+            />
+          ))}
+          
+          {/* Logout */}
           <button 
             onClick={handleLogout}
             className={cn(

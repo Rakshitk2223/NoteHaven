@@ -772,10 +772,12 @@ export interface Subscription {
   billing_cycle: 'monthly' | 'yearly'
   category_id: number | null
   start_date: string
+  end_date: string | null
   next_renewal_date: string
   status: 'active' | 'renew' | 'cancel' | 'cancelled'
   notes: string | null
   ledger_category_id: number | null
+  ledger_entry_id: number | null
   created_at: string
   updated_at: string
   category?: SubscriptionCategory
