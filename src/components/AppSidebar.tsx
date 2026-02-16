@@ -72,7 +72,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
       ? "bg-primary/10 text-primary border border-primary/20" 
       : "text-muted-foreground hover:text-foreground",
     isCollapsed 
-      ? "lg:justify-start lg:w-10 lg:h-10 lg:p-0" 
+      ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0" 
       : "px-3 py-2.5"
   );
 
@@ -227,11 +227,11 @@ const AppSidebar = () => {
           ))}
         </nav>
 
-        {/* Bottom Actions - Settings & Logout */}
+        {/* Bottom Actions - Settings & Logout (Fixed at extreme bottom-left) */}
         <div className={cn(
           "border-t border-border mt-auto flex flex-col",
           isCollapsed 
-            ? "lg:p-2 lg:items-start lg:space-y-2" 
+            ? "lg:p-2 lg:space-y-2" 
             : "p-4 space-y-1"
         )}>
           {/* Settings */}
