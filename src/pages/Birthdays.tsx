@@ -9,6 +9,7 @@ import { Plus, Trash2, Gift, Edit, Search, Cake, Clock, Menu } from 'lucide-reac
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { parseYMD, formatDateForDisplay } from '@/lib/date-utils';
 
 interface Birthday { id: number; name: string; date_of_birth: string; }
 
@@ -110,7 +111,7 @@ const Birthdays = () => {
 
   // Helper: days until/since birthday
   const daysDifference = (iso: string) => {
-    const base = new Date(iso + 'T00:00:00');
+    const base = parseYMD(iso);
     const now = new Date();
     now.setHours(0, 0, 0, 0);
     const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
@@ -128,7 +129,7 @@ const Birthdays = () => {
     const withDays = birthdays.map(b => ({
       ...b,
       days: daysDifference(b.date_of_birth),
-      date: new Date(b.date_of_birth + 'T00:00:00')
+      date: parseYMD(b.date_of_birth)
     }));
     
     // Get past birthdays (those that already happened this year)
@@ -194,7 +195,7 @@ const Birthdays = () => {
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
   const BirthdayCard = ({ birthday, showAge = true }: { birthday: Birthday; showAge?: boolean }) => {
-    const date = new Date(birthday.date_of_birth + 'T00:00:00');
+    const date = parseYMD(birthday.date_of_birth);
     const days = daysDifference(birthday.date_of_birth);
     const now = new Date();
     let age = now.getFullYear() - date.getFullYear();
@@ -211,7 +212,7 @@ const Birthdays = () => {
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-lg mb-1 truncate">{birthday.name}</h3>
             <p className="text-sm text-muted-foreground mb-2">
-              {date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
+              {formatDateForDisplay(birthday.date_of_birth)}
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               {showAge && (
@@ -531,8 +532,8 @@ const Birthdays = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {birthdays
                       .sort((a, b) => {
-                        const aDate = new Date(a.date_of_birth);
-                        const bDate = new Date(b.date_of_birth);
+                        const aDate = parseYMD(a.date_of_birth);
+                        const bDate = parseYMD(b.date_of_birth);
                         return aDate.getMonth() - bDate.getMonth() || aDate.getDate() - bDate.getDate();
                       })
                       .map(b => (

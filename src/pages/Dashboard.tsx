@@ -17,6 +17,7 @@ import { fetchUserTags, type Tag } from "@/lib/tags";
 import { getUpcomingRenewals, type UpcomingRenewal } from "@/lib/subscriptions";
 import { CreditCard } from "lucide-react";
 import { formatCurrency } from "@/lib/ledger";
+import { parseYMD } from "@/lib/date-utils";
 import DOMPurify from 'dompurify';
 
 interface Task {
@@ -863,7 +864,7 @@ const Dashboard = () => {
                   <div className="space-y-3">
                     {birthdays
                       .map(b => {
-                        const base = new Date(b.date_of_birth + 'T00:00:00');
+                        const base = parseYMD(b.date_of_birth);
                         const now = new Date();
                         const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
                         if (target.getTime() < now.getTime()) target.setFullYear(now.getFullYear()+1);
@@ -1082,7 +1083,7 @@ const Dashboard = () => {
                   <div className="space-y-2">
                     {birthdays
                       .map(b => {
-                        const base = new Date(b.date_of_birth + 'T00:00:00');
+                        const base = parseYMD(b.date_of_birth);
                         const now = new Date();
                         const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
                         if (target.getTime() < now.getTime()) target.setFullYear(now.getFullYear()+1);

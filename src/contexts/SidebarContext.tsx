@@ -4,6 +4,8 @@ interface SidebarContextType {
   isCollapsed: boolean;
   toggle: () => void;
   setCollapsed: (collapsed: boolean) => void;
+  wasManuallyToggled: boolean;
+  setWasManuallyToggled: (value: boolean) => void;
 }
 
 const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
@@ -24,6 +26,8 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     return false;
   });
 
+  const [wasManuallyToggled, setWasManuallyToggled] = useState(false);
+
   // Persist to localStorage whenever state changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -35,11 +39,17 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     }
   }, [isCollapsed]);
 
-  const toggle = () => setIsCollapsed(prev => !prev);
-  const setCollapsed = (collapsed: boolean) => setIsCollapsed(collapsed);
+  const toggle = () => {
+    setWasManuallyToggled(true);
+    setIsCollapsed(prev => !prev);
+  };
+  
+  const setCollapsed = (collapsed: boolean) => {
+    setIsCollapsed(collapsed);
+  };
 
   return (
-    <SidebarContext.Provider value={{ isCollapsed, toggle, setCollapsed }}>
+    <SidebarContext.Provider value={{ isCollapsed, toggle, setCollapsed, wasManuallyToggled, setWasManuallyToggled }}>
       {children}
     </SidebarContext.Provider>
   );

@@ -13,6 +13,7 @@ import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { dateToYMD, parseYMD, formatDateForDisplay } from "@/lib/date-utils";
 import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
@@ -335,7 +336,7 @@ const Tasks = () => {
                   <div className="w-full sm:w-48">
                     <DatePicker
                       date={newTaskDueObj}
-                      setDate={(d) => { setNewTaskDueObj(d); setNewTaskDue(d ? d.toISOString().slice(0,10) : ''); }}
+                      setDate={(d) => { setNewTaskDueObj(d); setNewTaskDue(d ? dateToYMD(d) : ''); }}
                       placeholder="Due date"
                       showClear={true}
                     />
@@ -542,7 +543,7 @@ const Tasks = () => {
                               {task.task_text}
                             </span>
                             {task.due_date && (
-                              <span className="text-xs">Due {new Date(task.due_date).toLocaleDateString()}</span>
+                              <span className="text-xs">Due {formatDateForDisplay(task.due_date)}</span>
                             )}
                             {/* Tags (show on hover) */}
                             {task.tags && task.tags.length > 0 && (
@@ -600,7 +601,7 @@ const Tasks = () => {
               <label className="text-sm font-medium">Due Date</label>
               <DatePicker
                 date={editDueObj}
-                setDate={(d) => { setEditDueObj(d); setEditDue(d ? d.toISOString().slice(0,10) : ''); }}
+                setDate={(d) => { setEditDueObj(d); setEditDue(d ? dateToYMD(d) : ''); }}
                 placeholder="No due date"
                 showClear={true}
               />

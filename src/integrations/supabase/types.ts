@@ -57,6 +57,7 @@ export type Database = {
           updated_at: string
           is_pinned: boolean | null
           background_color: string | null
+          calendar_date: string | null
         }
         Insert: {
           id?: number
@@ -67,6 +68,7 @@ export type Database = {
           updated_at?: string
           is_pinned?: boolean | null
           background_color?: string | null
+          calendar_date?: string | null
         }
         Update: {
           id?: number
@@ -77,6 +79,7 @@ export type Database = {
           updated_at?: string
           is_pinned?: boolean | null
           background_color?: string | null
+          calendar_date?: string | null
         }
         Relationships: []
       }
@@ -89,6 +92,7 @@ export type Database = {
           created_at: string
           updated_at: string
           is_pinned: boolean | null
+          due_date: string | null
         }
         Insert: {
           id?: number
@@ -98,6 +102,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
           is_pinned?: boolean | null
+          due_date?: string | null
         }
         Update: {
           id?: number
@@ -107,6 +112,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
           is_pinned?: boolean | null
+          due_date?: string | null
         }
         Relationships: []
       }
@@ -122,6 +128,7 @@ export type Database = {
           current_episode: number | null
           current_chapter: number | null
           image_url: string | null
+          release_date: string | null
           created_at: string
           updated_at: string
         }
@@ -136,6 +143,7 @@ export type Database = {
           current_episode?: number | null
           current_chapter?: number | null
           image_url?: string | null
+          release_date?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -150,6 +158,7 @@ export type Database = {
           current_episode?: number | null
           current_chapter?: number | null
           image_url?: string | null
+          release_date?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -498,6 +507,21 @@ export type Database = {
           next_renewal_date: string
           days_until: number
           status: string
+        }[]
+      }
+      get_calendar_events: {
+        Args: {
+          p_user_id: string
+          p_start_date: string
+          p_end_date: string
+        }
+        Returns: {
+          event_id: string
+          event_type: string
+          title: string
+          event_date: string
+          color: string
+          data: Json
         }[]
       }
     }

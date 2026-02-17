@@ -25,6 +25,7 @@ import {
 import { ensureSubscriptionCategoriesExist } from '@/lib/category-init';
 import { TagBadge } from '@/components/TagBadge';
 import { formatCurrency } from '@/lib/ledger';
+import { dateToYMD, parseYMD } from '@/lib/date-utils';
 
 const Subscriptions = () => {
   const { toast } = useToast();
@@ -187,7 +188,7 @@ const Subscriptions = () => {
       amount: '',
       billing_cycle: 'monthly',
       category_id: '',
-      start_date: new Date().toISOString().split('T')[0],
+    start_date: dateToYMD(new Date()),
       end_date: '',
       status: 'active',
       notes: ''
@@ -195,8 +196,9 @@ const Subscriptions = () => {
   };
 
   const getDaysUntilRenewal = (date: string) => {
-    const renewal = new Date(date);
+    const renewal = parseYMD(date);
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const diffTime = renewal.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays;

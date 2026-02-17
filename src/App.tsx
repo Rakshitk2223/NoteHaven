@@ -24,6 +24,7 @@ import SharedNote from "./pages/SharedNote.tsx"; // shared note public view
 import TagView from "./pages/TagView";
 import MoneyLedger from "./pages/MoneyLedger";
 import Subscriptions from "./pages/Subscriptions";
+import Calendar from "./pages/Calendar";
 
 const queryClient = new QueryClient();
 
@@ -57,6 +58,7 @@ const AppInner = () => {
         <Route path="/tags/:tagName" element={<ProtectedRoute><TagView /></ProtectedRoute>} />
 <Route path="/ledger" element={<ProtectedRoute><MoneyLedger /></ProtectedRoute>} />
 <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
+<Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
 <Route path="/check-email" element={<CheckEmail />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

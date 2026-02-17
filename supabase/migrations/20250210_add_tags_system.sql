@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS note_tags (
 );
 
 CREATE TABLE IF NOT EXISTS task_tags (
-  task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+  task_id INTEGER REFERENCES tasks(id) O2N DELETE CASCADE,
   tag_id INTEGER REFERENCES tags(id) ON DELETE CASCADE,
   PRIMARY KEY (task_id, tag_id)
 );

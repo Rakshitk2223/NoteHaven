@@ -28,3 +28,6 @@ dist-ssr
 
 # Planning documents (implementation roadmap)
 .planning/
+
+# Opencode configuration
+/opencode

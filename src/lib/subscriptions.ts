@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { dateToYMD, parseYMD, formatDateDDMMYYYY as formatDateDDMMYYYYUtil } from '@/lib/date-utils';
 import type { 
   Subscription, 
   SubscriptionCategory, 
@@ -71,7 +72,7 @@ export async function createSubscription(
       } else {
         today.setFullYear(today.getFullYear() + 1);
       }
-      subscription.next_renewal_date = today.toISOString().split('T')[0];
+      subscription.next_renewal_date = dateToYMD(today);
     }
   }
 
@@ -133,9 +134,10 @@ export async function getUpcomingRenewals(days: number = 4): Promise<UpcomingRen
 }
 
 export function calculateNextRenewalDate(refDate: string, billingCycle: 'monthly' | 'yearly'): string {
-  const ref = new Date(refDate);
+  const ref = parseYMD(refDate);
   const today = new Date();
-  let nextDate = new Date(ref);
+  today.setHours(0, 0, 0, 0);
+  let nextDate = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
 
   if (billingCycle === 'monthly') {
     // Add months until we get a date in the future
@@ -149,7 +151,7 @@ export function calculateNextRenewalDate(refDate: string, billingCycle: 'monthly
     }
   }
 
-  return nextDate.toISOString().split('T')[0];
+  return dateToYMD(nextDate);
 }
 
 // ============================================
@@ -231,9 +233,5 @@ export function getStatusLabel(status: string): string {
 // Date formatting utility - dd/mm/yyyy
 export function formatDateDDMMYYYY(dateString: string | null): string {
   if (!dateString) return '-';
-  const date = new Date(dateString);
-  const day = date.getDate().toString().padStart(2, '0');
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
+  return formatDateDDMMYYYYUtil(dateString);
 }
