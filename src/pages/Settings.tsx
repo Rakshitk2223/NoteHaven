@@ -18,6 +18,7 @@ interface SidebarItem {
 
 const DEFAULT_ORDER: SidebarItem[] = [
   { name: 'Dashboard', href: '/dashboard' },
+  { name: 'Calendar', href: '/calendar' },
   { name: 'Prompts', href: '/prompts' },
   { name: 'Media', href: '/media' },
   { name: 'Tasks', href: '/tasks' },
@@ -76,15 +77,37 @@ const Settings = () => {
     loadProfile();
   }, []);
 
-  // Load saved sidebar order
+  // Load saved sidebar order and merge with any new items from DEFAULT_ORDER
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        setSidebarItems(parsed);
+        const parsed = JSON.parse(saved) as SidebarItem[];
+        
+        // Create a set of existing item names for quick lookup
+        const existingNames = new Set(parsed.map(item => item.name));
+        
+        // Add any new items from DEFAULT_ORDER that aren't in the saved order
+        const newItems = DEFAULT_ORDER.filter(item => !existingNames.has(item.name));
+        
+        // Merge saved order with new items (new items added at their default positions)
+        const mergedItems = [...parsed];
+        
+        // Insert new items at their positions from DEFAULT_ORDER
+        newItems.forEach(newItem => {
+          const defaultIndex = DEFAULT_ORDER.findIndex(item => item.name === newItem.name);
+          // Insert at the same position, or at end if position is beyond current length
+          if (defaultIndex <= mergedItems.length) {
+            mergedItems.splice(defaultIndex, 0, newItem);
+          } else {
+            mergedItems.push(newItem);
+          }
+        });
+        
+        setSidebarItems(mergedItems);
       } catch (e) {
         console.error('Failed to parse sidebar order:', e);
+        setSidebarItems(DEFAULT_ORDER);
       }
     }
   }, []);
