@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import AppSidebar from '@/components/AppSidebar';
 import { MonthView } from '@/components/calendar/MonthView';
 import { WeekView } from '@/components/calendar/WeekView';
@@ -6,9 +6,7 @@ import { CalendarHeader } from '@/components/calendar/CalendarHeader';
 import { DayDetailModal } from '@/components/calendar/DayDetailModal';
 import { QuickAddDialog } from '@/components/calendar/QuickAddDialog';
 import { useCalendar } from '@/hooks/useCalendar';
-import { useSidebar } from '@/contexts/SidebarContext';
 import type { CalendarView } from '@/types/calendar';
-import { isSameDay } from 'date-fns';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Loader2, CalendarX } from 'lucide-react';
 
@@ -19,22 +17,6 @@ const Calendar = () => {
   const [quickAddDate, setQuickAddDate] = useState<Date | null>(null);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const isMobile = useIsMobile();
-  const { setCollapsed, wasManuallyToggled, setWasManuallyToggled } = useSidebar();
-
-  // Auto-collapse sidebar when calendar page loads (only if not manually toggled)
-  useEffect(() => {
-    if (!wasManuallyToggled) {
-      setCollapsed(true);
-    }
-    // Restore sidebar when leaving calendar page (only if not manually toggled)
-    return () => {
-      if (!wasManuallyToggled) {
-        setCollapsed(false);
-      }
-      // Reset manual toggle state on unmount
-      setWasManuallyToggled(false);
-    };
-  }, [setCollapsed, wasManuallyToggled, setWasManuallyToggled]);
 
   const { events, loading, filters, setFilters, refetch } = useCalendar(currentDate, view);
 
