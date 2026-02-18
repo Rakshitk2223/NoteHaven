@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
+import { cn } from '@/lib/utils';
 import { Menu, ExternalLink, GripVertical, Save, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface SidebarItem {
@@ -122,6 +123,7 @@ const Settings = () => {
 
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
     if (draggedItem === null || draggedItem === index) return;
 
     const newItems = [...sidebarItems];
@@ -134,6 +136,11 @@ const Settings = () => {
   };
 
   const handleDragEnd = () => {
+    setDraggedItem(null);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
     setDraggedItem(null);
   };
 
@@ -315,7 +322,7 @@ const Settings = () => {
                     Drag and drop items to reorder your sidebar navigation.
                   </p>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
                     {sidebarItems.map((item, index) => (
                       <div
                         key={item.name}
@@ -323,7 +330,10 @@ const Settings = () => {
                         onDragStart={() => handleDragStart(index)}
                         onDragOver={(e) => handleDragOver(e, index)}
                         onDragEnd={handleDragEnd}
-                        className="flex items-center gap-3 p-3 bg-secondary/50 rounded-lg cursor-move hover:bg-secondary transition-colors"
+                        className={cn(
+                          "flex items-center gap-3 p-3 bg-secondary/50 rounded-lg cursor-move hover:bg-secondary transition-all",
+                          draggedItem === index && "opacity-50 ring-2 ring-primary bg-primary/10 scale-[1.02]"
+                        )}
                       >
                         <GripVertical className="h-5 w-5 text-muted-foreground" />
                         <span className="font-medium">{item.name}</span>
