@@ -93,7 +93,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
       </span>
       {/* Tooltip for collapsed state */}
       {isCollapsed && (
-        <span className="lg:hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
+        <span className="hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
           {name}
         </span>
       )}
@@ -269,7 +269,7 @@ const AppSidebar = () => {
             </span>
             {/* Tooltip for collapsed state */}
             {isCollapsed && (
-              <span className="lg:hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
+              <span className="hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
                 Logout
               </span>
             )}
