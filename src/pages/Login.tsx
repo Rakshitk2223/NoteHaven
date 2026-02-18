@@ -20,7 +20,6 @@ const Login = () => {
     setLoading(true);
     try {
       await signIn(email, password);
-      navigate('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
     } finally {
