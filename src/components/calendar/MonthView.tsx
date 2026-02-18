@@ -108,7 +108,6 @@ export const MonthView = ({
 
           const dayCellContent = (
             <div
-              key={day.toISOString()}
               onClick={() => onDateClick(day)}
               className={cn(
                 "min-h-[120px] lg:min-h-[140px] p-1.5 lg:p-2 border-r border-b cursor-pointer transition-all flex flex-col",
@@ -193,7 +192,7 @@ export const MonthView = ({
             );
           }
 
-          return dayCellContent;
+          return <div key={`day-${day.toISOString()}`}>{dayCellContent}</div>;
         })}
       </div>
     </div>
