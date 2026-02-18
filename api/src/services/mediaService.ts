@@ -4,6 +4,7 @@ import { anilistService } from './anilistService';
 import { tmdbService } from './tmdbService';
 import { omdbService } from './omdbService';
 import { tvmazeService } from './tvmazeService';
+import { jikanService } from './jikanService';
 
 // Cache TTL in milliseconds (24 hours)
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -154,8 +155,11 @@ export const mediaService = {
   ): Promise<MediaItem[]> {
     const results: MediaItem[] = [];
     
-    // Search AniList for anime/manga/manhwa/manhua
+    // Search anime/manga with fallback chain: AniList -> Jikan/MAL
     if (!type || ['anime', 'manga', 'manhwa', 'manhua'].includes(type)) {
+      let animeResults: MediaItem[] = [];
+      
+      // Try AniList first
       try {
         let anilistType: 'anime' | 'manga' = 'anime';
         if (type === 'manga' || type === 'manhwa' || type === 'manhua') {
@@ -164,36 +168,73 @@ export const mediaService = {
         
         const anilistResults = await anilistService.search(query, anilistType, limit);
         
-        // Convert to MediaItem format
-        const mediaItems: MediaItem[] = anilistResults.map(r => ({
-          title: r.title || '',
-          type: (r.type as string) || 'anime',
-          anilistId: r.anilistId,
-          tmdbId: r.tmdbId,
-          malId: r.malId,
-          description: r.description || '',
-          genres: r.genres || [],
-          coverImage: r.coverImage || '',
-          bannerImage: r.bannerImage,
-          rating: r.rating || 0,
-          releaseDate: r.releaseDate,
-          status: (r.status as string) || 'upcoming',
-          episodes: r.episodes,
-          chapters: r.chapters,
-          duration: r.duration,
-          season: r.season,
-          searchKeywords: r.searchKeywords || []
-        }));
-        
-        // Filter by specific type if requested
-        const filtered = type 
-          ? mediaItems.filter(r => r.type === type)
-          : mediaItems;
-        
-        results.push(...filtered);
+        if (anilistResults.length > 0) {
+          animeResults = anilistResults.map(r => ({
+            title: r.title || '',
+            type: (r.type as string) || 'anime',
+            anilistId: r.anilistId,
+            tmdbId: r.tmdbId,
+            malId: r.malId,
+            description: r.description || '',
+            genres: r.genres || [],
+            coverImage: r.coverImage || '',
+            bannerImage: r.bannerImage,
+            rating: r.rating || 0,
+            releaseDate: r.releaseDate,
+            status: (r.status as string) || 'upcoming',
+            episodes: r.episodes,
+            chapters: r.chapters,
+            duration: r.duration,
+            season: r.season,
+            searchKeywords: r.searchKeywords || []
+          }));
+        }
       } catch (error) {
         console.error('AniList search failed:', error);
       }
+      
+      // Fallback to Jikan/MAL if AniList returned no results
+      if (animeResults.length === 0) {
+        try {
+          let jikanType: 'anime' | 'manga' = 'anime';
+          if (type === 'manga' || type === 'manhwa' || type === 'manhua') {
+            jikanType = 'manga';
+          }
+          
+          const jikanResults = await jikanService.search(query, jikanType, limit);
+          
+          if (jikanResults.length > 0) {
+            animeResults = jikanResults.map(r => ({
+              title: r.title || '',
+              type: (r.type as string) || 'anime',
+              anilistId: r.anilistId,
+              tmdbId: r.tmdbId,
+              malId: r.malId,
+              description: r.description || '',
+              genres: r.genres || [],
+              coverImage: r.coverImage || '',
+              bannerImage: r.bannerImage,
+              rating: r.rating || 0,
+              releaseDate: r.releaseDate,
+              status: (r.status as string) || 'upcoming',
+              episodes: r.episodes,
+              chapters: r.chapters,
+              duration: r.duration,
+              season: r.season,
+              searchKeywords: r.searchKeywords || []
+            }));
+          }
+        } catch (error) {
+          console.error('Jikan/MAL search failed:', error);
+        }
+      }
+      
+      // Filter by specific type if requested
+      const filtered = type 
+        ? animeResults.filter(r => r.type === type)
+        : animeResults;
+      
+      results.push(...filtered);
     }
     
     // Search movies/series with fallback chain: TMDB -> OMDb -> TVmaze

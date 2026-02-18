@@ -12,15 +12,20 @@ interface FetchQueueItem {
   id: number;
   title: string;
   type: string;
-  resolve: (imageUrl: string | null) => void;
+  resolve: (result: FetchResult) => void;
   reject: (error: Error) => void;
+}
+
+export interface FetchResult {
+  imageUrl: string | null;
+  source: 'database' | 'api' | null;
 }
 
 class LazyImageFetcher {
   private queue: FetchQueueItem[] = [];
   private isProcessing = false;
   private lastRequestTime = 0;
-  private cache: Map<number, string | null> = new Map();
+  private cache: Map<number, FetchResult> = new Map();
 
   // Map our types to API search types
   private getSearchType(type: string): string | undefined {
@@ -43,12 +48,18 @@ class LazyImageFetcher {
   }
 
   // Check if we have a cached result
-  getCached(id: number): string | null | undefined {
+  getCached(id: number): FetchResult | undefined {
     return this.cache.get(id);
   }
 
   // Fetch image for a media item
-  async fetchImage(id: number, title: string, type: string): Promise<string | null> {
+  async fetchImage(id: number, title: string, type: string, coverImageUrl?: string | null): Promise<FetchResult> {
+    // If already has image from database, return it immediately
+    if (coverImageUrl) {
+      console.log(`📦 [Database] Image already exists for "${title}"`);
+      return { imageUrl: coverImageUrl, source: 'database' };
+    }
+
     // Check cache first
     if (this.cache.has(id)) {
       return this.cache.get(id)!;
@@ -61,12 +72,26 @@ class LazyImageFetcher {
         const checkInterval = setInterval(() => {
           if (!this.isFetching(id)) {
             clearInterval(checkInterval);
-            resolve(this.cache.get(id) ?? null);
+            resolve(this.cache.get(id) ?? { imageUrl: null, source: null });
           }
         }, 100);
       });
     }
 
+    // Add to queue
+    return new Promise((resolve, reject) => {
+      this.queue.push({ id, title, type, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  // Force refresh - always search APIs even if already has image
+  async refreshImage(id: number, title: string, type: string): Promise<FetchResult> {
+    console.log(`🔄 [Refresh] Force refreshing image for "${title}"`);
+    
+    // Clear cache for this item
+    this.cache.delete(id);
+    
     // Add to queue
     return new Promise((resolve, reject) => {
       this.queue.push({ id, title, type, resolve, reject });
@@ -90,21 +115,21 @@ class LazyImageFetcher {
           await this.sleep(MIN_REQUEST_INTERVAL - timeSinceLastRequest);
         }
 
-        const imageUrl = await this.searchAndFetchImage(item);
+        const result = await this.searchAndFetchImage(item);
         
         // Cache the result
-        this.cache.set(item.id, imageUrl);
+        this.cache.set(item.id, result);
         
         // Save to database if found
-        if (imageUrl) {
-          await this.saveToDatabase(item.id, imageUrl);
+        if (result.imageUrl) {
+          await this.saveToDatabase(item.id, result.imageUrl);
         }
 
-        item.resolve(imageUrl);
+        item.resolve(result);
       } catch (error) {
         console.error(`Failed to fetch image for ${item.title}:`, error);
-        this.cache.set(item.id, null);
-        item.resolve(null);
+        this.cache.set(item.id, { imageUrl: null, source: null });
+        item.resolve({ imageUrl: null, source: null });
       }
 
       this.lastRequestTime = Date.now();
@@ -113,12 +138,14 @@ class LazyImageFetcher {
     this.isProcessing = false;
   }
 
-  private async searchAndFetchImage(item: FetchQueueItem): Promise<string | null> {
+  private async searchAndFetchImage(item: FetchQueueItem): Promise<FetchResult> {
     const searchType = this.getSearchType(item.type);
     if (!searchType) {
       console.warn(`Unknown type: ${item.type} for ${item.title}`);
-      return null;
+      return { imageUrl: null, source: null };
     }
+
+    console.log(`🔍 [API Search] Searching for: "${item.title}" (${searchType})`);
 
     // Try backend API first
     try {
@@ -126,8 +153,8 @@ class LazyImageFetcher {
       
       if (results.length > 0) {
         const bestMatch = results[0];
-        console.log(`✅ Found image for "${item.title}" via backend: ${bestMatch.coverImage}`);
-        return bestMatch.coverImage;
+        console.log(`✅ [API] Found image for "${item.title}" via backend: ${bestMatch.coverImage}`);
+        return { imageUrl: bestMatch.coverImage, source: 'api' };
       }
     } catch (error) {
       console.error(`Backend API search failed for "${item.title}":`, error);
@@ -141,21 +168,21 @@ class LazyImageFetcher {
         
         if (results.length > 0) {
           const bestMatch = results[0];
-          console.log(`✅ Found image for "${item.title}" via AniList direct: ${bestMatch.coverImage}`);
-          return bestMatch.coverImage;
+          console.log(`✅ [API] Found image for "${item.title}" via AniList direct: ${bestMatch.coverImage}`);
+          return { imageUrl: bestMatch.coverImage, source: 'api' };
         }
       } catch (error) {
         console.error(`AniList direct search failed for "${item.title}":`, error);
       }
     }
 
-    console.log(`❌ No image found for "${item.title}"`);
-    return null;
+    console.log(`❌ [API] No image found for "${item.title}"`);
+    return { imageUrl: null, source: null };
   }
 
   private async saveToDatabase(id: number, imageUrl: string): Promise<void> {
     try {
-      console.log(`💾 Attempting to save image for item ${id}: ${imageUrl.substring(0, 50)}...`);
+      console.log(`💾 [Database] Saving image for item ${id}`);
       
       const { data, error } = await supabase
         .from('media_tracker')
@@ -167,14 +194,12 @@ class LazyImageFetcher {
         .select();
 
       if (error) {
-        console.error(`❌ Failed to save image URL to database for item ${id}:`, error);
-        console.error('Error details:', error.message, error.details);
+        console.error(`❌ [Database] Failed to save image:`, error);
       } else {
-        console.log(`✅ Successfully saved image URL to database for item ${id}`);
-        console.log('Updated rows:', data?.length || 0);
+        console.log(`✅ [Database] Successfully saved image for item ${id}`);
       }
     } catch (error) {
-      console.error(`❌ Database update failed for item ${id}:`, error);
+      console.error(`❌ [Database] Update failed:`, error);
     }
   }
 

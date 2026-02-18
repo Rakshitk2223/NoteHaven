@@ -1,16 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Star, Edit2, Trash2, MoreVertical, Loader2 } from 'lucide-react';
+import { Star, Edit2, Trash2, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { lazyImageFetcher } from '@/lib/lazy-image-fetcher';
+import { lazyImageFetcher, type FetchResult } from '@/lib/lazy-image-fetcher';
 
 interface MediaCardProps {
   id: number;
@@ -61,13 +55,18 @@ export const MediaCard = ({
   const [isInView, setIsInView] = useState(false);
   const [error, setError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const [fetchedImageUrl, setFetchedImageUrl] = useState<string | null>(coverImageUrl || null);
+  const [fetchResult, setFetchResult] = useState<FetchResult>({ 
+    imageUrl: coverImageUrl || null, 
+    source: coverImageUrl ? 'database' : null 
+  });
   const [isFetching, setIsFetching] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const imgRef = useRef<HTMLDivElement>(null);
   const hasAttemptedFetch = useRef(false);
 
   // Use either the provided URL or the fetched URL
-  const displayImageUrl = fetchedImageUrl || coverImageUrl;
+  const displayImageUrl = fetchResult.imageUrl || coverImageUrl;
+  const imageSource = fetchResult.source;
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -89,15 +88,13 @@ export const MediaCard = ({
 
   // Lazy image fetching when card comes into view and has no image
   useEffect(() => {
-    if (isInView && !displayImageUrl && !hasAttemptedFetch.current) {
+    if (isInView && !displayImageUrl && !hasAttemptedFetch.current && !isRefreshing) {
       hasAttemptedFetch.current = true;
       setIsFetching(true);
 
-      lazyImageFetcher.fetchImage(id, title, type)
-        .then((url) => {
-          if (url) {
-            setFetchedImageUrl(url);
-          }
+      lazyImageFetcher.fetchImage(id, title, type, coverImageUrl)
+        .then((result) => {
+          setFetchResult(result);
           setIsFetching(false);
         })
         .catch((err) => {
@@ -105,7 +102,16 @@ export const MediaCard = ({
           setIsFetching(false);
         });
     }
-  }, [isInView, displayImageUrl, id, title, type]);
+  }, [isInView, displayImageUrl, id, title, type, coverImageUrl, isRefreshing]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setIsLoaded(false);
+    
+    const result = await lazyImageFetcher.refreshImage(id, title, type);
+    setFetchResult(result);
+    setIsRefreshing(false);
+  };
   
   const progressText = current_episode 
     ? `S${current_season || 1} E${current_episode}`
@@ -124,6 +130,13 @@ export const MediaCard = ({
     'JDrama': 'bg-cyan-500',
   };
   
+  // Determine loading text based on source
+  const getLoadingText = () => {
+    if (isRefreshing) return 'Refreshing...';
+    if (imageSource === 'database') return 'Fetching...';
+    return 'Searching...';
+  };
+  
   return (
     <div
       className="group relative"
@@ -139,19 +152,30 @@ export const MediaCard = ({
         )}
       >
         {/* Loading Skeleton or Fetching Indicator */}
-        {(!isLoaded || isFetching) && (
-          <div className="absolute inset-0 flex items-center justify-center bg-muted">
-            {isFetching ? (
-              <div className="flex flex-col items-center gap-2">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Searching...</span>
-              </div>
-            ) : (
-              <Skeleton className="absolute inset-0" />
-            )}
+        {((!isLoaded && displayImageUrl) || isFetching || isRefreshing) && (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted z-10">
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className={cn(
+                "h-8 w-8 animate-spin",
+                imageSource === 'database' ? "text-blue-500" : "text-amber-500"
+              )} />
+              <span className="text-xs text-muted-foreground">
+                {getLoadingText()}
+              </span>
+              {imageSource && (
+                <span className={cn(
+                  "text-[10px] px-2 py-0.5 rounded-full",
+                  imageSource === 'database' 
+                    ? "bg-blue-100 text-blue-700" 
+                    : "bg-amber-100 text-amber-700"
+                )}>
+                  {imageSource === 'database' ? '📦 Database' : '🔍 API Search'}
+                </span>
+              )}
+            </div>
           </div>
         )}
-
+        
         {/* Actual Image */}
         {isInView && (
           <img
@@ -170,7 +194,7 @@ export const MediaCard = ({
           />
         )}
         
-        {/* Hover Overlay */}
+        {/* Hover Overlay with Edit/Delete/Refresh */}
         <div
           className={cn(
             "absolute inset-0 bg-black/60 flex items-center justify-center gap-2",
@@ -195,11 +219,28 @@ export const MediaCard = ({
             <Trash2 className="h-3 w-3" />
           </Button>
         </div>
+
+        {/* Refresh Button - Top Right, visible on hover */}
+        <button
+          onClick={handleRefresh}
+          className={cn(
+            "absolute top-2 right-2 z-20",
+            "w-8 h-8 rounded-full bg-background/90 backdrop-blur",
+            "flex items-center justify-center",
+            "shadow-md border border-border",
+            "transition-all duration-200",
+            "hover:bg-primary hover:text-primary-foreground hover:scale-110",
+            isHovered ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
+          )}
+          title="Refresh cover from different source"
+        >
+          <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+        </button>
         
         {/* Type Badge */}
         <Badge
           className={cn(
-            "absolute top-2 left-2 text-white text-xs",
+            "absolute top-2 left-2 text-white text-xs z-10",
             typeColors[type] || 'bg-gray-500'
           )}
         >
@@ -208,7 +249,7 @@ export const MediaCard = ({
         
         {/* Rating Badge */}
         {rating && rating > 0 && (
-          <div className="absolute top-2 right-2 bg-black/70 text-white px-2 py-1 rounded flex items-center gap-1">
+          <div className="absolute top-2 right-12 z-10 bg-black/70 text-white px-2 py-1 rounded flex items-center gap-1">
             <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
             <span className="text-sm font-medium">{rating.toFixed(1)}</span>
           </div>

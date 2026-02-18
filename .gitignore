@@ -31,3 +31,6 @@ dist-ssr
 
 # Opencode configuration
 /opencode
+
+# Extras folder with cached data
+/Extras/
