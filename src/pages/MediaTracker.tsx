@@ -32,7 +32,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useInView } from "react-intersection-observer";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -241,6 +241,39 @@ const MediaTracker = () => {
     [data]
   );
 
+  // Total count from all pages
+  const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
+
+  // Fetch group counts from database (separate from items query)
+  const { data: groupCountsData } = useQuery({
+    queryKey: ['groupCounts', customGroups],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return { all: 0 };
+
+      // Get total count
+      const { count: allCount } = await supabase
+        .from('media_tracker')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      // Get count for each custom group
+      const groupCounts: Record<string, number> = { all: allCount ?? 0 };
+      
+      for (const group of customGroups) {
+        const { count } = await supabase
+          .from('media_tracker')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .in('type', group.types);
+        groupCounts[group.id] = count ?? 0;
+      }
+
+      return groupCounts;
+    },
+    staleTime: 30 * 1000, // Refresh every 30 seconds
+  });
+
   // Intersection observer to load more
   const { ref: loadMoreRef, inView } = useInView({ rootMargin: '200px' });
   useEffect(() => {
@@ -306,21 +339,11 @@ const MediaTracker = () => {
     );
   }, [filteredByTagsMediaItems, activeGroupId, customGroups]);
 
-  // Calculate category counts
+  // Calculate category counts - use database counts instead of loaded items
   const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      all: filteredByTagsMediaItems.length,
-    };
-    
-    // Add counts for each custom group
-    customGroups.forEach(group => {
-      counts[group.id] = filteredByTagsMediaItems.filter(item => 
-        itemBelongsToCustomGroup(item.type, group)
-      ).length;
-    });
-    
-    return counts;
-  }, [filteredByTagsMediaItems, customGroups]);
+    // Use fetched group counts from database, fallback to 0 if not loaded yet
+    return groupCountsData || { all: 0 };
+  }, [groupCountsData]);
 
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
