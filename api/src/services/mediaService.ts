@@ -2,6 +2,8 @@ import { MediaMetadata, IMediaMetadata } from '../models/MediaMetadata';
 import { MediaCache } from '../models/MediaCache';
 import { anilistService } from './anilistService';
 import { tmdbService } from './tmdbService';
+import { omdbService } from './omdbService';
+import { tvmazeService } from './tvmazeService';
 
 // Cache TTL in milliseconds (24 hours)
 const CACHE_TTL = 24 * 60 * 60 * 1000;
@@ -194,42 +196,109 @@ export const mediaService = {
       }
     }
     
-    // Search TMDB for movies/series/kdrama/jdrama
+    // Search movies/series with fallback chain: TMDB -> OMDb -> TVmaze
     if (!type || ['movie', 'series', 'kdrama', 'jdrama'].includes(type)) {
+      let movieResults: MediaItem[] = [];
+      
+      // Try TMDB first
       try {
         const tmdbType = type === 'movie' ? 'movie' : 'series';
         const tmdbResults = await tmdbService.search(query, tmdbType as any, limit);
         
-        // Convert to MediaItem format
-        const mediaItems: MediaItem[] = tmdbResults.map(r => ({
-          title: r.title || '',
-          type: (r.type as string) || 'series',
-          anilistId: r.anilistId,
-          tmdbId: r.tmdbId,
-          malId: r.malId,
-          description: r.description || '',
-          genres: r.genres || [],
-          coverImage: r.coverImage || '',
-          bannerImage: r.bannerImage,
-          rating: r.rating || 0,
-          releaseDate: r.releaseDate,
-          status: (r.status as string) || 'upcoming',
-          episodes: r.episodes,
-          chapters: r.chapters,
-          duration: r.duration,
-          season: r.season,
-          searchKeywords: r.searchKeywords || []
-        }));
-        
-        // Filter by specific type if requested
-        const filtered = type 
-          ? mediaItems.filter(r => r.type === type)
-          : mediaItems;
-        
-        results.push(...filtered);
+        if (tmdbResults.length > 0) {
+          movieResults = tmdbResults.map(r => ({
+            title: r.title || '',
+            type: (r.type as string) || 'series',
+            anilistId: r.anilistId,
+            tmdbId: r.tmdbId,
+            malId: r.malId,
+            description: r.description || '',
+            genres: r.genres || [],
+            coverImage: r.coverImage || '',
+            bannerImage: r.bannerImage,
+            rating: r.rating || 0,
+            releaseDate: r.releaseDate,
+            status: (r.status as string) || 'upcoming',
+            episodes: r.episodes,
+            chapters: r.chapters,
+            duration: r.duration,
+            season: r.season,
+            searchKeywords: r.searchKeywords || []
+          }));
+        }
       } catch (error) {
         console.error('TMDB search failed:', error);
       }
+      
+      // Fallback to OMDb if TMDB returned no results
+      if (movieResults.length === 0) {
+        try {
+          const omdbType = type === 'movie' ? 'movie' : 'series';
+          const omdbResults = await omdbService.search(query, omdbType, limit);
+          
+          if (omdbResults.length > 0) {
+            movieResults = omdbResults.map(r => ({
+              title: r.title || '',
+              type: (r.type as string) || 'series',
+              anilistId: r.anilistId,
+              tmdbId: r.tmdbId,
+              malId: r.malId,
+              description: r.description || '',
+              genres: r.genres || [],
+              coverImage: r.coverImage || '',
+              bannerImage: r.bannerImage,
+              rating: r.rating || 0,
+              releaseDate: r.releaseDate,
+              status: (r.status as string) || 'upcoming',
+              episodes: r.episodes,
+              chapters: r.chapters,
+              duration: r.duration,
+              season: r.season,
+              searchKeywords: r.searchKeywords || []
+            }));
+          }
+        } catch (error) {
+          console.error('OMDb search failed:', error);
+        }
+      }
+      
+      // Fallback to TVmaze for TV shows if still no results
+      if (movieResults.length === 0 && type !== 'movie') {
+        try {
+          const tvmazeResults = await tvmazeService.search(query, limit);
+          
+          if (tvmazeResults.length > 0) {
+            movieResults = tvmazeResults.map(r => ({
+              title: r.title || '',
+              type: (r.type as string) || 'series',
+              anilistId: r.anilistId,
+              tmdbId: r.tmdbId,
+              malId: r.malId,
+              description: r.description || '',
+              genres: r.genres || [],
+              coverImage: r.coverImage || '',
+              bannerImage: r.bannerImage,
+              rating: r.rating || 0,
+              releaseDate: r.releaseDate,
+              status: (r.status as string) || 'upcoming',
+              episodes: r.episodes,
+              chapters: r.chapters,
+              duration: r.duration,
+              season: r.season,
+              searchKeywords: r.searchKeywords || []
+            }));
+          }
+        } catch (error) {
+          console.error('TVmaze search failed:', error);
+        }
+      }
+      
+      // Filter by specific type if requested
+      const filtered = type 
+        ? movieResults.filter(r => r.type === type)
+        : movieResults;
+      
+      results.push(...filtered);
     }
     
     return results.slice(0, limit);

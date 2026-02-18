@@ -5,7 +5,7 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 // Get API key at runtime (not at module load time)
-const getTMDBApiKey = () => process.env.getTMDBApiKey();
+const getTMDBApiKey = () => process.env.TMDB_API_KEY;
 
 interface TMDBResult {
   id: number;
