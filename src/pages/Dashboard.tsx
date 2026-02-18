@@ -85,6 +85,8 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Track tasks currently being completed to prevent duplicate requests
+  const completingTasksRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     fetchDashboardData();
@@ -319,6 +321,13 @@ const Dashboard = () => {
   };
 
   const handleTaskComplete = async (taskId: number) => {
+    // Prevent duplicate requests
+    if (completingTasksRef.current.has(taskId)) return;
+    completingTasksRef.current.add(taskId);
+    
+    // Store task for potential revert
+    const taskToComplete = pendingTasks.find(t => t.id === taskId);
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
@@ -343,13 +352,17 @@ const Dashboard = () => {
       const newStats = await fetchStats();
       setStats(newStats);
     } catch (error) {
-      // Revert optimistic update on error
-      fetchDashboardData();
+      // Revert optimistic update on error - add task back to list
+      if (taskToComplete) {
+        setPendingTasks(prev => [taskToComplete, ...prev]);
+      }
       toast({
         title: "Error",
         description: "Failed to complete task",
         variant: "destructive"
       });
+    } finally {
+      completingTasksRef.current.delete(taskId);
     }
   };
 
