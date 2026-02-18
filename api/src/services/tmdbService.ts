@@ -63,6 +63,31 @@ function determineType(item: TMDBResult | TMDBDetails, searchType?: string): str
   return 'series';
 }
 
+// Helper function to sleep
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Retry wrapper with exponential backoff
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries: number = 3,
+  delay: number = 1000
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    if (retries <= 0) throw error;
+    
+    // Retry on network errors or 429 (rate limit)
+    if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.response?.status === 429) {
+      console.log(`⚠️ TMDB request failed, retrying in ${delay}ms... (${retries} retries left)`);
+      await sleep(delay);
+      return withRetry(fn, retries - 1, delay * 2);
+    }
+    
+    throw error;
+  }
+}
+
 export const tmdbService = {
   async search(
     query: string,
@@ -70,20 +95,30 @@ export const tmdbService = {
     limit: number = 10
   ): Promise<Partial<IMediaMetadata>[]> {
     try {
-      if (!getTMDBApiKey()) {
-        console.error('getTMDBApiKey() is not set');
+      const apiKey = getTMDBApiKey();
+      if (!apiKey) {
+        console.error('❌ TMDB API key is not set');
         return [];
       }
 
-      // Search for movies and TV shows
-      const response = await axios.get(`${TMDB_BASE_URL}/search/multi`, {
-        params: {
-          api_key: getTMDBApiKey(),
-          query,
-          language: 'en-US',
-          page: 1
-        }
-      });
+      console.log(`🔍 [TMDB] Searching for: ${query} (${type})`);
+
+      // Search for movies and TV shows with retry
+      const response = await withRetry(() => 
+        axios.get(`${TMDB_BASE_URL}/search/multi`, {
+          params: {
+            api_key: apiKey,
+            query,
+            language: 'en-US',
+            page: 1
+          },
+          timeout: 10000, // 10 second timeout
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'NoteHaven/1.0'
+          }
+        })
+      );
       
       const results: TMDBResult[] = response.data.results
         .filter((item: TMDBResult) => {
@@ -94,13 +129,23 @@ export const tmdbService = {
         })
         .slice(0, limit);
       
-      // Get detailed info for each result
-      const detailedResults = await Promise.all(
-        results.map(async (item) => {
-          const details = await this.getDetails(item.id, item.media_type === 'movie' ? 'movie' : 'tv');
-          return details;
-        })
-      );
+      console.log(`✅ [TMDB] Found ${results.length} results`);
+      
+      // Get detailed info for each result with concurrency limit
+      const detailedResults: (Partial<IMediaMetadata> | null)[] = [];
+      for (const item of results) {
+        try {
+          const details = await withRetry(() => 
+            this.getDetails(item.id, item.media_type === 'movie' ? 'movie' : 'tv')
+          );
+          detailedResults.push(details);
+          // Small delay between requests to avoid rate limiting
+          await sleep(100);
+        } catch (err) {
+          console.error(`Failed to get details for ${item.id}:`, err);
+          detailedResults.push(null);
+        }
+      }
       
       // Filter by requested type
       return detailedResults
@@ -114,7 +159,7 @@ export const tmdbService = {
         })
         .slice(0, limit);
     } catch (error) {
-      console.error('TMDB API error:', error);
+      console.error('❌ TMDB API error:', error);
       return [];
     }
   },

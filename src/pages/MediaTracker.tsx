@@ -359,7 +359,7 @@ const MediaTracker = () => {
       if (ia === -1) return 1; if (ib === -1) return -1; return ia - ib;
     });
     return { keys, groups };
-  }, [filteredByTagsMediaItems]);
+  }, [categoryFilteredItems]);
 
   const handleQuickUpdate = async (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => {
     const currentVal = item[field];

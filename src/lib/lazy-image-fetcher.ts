@@ -155,21 +155,26 @@ class LazyImageFetcher {
 
   private async saveToDatabase(id: number, imageUrl: string): Promise<void> {
     try {
-      const { error } = await supabase
+      console.log(`💾 Attempting to save image for item ${id}: ${imageUrl.substring(0, 50)}...`);
+      
+      const { data, error } = await supabase
         .from('media_tracker')
         .update({ 
           cover_image_url: imageUrl,
           updated_at: new Date().toISOString()
         })
-        .eq('id', id);
+        .eq('id', id)
+        .select();
 
       if (error) {
-        console.error(`Failed to save image URL to database for item ${id}:`, error);
+        console.error(`❌ Failed to save image URL to database for item ${id}:`, error);
+        console.error('Error details:', error.message, error.details);
       } else {
-        console.log(`💾 Saved image URL to database for item ${id}`);
+        console.log(`✅ Successfully saved image URL to database for item ${id}`);
+        console.log('Updated rows:', data?.length || 0);
       }
     } catch (error) {
-      console.error(`Database update failed for item ${id}:`, error);
+      console.error(`❌ Database update failed for item ${id}:`, error);
     }
   }
 
