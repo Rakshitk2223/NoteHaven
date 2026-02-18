@@ -40,7 +40,7 @@ import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
-import { CategoryTabs } from "@/components/media/CategoryTabs";
+import { CategoryTabs, type CustomGroup, CUSTOM_GROUPS, itemBelongsToGroup } from "@/components/media/CategoryTabs";
 import { MediaCard } from "@/components/media/MediaCard";
 
 interface MediaItem {
@@ -65,6 +65,8 @@ interface MediaItem {
 // Valid types and statuses for runtime validation
 const VALID_TYPES = ['Movie', 'Series', 'Anime', 'Manga', 'Manhwa', 'Manhua', 'KDrama', 'JDrama'] as const;
 const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 'Completed'] as const;
+
+const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
 
 // Normalize media item to ensure valid types and statuses
 const normalizeMediaItem = (item: MediaItem): MediaItem => {
@@ -132,7 +134,7 @@ const MediaTracker = () => {
   const [editingItemTags, setEditingItemTags] = useState<Tag[]>([]);
   
   // Category tabs state
-  const [activeCategory, setActiveCategory] = useState<'all' | 'reading' | 'watching' | 'movies'>('all');
+  const [activeCategory, setActiveCategory] = useState<CustomGroup>('all');
 
   // Save view mode changes
   useEffect(() => {
@@ -273,40 +275,32 @@ const MediaTracker = () => {
     });
   }, [mediaItems, selectedTags]);
 
-  // Category filtering
+  // Category filtering using custom groups
   const categoryFilteredItems = useMemo(() => {
-    if (activeCategory === 'all') return filteredByTagsMediaItems;
-    
-    const readingTypes = ['Manga', 'Manhwa', 'Manhua'];
-    const watchingTypes = ['Series', 'Anime', 'KDrama', 'JDrama'];
-    const movieTypes = ['Movie'];
-    
-    return filteredByTagsMediaItems.filter(item => {
-      switch (activeCategory) {
-        case 'reading':
-          return readingTypes.includes(item.type);
-        case 'watching':
-          return watchingTypes.includes(item.type);
-        case 'movies':
-          return movieTypes.includes(item.type);
-        default:
-          return true;
-      }
-    });
+    return filteredByTagsMediaItems.filter(item => 
+      itemBelongsToGroup(item.type, activeCategory)
+    );
   }, [filteredByTagsMediaItems, activeCategory]);
 
   // Calculate category counts
   const categoryCounts = useMemo(() => {
-    const readingTypes = ['Manga', 'Manhwa', 'Manhua'];
-    const watchingTypes = ['Series', 'Anime', 'KDrama', 'JDrama'];
-    const movieTypes = ['Movie'];
-    
-    return {
+    const counts: Record<CustomGroup, number> = {
       all: filteredByTagsMediaItems.length,
-      reading: filteredByTagsMediaItems.filter(item => readingTypes.includes(item.type)).length,
-      watching: filteredByTagsMediaItems.filter(item => watchingTypes.includes(item.type)).length,
-      movies: filteredByTagsMediaItems.filter(item => movieTypes.includes(item.type)).length,
+      manga: 0,
+      drama: 0,
+      webseries: 0,
+      movies: 0,
     };
+    
+    filteredByTagsMediaItems.forEach(item => {
+      (Object.keys(CUSTOM_GROUPS) as CustomGroup[]).forEach(group => {
+        if (group !== 'all' && itemBelongsToGroup(item.type, group)) {
+          counts[group]++;
+        }
+      });
+    });
+    
+    return counts;
   }, [filteredByTagsMediaItems]);
 
   const groupedByStatus = useMemo(() => {
@@ -920,7 +914,28 @@ const MediaTracker = () => {
         <TableBody>
           {items.map((item) => (
             <TableRow key={item.id}>
-              <TableCell id={`media-${item.id}`} className="font-medium">{item.title}</TableCell>
+              <TableCell id={`media-${item.id}`} className="font-medium">
+                <div className="flex items-center gap-3">
+                  {/* Small Cover Image */}
+                  <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted">
+                    {item.cover_image_url ? (
+                      <img
+                        src={item.cover_image_url}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = PLACEHOLDER_IMAGE;
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <span className="text-[8px] text-muted-foreground text-center">No Img</span>
+                      </div>
+                    )}
+                  </div>
+                  <span className="truncate">{item.title}</span>
+                </div>
+              </TableCell>
               <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
               <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
               <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>

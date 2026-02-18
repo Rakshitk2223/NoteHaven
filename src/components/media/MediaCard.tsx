@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Star, Edit2, Trash2, MoreVertical } from 'lucide-react';
+import { Star, Edit2, Trash2, MoreVertical, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -10,6 +10,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { lazyImageFetcher } from '@/lib/lazy-image-fetcher';
 
 interface MediaCardProps {
   id: number;
@@ -60,8 +61,14 @@ export const MediaCard = ({
   const [isInView, setIsInView] = useState(false);
   const [error, setError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [fetchedImageUrl, setFetchedImageUrl] = useState<string | null>(coverImageUrl || null);
+  const [isFetching, setIsFetching] = useState(false);
   const imgRef = useRef<HTMLDivElement>(null);
-  
+  const hasAttemptedFetch = useRef(false);
+
+  // Use either the provided URL or the fetched URL
+  const displayImageUrl = fetchedImageUrl || coverImageUrl;
+
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -72,13 +79,33 @@ export const MediaCard = ({
       },
       { rootMargin: '50px' }
     );
-    
+
     if (imgRef.current) {
       observer.observe(imgRef.current);
     }
-    
+
     return () => observer.disconnect();
   }, []);
+
+  // Lazy image fetching when card comes into view and has no image
+  useEffect(() => {
+    if (isInView && !displayImageUrl && !hasAttemptedFetch.current) {
+      hasAttemptedFetch.current = true;
+      setIsFetching(true);
+
+      lazyImageFetcher.fetchImage(id, title, type)
+        .then((url) => {
+          if (url) {
+            setFetchedImageUrl(url);
+          }
+          setIsFetching(false);
+        })
+        .catch((err) => {
+          console.error(`Failed to fetch image for ${title}:`, err);
+          setIsFetching(false);
+        });
+    }
+  }, [isInView, displayImageUrl, id, title, type]);
   
   const progressText = current_episode 
     ? `S${current_season || 1} E${current_episode}`
@@ -111,15 +138,24 @@ export const MediaCard = ({
           "shadow-md group-hover:shadow-xl transition-shadow duration-300"
         )}
       >
-        {/* Loading Skeleton */}
-        {!isLoaded && (
-          <Skeleton className="absolute inset-0" />
+        {/* Loading Skeleton or Fetching Indicator */}
+        {(!isLoaded || isFetching) && (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted">
+            {isFetching ? (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">Searching...</span>
+              </div>
+            ) : (
+              <Skeleton className="absolute inset-0" />
+            )}
+          </div>
         )}
-        
+
         {/* Actual Image */}
         {isInView && (
           <img
-            src={error || !coverImageUrl ? PLACEHOLDER_IMAGE : coverImageUrl}
+            src={error || !displayImageUrl ? PLACEHOLDER_IMAGE : displayImageUrl}
             alt={title}
             onLoad={() => setIsLoaded(true)}
             onError={() => {
