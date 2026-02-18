@@ -39,6 +39,27 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     }
   }, [isCollapsed]);
 
+  // Sync with other tabs via storage event
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY && event.newValue !== null) {
+        const newValue = event.newValue === 'true';
+        // Only update if different to avoid unnecessary renders
+        setIsCollapsed(prev => {
+          if (prev !== newValue) {
+            return newValue;
+          }
+          return prev;
+        });
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   const toggle = () => {
     setWasManuallyToggled(true);
     setIsCollapsed(prev => !prev);
