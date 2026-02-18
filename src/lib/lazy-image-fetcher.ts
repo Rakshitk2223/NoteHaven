@@ -1,4 +1,5 @@
 import { mediaApi, type ExternalMedia } from "./media-api";
+import { anilistDirectService } from "./anilist-direct";
 import { supabase } from "@/integrations/supabase/client";
 
 // Rate limiting
@@ -119,18 +120,36 @@ class LazyImageFetcher {
       return null;
     }
 
+    // Try backend API first
     try {
       const results = await mediaApi.search(item.title, searchType, 1);
       
       if (results.length > 0) {
         const bestMatch = results[0];
-        console.log(`✅ Found image for "${item.title}": ${bestMatch.coverImage}`);
+        console.log(`✅ Found image for "${item.title}" via backend: ${bestMatch.coverImage}`);
         return bestMatch.coverImage;
       }
     } catch (error) {
-      console.error(`API search failed for "${item.title}":`, error);
+      console.error(`Backend API search failed for "${item.title}":`, error);
     }
 
+    // Fallback to direct AniList for anime/manga/manhwa/manhua
+    if (['anime', 'manga', 'manhwa', 'manhua'].includes(searchType)) {
+      try {
+        const anilistType: 'anime' | 'manga' = ['manga', 'manhwa', 'manhua'].includes(searchType) ? 'manga' : 'anime';
+        const results = await anilistDirectService.search(item.title, anilistType, 1);
+        
+        if (results.length > 0) {
+          const bestMatch = results[0];
+          console.log(`✅ Found image for "${item.title}" via AniList direct: ${bestMatch.coverImage}`);
+          return bestMatch.coverImage;
+        }
+      } catch (error) {
+        console.error(`AniList direct search failed for "${item.title}":`, error);
+      }
+    }
+
+    console.log(`❌ No image found for "${item.title}"`);
     return null;
   }
 
