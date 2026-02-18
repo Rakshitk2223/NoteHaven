@@ -65,19 +65,41 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
     }
   };
 
+  const validateBirthdayYear = (year: string): number | null => {
+    if (!year.trim()) return new Date().getFullYear();
+    
+    const yearNum = parseInt(year, 10);
+    const currentYear = new Date().getFullYear();
+    
+    if (isNaN(yearNum) || yearNum < 1900 || yearNum > currentYear) {
+      return null;
+    }
+    
+    return yearNum;
+  };
+
   const handleAddBirthday = async () => {
     if (!birthdayName.trim() || !date) return;
+
+    // Validate year before proceeding
+    const validatedYear = validateBirthdayYear(birthdayYear);
+    if (validatedYear === null) {
+      toast({
+        title: 'Invalid year',
+        description: `Please enter a valid year between 1900 and ${new Date().getFullYear()}`,
+        variant: 'destructive',
+      });
+      return;
+    }
 
     setIsLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Construct date string - use year if provided, otherwise use current year
-      const year = birthdayYear ? parseInt(birthdayYear) : new Date().getFullYear();
       const month = date.getMonth() + 1;
       const day = date.getDate();
-      const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dateString = `${validatedYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
       const { error } = await supabase.from('birthdays').insert([{
         user_id: user.id,
@@ -140,13 +162,17 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
                 id="task-text"
                 placeholder="What needs to be done?"
                 value={taskText}
+                maxLength={500}
                 onChange={(e) => setTaskText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isLoading) {
+                  if (e.key === 'Enter' && !isLoading && taskText.trim()) {
                     handleAddTask();
                   }
                 }}
               />
+              <p className="text-xs text-muted-foreground text-right">
+                {taskText.length}/500
+              </p>
             </div>
             <Button
               onClick={handleAddTask}
