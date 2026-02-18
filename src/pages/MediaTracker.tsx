@@ -40,6 +40,8 @@ import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
+import { CategoryTabs } from "@/components/media/CategoryTabs";
+import { MediaCard } from "@/components/media/MediaCard";
 
 interface MediaItem {
   id: number;
@@ -52,6 +54,9 @@ interface MediaItem {
   current_season?: number;
   current_episode?: number;
   current_chapter?: number;
+  cover_image_url?: string | null;
+  external_id?: string | null;
+  metadata_source?: string | null;
   created_at: string;
   updated_at?: string;
   tags?: Tag[];
@@ -125,6 +130,9 @@ const MediaTracker = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [formTags, setFormTags] = useState<Tag[]>([]);
   const [editingItemTags, setEditingItemTags] = useState<Tag[]>([]);
+  
+  // Category tabs state
+  const [activeCategory, setActiveCategory] = useState<'all' | 'reading' | 'watching' | 'movies'>('all');
 
   // Save view mode changes
   useEffect(() => {
@@ -265,9 +273,45 @@ const MediaTracker = () => {
     });
   }, [mediaItems, selectedTags]);
 
+  // Category filtering
+  const categoryFilteredItems = useMemo(() => {
+    if (activeCategory === 'all') return filteredByTagsMediaItems;
+    
+    const readingTypes = ['Manga', 'Manhwa', 'Manhua'];
+    const watchingTypes = ['Series', 'Anime', 'KDrama', 'JDrama'];
+    const movieTypes = ['Movie'];
+    
+    return filteredByTagsMediaItems.filter(item => {
+      switch (activeCategory) {
+        case 'reading':
+          return readingTypes.includes(item.type);
+        case 'watching':
+          return watchingTypes.includes(item.type);
+        case 'movies':
+          return movieTypes.includes(item.type);
+        default:
+          return true;
+      }
+    });
+  }, [filteredByTagsMediaItems, activeCategory]);
+
+  // Calculate category counts
+  const categoryCounts = useMemo(() => {
+    const readingTypes = ['Manga', 'Manhwa', 'Manhua'];
+    const watchingTypes = ['Series', 'Anime', 'KDrama', 'JDrama'];
+    const movieTypes = ['Movie'];
+    
+    return {
+      all: filteredByTagsMediaItems.length,
+      reading: filteredByTagsMediaItems.filter(item => readingTypes.includes(item.type)).length,
+      watching: filteredByTagsMediaItems.filter(item => watchingTypes.includes(item.type)).length,
+      movies: filteredByTagsMediaItems.filter(item => movieTypes.includes(item.type)).length,
+    };
+  }, [filteredByTagsMediaItems]);
+
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
-    filteredByTagsMediaItems.forEach(item => {
+    categoryFilteredItems.forEach(item => {
       const key = getStatusCategory(item.status || 'Active');
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
@@ -836,138 +880,22 @@ const MediaTracker = () => {
             <Badge className={getStatusColor(statusKey as MediaItem['status'])}>{statusKey}</Badge>
             <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>
           </h2>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {groupedByStatus.groups[statusKey].map((item) => (
-              <div
+              <MediaCard
                 key={item.id}
-                id={`media-${item.id}`}
-                className="zen-card p-6 transition-all duration-150 hover:shadow-lg hover:-translate-y-0.5"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <Badge className={getTypeColor(item.type)}>{item.type}</Badge>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-6 px-2 gap-1" disabled={updatingIds.has(item.id)}>
-                        <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
-                        <ChevronDown className="h-3 w-3" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {readableTypes.includes(item.type) ? (
-                        <>
-                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Reading')}>
-                            Reading
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Plan to Read')}>
-                            Plan to Read
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Completed')}>
-                            Completed
-                          </DropdownMenuItem>
-                        </>
-                      ) : (
-                        <>
-                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Watching')}>
-                            Watching
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Plan to Watch')}>
-                            Plan to Watch
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleQuickStatusChange(item, 'Completed')}>
-                            Completed
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                <h3 className="text-lg font-semibold text-foreground mb-2 truncate">{item.title}</h3>
-                {item.rating && (
-                  <div className="flex items-center gap-1 mb-3">
-                    <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                    <span className="text-sm font-medium">{item.rating}/10</span>
-                  </div>
-                )}
-                <div className="text-sm text-muted-foreground mb-4 space-y-2">
-                  {readableTypes.includes(item.type) ? (
-                    item.current_chapter ? (
-                      <div className="flex items-center gap-2">
-                        <span>Ch. {item.current_chapter}</span>
-                        <div className="flex gap-1">
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            disabled={updatingIds.has(item.id)}
-                            onClick={() => handleQuickUpdate(item, 'current_chapter', -1)}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            disabled={updatingIds.has(item.id)}
-                            onClick={() => handleQuickUpdate(item, 'current_chapter', 1)}
-                          >
-                            <PlusIcon className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>-</div>
-                    )
-                  ) : watchableTypes.includes(item.type) ? (
-                    (item.current_season || item.current_episode) ? (
-                      <div className="flex items-center gap-2">
-                        <span>
-                          {item.current_season ? `S${item.current_season} • ` : ''}
-                          {item.current_episode ? `E${item.current_episode}` : ''}
-                        </span>
-                        {item.current_episode && (
-                          <div className="flex gap-1">
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              className="h-6 w-6"
-                              disabled={updatingIds.has(item.id)}
-                              onClick={() => handleQuickUpdate(item, 'current_episode', -1)}
-                            >
-                              <Minus className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              className="h-6 w-6"
-                              disabled={updatingIds.has(item.id)}
-                              onClick={() => handleQuickUpdate(item, 'current_episode', 1)}
-                            >
-                              <PlusIcon className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div>-</div>
-                    )
-                  ) : (
-                    <div>-</div>
-                  )}
-                </div>
-                <div className="flex space-x-2">
-                  <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)} className="flex-1">
-                    <Edit className="h-4 w-4 mr-1" />Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setDeleteConfirm({ open: true, id: item.id })}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
+                id={item.id}
+                title={item.title}
+                type={item.type}
+                status={item.status}
+                rating={item.rating}
+                current_season={item.current_season}
+                current_episode={item.current_episode}
+                current_chapter={item.current_chapter}
+                coverImageUrl={item.cover_image_url}
+                onEdit={() => handleEditMedia(item)}
+                onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
+              />
             ))}
           </div>
         </div>
@@ -1513,24 +1441,26 @@ const MediaTracker = () => {
               </div>
             </div>
 
+            {/* Category Tabs */}
+            <div className="mb-6">
+              <CategoryTabs
+                activeCategory={activeCategory}
+                onCategoryChange={setActiveCategory}
+                counts={categoryCounts}
+              />
+            </div>
+
             {loading ? (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="zen-card p-6">
-                    <div className="flex items-start justify-between mb-3">
-                      <Skeleton className="h-6 w-20" />
-                      <Skeleton className="h-6 w-24" />
-                    </div>
-                    <Skeleton className="h-5 w-3/4 mb-3" />
-                    <Skeleton className="h-4 w-1/3 mb-4" />
-                    <div className="flex gap-2">
-                      <Skeleton className="h-8 w-24" />
-                      <Skeleton className="h-8 w-8" />
-                    </div>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div key={i} className="space-y-3">
+                    <Skeleton className="aspect-[2/3] w-full rounded-lg" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
                   </div>
                 ))}
               </div>
-            ) : mediaItems.length === 0 ? (
+            ) : categoryFilteredItems.length === 0 ? (
               <div className="zen-card p-8 text-center">
                 <p className="text-muted-foreground mb-4">
                   {filterType.length > 0 || filterStatus !== 'All' 
@@ -1541,9 +1471,9 @@ const MediaTracker = () => {
             ) : (
               <div className="space-y-6">
                 {viewMode === 'grid' ? (
-                  <MediaGridView items={mediaItems} />
+                  <MediaGridView items={categoryFilteredItems} />
                 ) : (
-                  <MediaListView items={mediaItems} />
+                  <MediaListView items={categoryFilteredItems} />
                 )}
                 {/* Infinite scroll sentinel */}
                 <div ref={loadMoreRef} />
