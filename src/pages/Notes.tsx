@@ -68,6 +68,9 @@ const Notes = () => {
   const [notesPerPage] = useState(50); // Pagination: load 50 notes at a time
   const [currentPage, setCurrentPage] = useState(1);
   const { toast } = useToast();
+  // Track local edit state to prevent remote overwrites
+  const localEditTimestampRef = useRef<number>(Date.now());
+  const hasLocalChangesRef = useRef<boolean>(false);
   // Sharing state
   const [shareOpen, setShareOpen] = useState(false);
   const [allowEditShare, setAllowEditShare] = useState(false);
@@ -399,18 +402,41 @@ const Notes = () => {
               });
             } else if (payload.eventType === 'UPDATE') {
               const updatedNote = payload.new as Note;
-              setNotes(prev => prev.map(note => 
-                note.id === updatedNote.id ? updatedNote : note
-              ));
+              const remoteTime = new Date(updatedNote.updated_at).getTime();
+              const localTime = localEditTimestampRef.current;
               
-              // If the currently selected note was updated, update it
-              // but DON'T reset the editor content to avoid cursor jumping
-              setSelectedNote(prev => {
-                if (prev?.id === updatedNote.id) {
-                  // Only update metadata (title, pinned, color), not content
-                  // Content sync is handled separately to avoid cursor issues
-                  return { ...prev, ...updatedNote };
+              // Only update if remote is newer AND we don't have unsaved local changes
+              const shouldApplyRemote = remoteTime > localTime && !hasLocalChangesRef.current;
+              
+              setNotes(prev => prev.map(note => {
+                if (note.id !== updatedNote.id) return note;
+                // Only update note list if remote is newer
+                if (shouldApplyRemote) {
+                  return updatedNote;
                 }
+                return note;
+              }));
+              
+              // If the currently selected note was updated
+              setSelectedNote(prev => {
+                if (prev?.id !== updatedNote.id) return prev;
+                
+                // If we have local changes, don't overwrite content
+                if (hasLocalChangesRef.current) {
+                  // Only update metadata (pinned, color), not title/content
+                  return { 
+                    ...prev, 
+                    is_pinned: updatedNote.is_pinned,
+                    background_color: updatedNote.background_color,
+                    updated_at: updatedNote.updated_at
+                  };
+                }
+                
+                // Apply full update if remote is newer
+                if (shouldApplyRemote) {
+                  return updatedNote;
+                }
+                
                 return prev;
               });
             } else if (payload.eventType === 'DELETE') {
@@ -571,6 +597,9 @@ const Notes = () => {
       if (error) throw error;
       const now = new Date().toISOString();
       setLastServerUpdate(now);
+      // Reset local changes flag since save was successful
+      hasLocalChangesRef.current = false;
+      localEditTimestampRef.current = Date.now();
   // Update list & selected note with new field value so previews stay fresh
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value, updated_at: now } : n));
       setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value, updated_at: now } : prev);
@@ -596,6 +625,9 @@ const Notes = () => {
 
   const handleTitleChange = (val: string) => {
     setTitleValue(val);
+    // Mark that user has made local changes
+    hasLocalChangesRef.current = true;
+    localEditTimestampRef.current = Date.now();
     if (selectedNote) {
       const previous = selectedNote.title || '';
       if (val !== previous) scheduleTitleSave(selectedNote.id, val, previous);
@@ -604,6 +636,9 @@ const Notes = () => {
 
   const handleContentChange = (html: string) => {
     setContentValue(html);
+    // Mark that user has made local changes
+    hasLocalChangesRef.current = true;
+    localEditTimestampRef.current = Date.now();
     if (selectedNote) {
       const previous = selectedNote.content || '';
       if (html !== previous) scheduleContentSave(selectedNote.id, html, previous);
