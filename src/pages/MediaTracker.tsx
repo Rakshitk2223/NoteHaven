@@ -40,8 +40,8 @@ import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
-import { CategoryTabs, type CustomGroup, CUSTOM_GROUPS, itemBelongsToGroup } from "@/components/media/CategoryTabs";
 import { MediaCard } from "@/components/media/MediaCard";
+import { CustomGroupBuilder, type CustomGroup, itemBelongsToCustomGroup } from "@/components/media/CustomGroupBuilder";
 
 interface MediaItem {
   id: number;
@@ -133,8 +133,27 @@ const MediaTracker = () => {
   const [formTags, setFormTags] = useState<Tag[]>([]);
   const [editingItemTags, setEditingItemTags] = useState<Tag[]>([]);
   
-  // Category tabs state
-  const [activeCategory, setActiveCategory] = useState<CustomGroup>('all');
+  // Custom groups state (persisted to localStorage)
+  const [customGroups, setCustomGroups] = useState<CustomGroup[]>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerCustomGroups') : null;
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeGroupId, setActiveGroupId] = useState<string | 'all'>('all');
+
+  // Save custom groups to localStorage
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('mediaTrackerCustomGroups', JSON.stringify(customGroups));
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [customGroups]);
 
   // Save view mode changes
   useEffect(() => {
@@ -277,31 +296,31 @@ const MediaTracker = () => {
 
   // Category filtering using custom groups
   const categoryFilteredItems = useMemo(() => {
+    if (activeGroupId === 'all') return filteredByTagsMediaItems;
+    
+    const activeGroup = customGroups.find(g => g.id === activeGroupId);
+    if (!activeGroup) return filteredByTagsMediaItems;
+    
     return filteredByTagsMediaItems.filter(item => 
-      itemBelongsToGroup(item.type, activeCategory)
+      itemBelongsToCustomGroup(item.type, activeGroup)
     );
-  }, [filteredByTagsMediaItems, activeCategory]);
+  }, [filteredByTagsMediaItems, activeGroupId, customGroups]);
 
   // Calculate category counts
   const categoryCounts = useMemo(() => {
-    const counts: Record<CustomGroup, number> = {
+    const counts: Record<string, number> = {
       all: filteredByTagsMediaItems.length,
-      manga: 0,
-      drama: 0,
-      webseries: 0,
-      movies: 0,
     };
     
-    filteredByTagsMediaItems.forEach(item => {
-      (Object.keys(CUSTOM_GROUPS) as CustomGroup[]).forEach(group => {
-        if (group !== 'all' && itemBelongsToGroup(item.type, group)) {
-          counts[group]++;
-        }
-      });
+    // Add counts for each custom group
+    customGroups.forEach(group => {
+      counts[group.id] = filteredByTagsMediaItems.filter(item => 
+        itemBelongsToCustomGroup(item.type, group)
+      ).length;
     });
     
     return counts;
-  }, [filteredByTagsMediaItems]);
+  }, [filteredByTagsMediaItems, customGroups]);
 
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
@@ -1456,12 +1475,14 @@ const MediaTracker = () => {
               </div>
             </div>
 
-            {/* Category Tabs */}
+            {/* Custom Groups */}
             <div className="mb-6">
-              <CategoryTabs
-                activeCategory={activeCategory}
-                onCategoryChange={setActiveCategory}
-                counts={categoryCounts}
+              <CustomGroupBuilder
+                groups={customGroups}
+                onGroupsChange={setCustomGroups}
+                activeGroupId={activeGroupId}
+                onActiveGroupChange={setActiveGroupId}
+                itemCounts={categoryCounts}
               />
             </div>
 
