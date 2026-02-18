@@ -1,9 +1,11 @@
 import axios from 'axios';
 import { IMediaMetadata } from '../models/MediaMetadata';
 
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
+
+// Get API key at runtime (not at module load time)
+const getTMDBApiKey = () => process.env.getTMDBApiKey();
 
 interface TMDBResult {
   id: number;
@@ -68,15 +70,15 @@ export const tmdbService = {
     limit: number = 10
   ): Promise<Partial<IMediaMetadata>[]> {
     try {
-      if (!TMDB_API_KEY) {
-        console.error('TMDB_API_KEY is not set');
+      if (!getTMDBApiKey()) {
+        console.error('getTMDBApiKey() is not set');
         return [];
       }
 
       // Search for movies and TV shows
       const response = await axios.get(`${TMDB_BASE_URL}/search/multi`, {
         params: {
-          api_key: TMDB_API_KEY,
+          api_key: getTMDBApiKey(),
           query,
           language: 'en-US',
           page: 1
@@ -119,14 +121,14 @@ export const tmdbService = {
   
   async getDetails(id: number, mediaType: 'movie' | 'tv'): Promise<Partial<IMediaMetadata> | null> {
     try {
-      if (!TMDB_API_KEY) {
-        console.error('TMDB_API_KEY is not set');
+      if (!getTMDBApiKey()) {
+        console.error('getTMDBApiKey() is not set');
         return null;
       }
 
       const response = await axios.get(`${TMDB_BASE_URL}/${mediaType}/${id}`, {
         params: {
-          api_key: TMDB_API_KEY,
+          api_key: getTMDBApiKey(),
           language: 'en-US'
         }
       });
