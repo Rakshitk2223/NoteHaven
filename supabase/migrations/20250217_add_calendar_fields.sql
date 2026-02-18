@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_notes_calendar_date
 ON notes(user_id, calendar_date) 
 WHERE calendar_date IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_media_release_date 
+CREATE INDEX IF NOT EXISTS idx_media_release_dat
 ON media_tracker(user_id, release_date) 
 WHERE release_date IS NOT NULL;
 

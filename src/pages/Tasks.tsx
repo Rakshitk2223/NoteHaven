@@ -52,16 +52,41 @@ const Tasks = () => {
   const [newTaskTags, setNewTaskTags] = useState<Tag[]>([]);
   const [editTaskTags, setEditTaskTags] = useState<Tag[]>([]);
 
+  // Ref to track mounted state and prevent setting state after unmount
+  const isMountedRef = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
   // Load tags when editing a task
   useEffect(() => {
     const loadEditTaskTags = async () => {
-      if (editTask?.id) {
-        try {
-          const tags = await fetchTaskTags(editTask.id);
+      if (!editTask?.id) {
+        setEditTaskTags([]);
+        return;
+      }
+
+      // Cancel any in-flight request
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
+
+      try {
+        const tags = await fetchTaskTags(editTask.id);
+        // Only update state if component is still mounted and task hasn't changed
+        if (isMountedRef.current) {
           setEditTaskTags(tags);
-        } catch (err) {
-          console.error('Failed to load task tags:', err);
         }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          // Request was cancelled, ignore
+          return;
+        }
+        console.error('Failed to load task tags:', err);
       }
     };
     loadEditTaskTags();
