@@ -6,6 +6,11 @@ import { tmdbService } from './tmdbService';
 // Cache TTL in milliseconds (24 hours)
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
+// Escape special regex characters to prevent MongoDB errors
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // Media item interface for API responses
 export interface MediaItem {
   _id?: string;
@@ -74,17 +79,20 @@ export const mediaService = {
     // Search MongoDB first
     let results: MediaItem[] = [];
     
+    // Escape special regex characters to prevent MongoDB errors
+    const escapedQuery = escapeRegex(query);
+    
     const dbQuery = type 
       ? {
           type,
           $or: [
-            { title: { $regex: query, $options: 'i' } },
+            { title: { $regex: escapedQuery, $options: 'i' } },
             { searchKeywords: { $in: [query.toLowerCase()] } }
           ]
         }
       : {
           $or: [
-            { title: { $regex: query, $options: 'i' } },
+            { title: { $regex: escapedQuery, $options: 'i' } },
             { searchKeywords: { $in: [query.toLowerCase()] } }
           ]
         };
