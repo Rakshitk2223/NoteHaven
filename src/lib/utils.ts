@@ -1,8 +1,36 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import DOMPurify from 'dompurify'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+/**
+ * Sanitizes HTML content to prevent XSS attacks.
+ * Removes all potentially dangerous tags and attributes.
+ * Only allows safe formatting tags.
+ */
+export function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li'],
+    ALLOWED_ATTR: [],
+    ALLOW_DATA_ATTR: false,
+    SANITIZE_DOM: true,
+  })
+}
+
+/**
+ * Sanitizes HTML for preview display with more allowed tags
+ * but still removes dangerous content.
+ */
+export function sanitizePreview(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre', 'span'],
+    ALLOWED_ATTR: ['class'],
+    ALLOW_DATA_ATTR: false,
+    SANITIZE_DOM: true,
+  })
 }
 
 // Returns a Tailwind text color class (neutral-900 or neutral-100) based on luminance of a hex background

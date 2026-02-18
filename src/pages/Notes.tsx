@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 // Removed Textarea split-view in favor of Tiptap WYSIWYG
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
-import { cn, getContrastTextColor } from "@/lib/utils";
+import { cn, getContrastTextColor, sanitizePreview } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
 import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
@@ -22,7 +22,7 @@ import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchNoteTags, setNoteTags, createTag, type Tag } from "@/lib/tags";
 // Removed markdown rendering libraries; now storing & rendering raw HTML
 import { useEditor, EditorContent } from '@tiptap/react';
-import DOMPurify from 'dompurify';
+
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Gapcursor from '@tiptap/extension-gapcursor';
@@ -772,16 +772,6 @@ const Notes = () => {
   const truncateText = (text: string, maxLength: number = 50) => {
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength) + '...';
-  };
-
-  // Sanitize HTML for preview display using DOMPurify
-  const sanitizePreview = (html: string) => {
-    return DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre', 'span', 'div'],
-      ALLOWED_ATTR: ['class', 'style'],
-      ALLOW_DATA_ATTR: false,
-      SANITIZE_DOM: true,
-    });
   };
 
   // Filter notes based on search query and selected tags

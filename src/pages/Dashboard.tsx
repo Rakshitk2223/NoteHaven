@@ -18,7 +18,7 @@ import { getUpcomingRenewals, type UpcomingRenewal } from "@/lib/subscriptions";
 import { CreditCard } from "lucide-react";
 import { formatCurrency } from "@/lib/ledger";
 import { parseYMD } from "@/lib/date-utils";
-import DOMPurify from 'dompurify';
+import { sanitizeHtml } from "@/lib/utils";
 
 interface Task {
   id: number;
@@ -57,11 +57,6 @@ interface Countdown {
   event_date: string; // ISO date
 }
 interface Birthday { id: number; name: string; date_of_birth: string; }
-
-// Helper function to sanitize HTML content
-const sanitizeHtml = (html: string): string => {
-  return DOMPurify.sanitize(html, { ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br'] });
-};
 
 const Dashboard = () => {
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
