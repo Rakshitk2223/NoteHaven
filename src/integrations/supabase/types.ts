@@ -330,6 +330,60 @@ export type Database = {
         }
         Relationships: []
       }
+      code_snippets: {
+        Row: {
+          id: number
+          user_id: string
+          title: string
+          code: string
+          language: string
+          category: string | null
+          is_favorited: boolean | null
+          is_pinned: boolean | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          user_id: string
+          title: string
+          code?: string
+          language?: string
+          category?: string | null
+          is_favorited?: boolean | null
+          is_pinned?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          user_id?: string
+          title?: string
+          code?: string
+          language?: string
+          category?: string | null
+          is_favorited?: boolean | null
+          is_pinned?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      code_snippet_tags: {
+        Row: {
+          snippet_id: number
+          tag_id: number
+        }
+        Insert: {
+          snippet_id: number
+          tag_id: number
+        }
+        Update: {
+          snippet_id?: number
+          tag_id?: number
+        }
+        Relationships: []
+      }
       ledger_categories: {
         Row: {
           id: number
@@ -719,6 +773,20 @@ export interface PromptWithTags {
   category: string | null
   is_pinned: boolean | null
   created_at: string
+  tags?: Tag[]
+}
+
+export interface CodeSnippetWithTags {
+  id: number
+  user_id: string
+  title: string
+  code: string
+  language: string
+  category: string | null
+  is_favorited: boolean | null
+  is_pinned: boolean | null
+  created_at: string
+  updated_at: string
   tags?: Tag[]
 }
 

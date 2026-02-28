@@ -15,7 +15,8 @@ import {
   ExternalLink,
   Wallet,
   CreditCard,
-  Calendar
+  Calendar,
+  Library
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -25,7 +26,7 @@ import { useSidebar } from "@/contexts/SidebarContext";
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   "Dashboard": LayoutDashboard,
   "Calendar": Calendar,
-  "Prompts": MessageSquare,
+  "Library": Library,
   "Media": Monitor,
   "Tasks": CheckSquare,
   "Notes": FileText,
@@ -43,7 +44,7 @@ interface NavItem {
 const defaultMainNavigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Calendar", href: "/calendar", icon: Calendar },
-  { name: "Prompts", href: "/prompts", icon: MessageSquare },
+  { name: "Library", href: "/library", icon: Library },
   { name: "Media", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },

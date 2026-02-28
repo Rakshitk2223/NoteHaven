@@ -379,7 +379,7 @@ const Dashboard = () => {
   };
 
   const handlePromptClick = () => {
-    navigate('/prompts');
+    navigate('/library');
   };
 
   const handleViewAllTasks = () => {
@@ -394,7 +394,7 @@ const Dashboard = () => {
         navigate(`/tasks?task=${item.id}`);
         break;
       case 'prompt':
-        navigate('/prompts');
+        navigate('/library');
         break;
       case 'note':
         navigate(`/notes?note=${item.id}`);
@@ -410,7 +410,7 @@ const Dashboard = () => {
       value: stats.prompts,
       description: "Total prompts created",
       icon: <Sparkles className="h-5 w-5" />,
-      link: "/prompts"
+      link: "/library"
     },
     {
       title: "Media Items",

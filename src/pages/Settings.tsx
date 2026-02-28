@@ -20,7 +20,7 @@ interface SidebarItem {
 const DEFAULT_ORDER: SidebarItem[] = [
   { name: 'Dashboard', href: '/dashboard' },
   { name: 'Calendar', href: '/calendar' },
-  { name: 'Prompts', href: '/prompts' },
+  { name: 'Library', href: '/library' },
   { name: 'Media', href: '/media' },
   { name: 'Tasks', href: '/tasks' },
   { name: 'Notes', href: '/notes' },

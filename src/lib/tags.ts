@@ -1,7 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
-import type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags } from '@/integrations/supabase/types';
+import type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags, CodeSnippetWithTags } from '@/integrations/supabase/types';
 
-export type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags };
+export type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags, CodeSnippetWithTags };
 
 // Tag color palette (must be defined here since types file uses it differently)
 export const TAG_COLORS = [
@@ -144,6 +144,19 @@ export async function fetchPromptTags(promptId: number): Promise<Tag[]> {
   return (data || []).map((item: any) => item.tags);
 }
 
+/**
+ * Fetch tags for a specific code snippet
+ */
+export async function fetchSnippetTags(snippetId: number): Promise<Tag[]> {
+  const { data, error } = await supabase
+    .from('code_snippet_tags')
+    .select('tag_id, tags(*)')
+    .eq('snippet_id', snippetId);
+
+  if (error) throw error;
+  return (data || []).map((item: any) => item.tags);
+}
+
 // ============================================
 // TAG CRUD
 // ============================================
@@ -276,6 +289,21 @@ export async function setPromptTags(promptId: number, tagIds: number[]): Promise
   }
 }
 
+/**
+ * Set tags for a code snippet (replaces existing tags)
+ */
+export async function setSnippetTags(snippetId: number, tagIds: number[]): Promise<void> {
+  await supabase.from('code_snippet_tags').delete().eq('snippet_id', snippetId);
+  
+  if (tagIds.length > 0) {
+    const { error } = await supabase
+      .from('code_snippet_tags')
+      .insert(tagIds.map(tagId => ({ snippet_id: snippetId, tag_id: tagId })));
+    
+    if (error) throw error;
+  }
+}
+
 // ============================================
 // SEARCH BY TAG
 // ============================================
@@ -285,6 +313,7 @@ export interface TaggedItems {
   tasks: TaskWithTags[];
   media: MediaWithTags[];
   prompts: PromptWithTags[];
+  snippets: CodeSnippetWithTags[];
 }
 
 /**
@@ -305,10 +334,10 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
     .eq('name', normalizedName)
     .single();
 
-  if (!tag) return { notes: [], tasks: [], media: [], prompts: [] };
+  if (!tag) return { notes: [], tasks: [], media: [], prompts: [], snippets: [] };
 
   // Fetch all items with this tag
-  const [notesResult, tasksResult, mediaResult, promptsResult] = await Promise.all([
+  const [notesResult, tasksResult, mediaResult, promptsResult, snippetsResult] = await Promise.all([
     supabase
       .from('note_tags')
       .select('notes(*)')
@@ -328,14 +357,20 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
       .from('prompt_tags')
       .select('prompts(*)')
       .eq('tag_id', tag.id)
-      .then(({ data }) => (data || []).map((item: any) => item.prompts))
+      .then(({ data }) => (data || []).map((item: any) => item.prompts)),
+    supabase
+      .from('code_snippet_tags')
+      .select('code_snippets(*)')
+      .eq('tag_id', tag.id)
+      .then(({ data }) => (data || []).map((item: any) => item.code_snippets))
   ]);
 
   return {
     notes: notesResult,
     tasks: tasksResult,
     media: mediaResult,
-    prompts: promptsResult
+    prompts: promptsResult,
+    snippets: snippetsResult
   };
 }
 

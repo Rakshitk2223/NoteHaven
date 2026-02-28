@@ -13,6 +13,7 @@ import Login from "./pages/Login";
 import SignUp from "./pages/SignUp";
 import Dashboard from "./pages/Dashboard";
 import Prompts from "./pages/Prompts";
+import Library from "./pages/Library";
 import MediaTracker from "./pages/MediaTracker";
 import Tasks from "./pages/Tasks";
 import Notes from "./pages/Notes";
@@ -48,7 +49,8 @@ const AppInner = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-        <Route path="/prompts" element={<ProtectedRoute><Prompts /></ProtectedRoute>} />
+        <Route path="/prompts" element={<ProtectedRoute><Library /></ProtectedRoute>} />
+        <Route path="/library" element={<ProtectedRoute><Library /></ProtectedRoute>} />
         <Route path="/media" element={<ProtectedRoute><MediaTracker /></ProtectedRoute>} />
         <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
         <Route path="/notes" element={<ProtectedRoute><Notes /></ProtectedRoute>} />

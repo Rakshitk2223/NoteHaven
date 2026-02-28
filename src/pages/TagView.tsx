@@ -18,7 +18,8 @@ export default function TagView() {
     notes: [],
     tasks: [],
     media: [],
-    prompts: []
+    prompts: [],
+    snippets: []
   });
   const [tag, setTag] = useState<Tag | null>(null);
 
@@ -222,7 +223,7 @@ export default function TagView() {
                     {items.prompts.map(prompt => (
                       <button
                         key={prompt.id}
-                        onClick={() => navigate('/prompts')}
+                        onClick={() => navigate('/library')}
                         className="text-left p-3 rounded-lg border hover:bg-accent transition-colors"
                       >
                         <p className="font-medium">{prompt.title}</p>
