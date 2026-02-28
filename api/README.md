@@ -25,7 +25,7 @@ Edit `.env` and add your credentials:
 
 ```env
 # MongoDB Connection (from MongoDB Atlas)
-MONGODB_URI=mongodb+srv://Rakshit:YOUR_PASSWORD@cruxdb.iatgnjf.mongodb.net/notehaven?retryWrites=true&w=majority
+MONGODB_URI=mongodb+srv://your_username:your_password@your_cluster.mongodb.net/your_database?retryWrites=true&w=majority
 
 # TMDB API Key (get from https://www.themoviedb.org/settings/api)
 TMDB_API_KEY=your_tmdb_api_key_here
