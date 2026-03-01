@@ -26,16 +26,24 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting
+// Rate limiting - INCREASED for image batch loading
+// 1000 requests per 15 minutes to handle 1200+ media items
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '1000', 10), // Increased from 100 to 1000
   message: {
     success: false,
     error: 'Too many requests, please try again later'
   },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  // Skip rate limiting for batch search endpoint during development
+  skip: (req) => {
+    if (process.env.NODE_ENV === 'development' && req.path.includes('batch-search')) {
+      return true;
+    }
+    return false;
+  }
 });
 
 app.use('/api/', limiter);
