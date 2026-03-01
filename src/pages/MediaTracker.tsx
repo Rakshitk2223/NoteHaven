@@ -119,6 +119,7 @@ const MediaTracker = () => {
   const [typedSearchTerm, setTypedSearchTerm] = useState(''); // immediate input echo
   const searchDebounceRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const hasAttemptedPreloadRef = useRef<boolean>(false);
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
@@ -246,9 +247,19 @@ const MediaTracker = () => {
   );
 
   // Preload all images when media items are loaded
+  // This runs ONCE when media items change (not on every isPreloading change)
+  useEffect(() => {
+    // Reset the ref when media items change (new filter, search, etc.)
+    hasAttemptedPreloadRef.current = false;
+  }, [filterType, filterStatus, searchTerm, sortOrder]);
+
   useEffect(() => {
     const preloadImages = async () => {
-      if (mediaItems.length === 0 || isPreloading) return;
+      // Prevent multiple runs
+      if (mediaItems.length === 0 || hasAttemptedPreloadRef.current || isPreloading) return;
+      
+      // Mark as attempted immediately to prevent race conditions
+      hasAttemptedPreloadRef.current = true;
 
       // Check if we already have cached images
       const stats = batchImageFetcher.getCacheStats();
@@ -301,7 +312,7 @@ const MediaTracker = () => {
     };
 
     preloadImages();
-  }, [mediaItems, isPreloading]);
+  }, [mediaItems]); // Removed isPreloading to prevent infinite loop
 
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
