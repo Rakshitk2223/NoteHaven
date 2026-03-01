@@ -127,7 +127,6 @@ export type Database = {
           current_season: number | null
           current_episode: number | null
           current_chapter: number | null
-          image_url: string | null
           release_date: string | null
           created_at: string
           updated_at: string
@@ -142,7 +141,6 @@ export type Database = {
           current_season?: number | null
           current_episode?: number | null
           current_chapter?: number | null
-          image_url?: string | null
           release_date?: string | null
           created_at?: string
           updated_at?: string
@@ -157,7 +155,6 @@ export type Database = {
           current_season?: number | null
           current_episode?: number | null
           current_chapter?: number | null
-          image_url?: string | null
           release_date?: string | null
           created_at?: string
           updated_at?: string
@@ -758,7 +755,6 @@ export interface MediaWithTags {
   current_season: number | null
   current_episode: number | null
   current_chapter: number | null
-  image_url: string | null
   created_at: string
   updated_at: string
   tags?: Tag[]

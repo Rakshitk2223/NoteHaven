@@ -54,9 +54,6 @@ interface MediaItem {
   current_season?: number;
   current_episode?: number;
   current_chapter?: number;
-  cover_image_url?: string | null;
-  external_id?: string | null;
-  metadata_source?: string | null;
   created_at: string;
   updated_at?: string;
   tags?: Tag[];
@@ -928,7 +925,6 @@ const MediaTracker = () => {
                 current_season={item.current_season}
                 current_episode={item.current_episode}
                 current_chapter={item.current_chapter}
-                coverImageUrl={item.cover_image_url}
                 onEdit={() => handleEditMedia(item)}
                 onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
               />
@@ -958,22 +954,11 @@ const MediaTracker = () => {
             <TableRow key={item.id}>
               <TableCell id={`media-${item.id}`} className="font-medium">
                 <div className="flex items-center gap-3">
-                  {/* Small Cover Image */}
-                  <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted">
-                    {item.cover_image_url ? (
-                      <img
-                        src={item.cover_image_url}
-                        alt={item.title}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = PLACEHOLDER_IMAGE;
-                        }}
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <span className="text-[8px] text-muted-foreground text-center">No Img</span>
-                      </div>
-                    )}
+                  {/* Small Cover Image - Images are lazy-loaded in grid view */}
+                  <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted flex items-center justify-center">
+                    <span className="text-lg font-bold text-muted-foreground">
+                      {item.title.charAt(0).toUpperCase()}
+                    </span>
                   </div>
                   <span className="truncate">{item.title}</span>
                 </div>

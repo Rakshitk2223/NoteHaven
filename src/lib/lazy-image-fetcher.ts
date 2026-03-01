@@ -1,6 +1,5 @@
 import { mediaApi, type ExternalMedia } from "./media-api";
 import { anilistDirectService } from "./anilist-direct";
-import { supabase } from "@/integrations/supabase/client";
 
 // Rate limiting
 const ANILIST_RATE_LIMIT = 90; // requests per minute
@@ -47,20 +46,18 @@ class LazyImageFetcher {
     return this.queue.some(item => item.id === id);
   }
 
-  // Check if we have a cached result
+  // Check if we have a cached result (session only)
   getCached(id: number): FetchResult | undefined {
     return this.cache.get(id);
   }
 
   // Fetch image for a media item
-  async fetchImage(id: number, title: string, type: string, coverImageUrl?: string | null): Promise<FetchResult> {
-    // If already has image from database, return it immediately
-    if (coverImageUrl) {
-      console.log(`📦 [Database] Image already exists for "${title}"`);
-      return { imageUrl: coverImageUrl, source: 'database' };
-    }
-
-    // Check cache first
+  // Images are cached in MongoDB (24hr TTL) by the backend API
+  // No need to cache in Supabase - simpler mental model:
+  // - Supabase = User data (title, status, progress)
+  // - MongoDB = External metadata (descriptions, images, episode counts)
+  async fetchImage(id: number, title: string, type: string): Promise<FetchResult> {
+    // Check in-memory cache first (session only)
     if (this.cache.has(id)) {
       return this.cache.get(id)!;
     }
@@ -117,13 +114,9 @@ class LazyImageFetcher {
 
         const result = await this.searchAndFetchImage(item);
         
-        // Cache the result
+        // Cache in memory for this session only
+        // MongoDB handles long-term caching via the backend API
         this.cache.set(item.id, result);
-        
-        // Save to database if found
-        if (result.imageUrl) {
-          await this.saveToDatabase(item.id, result.imageUrl);
-        }
 
         item.resolve(result);
       } catch (error) {
@@ -147,7 +140,10 @@ class LazyImageFetcher {
 
     console.log(`🔍 [API Search] Searching for: "${item.title}" (${searchType})`);
 
-    // Try backend API first
+    // Backend API handles MongoDB caching (24hr TTL)
+    // 1. Checks MongoDB first
+    // 2. If not found, fetches from external APIs
+    // 3. Saves to MongoDB for future requests
     try {
       const results = await mediaApi.search(item.title, searchType, 1);
       
@@ -178,29 +174,6 @@ class LazyImageFetcher {
 
     console.log(`❌ [API] No image found for "${item.title}"`);
     return { imageUrl: null, source: null };
-  }
-
-  private async saveToDatabase(id: number, imageUrl: string): Promise<void> {
-    try {
-      console.log(`💾 [Database] Saving image for item ${id}`);
-      
-      const { data, error } = await supabase
-        .from('media_tracker')
-        .update({ 
-          cover_image_url: imageUrl,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', id)
-        .select();
-
-      if (error) {
-        console.error(`❌ [Database] Failed to save image:`, error);
-      } else {
-        console.log(`✅ [Database] Successfully saved image for item ${id}`);
-      }
-    } catch (error) {
-      console.error(`❌ [Database] Update failed:`, error);
-    }
   }
 
   private sleep(ms: number): Promise<void> {

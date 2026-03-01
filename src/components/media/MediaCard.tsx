@@ -15,7 +15,6 @@ interface MediaCardProps {
   current_season?: number;
   current_episode?: number;
   current_chapter?: number;
-  coverImageUrl?: string | null;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -47,7 +46,6 @@ export const MediaCard = ({
   current_season,
   current_episode,
   current_chapter,
-  coverImageUrl,
   onEdit,
   onDelete,
 }: MediaCardProps) => {
@@ -56,16 +54,16 @@ export const MediaCard = ({
   const [error, setError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [fetchResult, setFetchResult] = useState<FetchResult>({ 
-    imageUrl: coverImageUrl || null, 
-    source: coverImageUrl ? 'database' : null 
+    imageUrl: null, 
+    source: null 
   });
   const [isFetching, setIsFetching] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const imgRef = useRef<HTMLDivElement>(null);
   const hasAttemptedFetch = useRef(false);
 
-  // Use either the provided URL or the fetched URL
-  const displayImageUrl = fetchResult.imageUrl || coverImageUrl;
+  // Use the fetched URL from MongoDB cache (via backend API)
+  const displayImageUrl = fetchResult.imageUrl;
   const imageSource = fetchResult.source;
 
   useEffect(() => {
@@ -86,13 +84,14 @@ export const MediaCard = ({
     return () => observer.disconnect();
   }, []);
 
-  // Lazy image fetching when card comes into view and has no image
+  // Lazy image fetching when card comes into view
+  // Backend API handles MongoDB caching with 24hr TTL
   useEffect(() => {
-    if (isInView && !displayImageUrl && !hasAttemptedFetch.current && !isRefreshing) {
+    if (isInView && !hasAttemptedFetch.current && !isRefreshing) {
       hasAttemptedFetch.current = true;
       setIsFetching(true);
 
-      lazyImageFetcher.fetchImage(id, title, type, coverImageUrl)
+      lazyImageFetcher.fetchImage(id, title, type)
         .then((result) => {
           setFetchResult(result);
           setIsFetching(false);
@@ -102,7 +101,7 @@ export const MediaCard = ({
           setIsFetching(false);
         });
     }
-  }, [isInView, displayImageUrl, id, title, type, coverImageUrl, isRefreshing]);
+  }, [isInView, id, title, type, isRefreshing]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

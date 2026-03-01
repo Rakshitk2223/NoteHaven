@@ -2,7 +2,7 @@ import axios from 'axios';
 import { IMediaMetadata } from '../models/MediaMetadata';
 
 const OMDB_API_KEY = process.env.OMDB_API_KEY;
-const OMDB_BASE_URL = 'http://www.omdbapi.com/';
+const OMDB_BASE_URL = 'https://www.omdbapi.com/';
 
 // Get API key at runtime
 const getOMDBApiKey = () => process.env.OMDB_API_KEY;
