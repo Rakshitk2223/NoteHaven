@@ -34,9 +34,10 @@ export interface MediaItem {
   duration?: number;
   season?: number;
   searchKeywords: string[];
+  source?: 'mongodb' | 'api';
 }
 
-function mapToMediaItem(doc: any): MediaItem {
+function mapToMediaItem(doc: any, source?: 'mongodb' | 'api'): MediaItem {
   return {
     _id: doc._id?.toString(),
     title: doc.title,
@@ -55,7 +56,8 @@ function mapToMediaItem(doc: any): MediaItem {
     chapters: doc.chapters,
     duration: doc.duration,
     season: doc.season,
-    searchKeywords: doc.searchKeywords || []
+    searchKeywords: doc.searchKeywords || [],
+    source
   };
 }
 
@@ -105,7 +107,7 @@ export const mediaService = {
       .limit(limit)
       .lean();
     
-    results = dbResults.map(mapToMediaItem);
+    results = dbResults.map(doc => mapToMediaItem(doc, 'mongodb'));
     
     // If not enough results, search external APIs
     if (results.length < limit) {
@@ -186,7 +188,8 @@ export const mediaService = {
             chapters: r.chapters,
             duration: r.duration,
             season: r.season,
-            searchKeywords: r.searchKeywords || []
+            searchKeywords: r.searchKeywords || [],
+            source: 'api' as const
           }));
         }
       } catch (error) {
@@ -221,7 +224,8 @@ export const mediaService = {
               chapters: r.chapters,
               duration: r.duration,
               season: r.season,
-              searchKeywords: r.searchKeywords || []
+              searchKeywords: r.searchKeywords || [],
+              source: 'api' as const
             }));
           }
         } catch (error) {
@@ -264,7 +268,8 @@ export const mediaService = {
             chapters: r.chapters,
             duration: r.duration,
             season: r.season,
-            searchKeywords: r.searchKeywords || []
+            searchKeywords: r.searchKeywords || [],
+            source: 'api' as const
           }));
         }
       } catch (error) {
@@ -295,7 +300,8 @@ export const mediaService = {
               chapters: r.chapters,
               duration: r.duration,
               season: r.season,
-              searchKeywords: r.searchKeywords || []
+              searchKeywords: r.searchKeywords || [],
+              source: 'api' as const
             }));
           }
         } catch (error) {
@@ -326,7 +332,8 @@ export const mediaService = {
               chapters: r.chapters,
               duration: r.duration,
               season: r.season,
-              searchKeywords: r.searchKeywords || []
+              searchKeywords: r.searchKeywords || [],
+              source: 'api' as const
             }));
           }
         } catch (error) {

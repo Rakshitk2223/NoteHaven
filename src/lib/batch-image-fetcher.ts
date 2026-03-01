@@ -8,6 +8,7 @@ export interface BatchImageResult {
   imageUrl: string | null;
   title: string;
   type: string;
+  source?: 'mongodb' | 'api';
 }
 
 export interface BatchFetchProgress {
@@ -106,7 +107,8 @@ class BatchImageFetcher {
             id: r.id,
             imageUrl: r.found && r.data ? r.data.coverImage : null,
             title: batch.find(b => b.id === r.id)?.title || '',
-            type: batch.find(b => b.id === r.id)?.type || ''
+            type: batch.find(b => b.id === r.id)?.type || '',
+            source: r.source
           }));
 
           // Cache all results

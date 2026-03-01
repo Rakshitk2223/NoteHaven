@@ -16,6 +16,7 @@ interface MediaCardProps {
   current_episode?: number;
   current_chapter?: number;
   preloadedImageUrl?: string | null;
+  preloadedSource?: 'mongodb' | 'api' | null;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -48,6 +49,7 @@ export const MediaCard = ({
   current_episode,
   current_chapter,
   preloadedImageUrl,
+  preloadedSource,
   onEdit,
   onDelete,
 }: MediaCardProps) => {
@@ -57,7 +59,7 @@ export const MediaCard = ({
   const [isHovered, setIsHovered] = useState(false);
   const [fetchResult, setFetchResult] = useState<FetchResult>({ 
     imageUrl: preloadedImageUrl || null, 
-    source: preloadedImageUrl ? 'database' : null 
+    source: preloadedSource === 'mongodb' ? 'database' : preloadedSource === 'api' ? 'api' : null 
   });
   const [isFetching, setIsFetching] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -139,8 +141,8 @@ export const MediaCard = ({
   // Determine loading text based on source
   const getLoadingText = () => {
     if (isRefreshing) return 'Refreshing...';
-    if (imageSource === 'database') return 'Fetching...';
-    return 'Searching...';
+    if (imageSource === 'database') return 'Loading';
+    return 'Searching';
   };
   
   return (
@@ -170,12 +172,12 @@ export const MediaCard = ({
               </span>
               {imageSource && (
                 <span className={cn(
-                  "text-[10px] px-2 py-0.5 rounded-full",
-                  imageSource === 'database' 
-                    ? "bg-blue-100 text-blue-700" 
-                    : "bg-amber-100 text-amber-700"
+                  "text-[10px] px-2 py-0.5 rounded-full font-medium",
+                  imageSource === 'database'
+                    ? "bg-green-100 text-green-700 border border-green-300"
+                    : "bg-amber-100 text-amber-700 border border-amber-300"
                 )}>
-                  {imageSource === 'database' ? '📦 Database' : '🔍 API Search'}
+                  {imageSource === 'database' ? '✓ MongoDB' : '⟳ API'}
                 </span>
               )}
             </div>

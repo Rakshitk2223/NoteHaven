@@ -146,6 +146,7 @@ const MediaTracker = () => {
   const [preloadProgress, setPreloadProgress] = useState<BatchFetchProgress | null>(null);
   const [isPreloading, setIsPreloading] = useState(false);
   const [preloadedImageUrls, setPreloadedImageUrls] = useState<Map<number, string | null>>(new Map());
+  const [preloadedImageSources, setPreloadedImageSources] = useState<Map<number, 'mongodb' | 'api' | null>>(new Map());
 
   // Save custom groups to localStorage
   useEffect(() => {
@@ -253,15 +254,18 @@ const MediaTracker = () => {
       const stats = batchImageFetcher.getCacheStats();
       if (stats.total >= mediaItems.length * 0.8) {
         console.log('📦 Images already cached, skipping preload');
-        // Update preloaded URLs from cache
-        const newMap = new Map<number, string | null>();
+        // Update preloaded URLs and sources from cache
+        const newUrlMap = new Map<number, string | null>();
+        const newSourceMap = new Map<number, 'mongodb' | 'api' | null>();
         mediaItems.forEach(item => {
           const cached = batchImageFetcher.getCached(item.id);
           if (cached) {
-            newMap.set(item.id, cached.imageUrl);
+            newUrlMap.set(item.id, cached.imageUrl);
+            newSourceMap.set(item.id, cached.source || null);
           }
         });
-        setPreloadedImageUrls(newMap);
+        setPreloadedImageUrls(newUrlMap);
+        setPreloadedImageSources(newSourceMap);
         return;
       }
 
@@ -278,15 +282,18 @@ const MediaTracker = () => {
         setPreloadProgress(progress);
       });
 
-      // Update the preloaded URLs map
-      const newMap = new Map<number, string | null>();
+      // Update the preloaded URLs and sources maps
+      const newUrlMap = new Map<number, string | null>();
+      const newSourceMap = new Map<number, 'mongodb' | 'api' | null>();
       mediaItems.forEach(item => {
         const cached = batchImageFetcher.getCached(item.id);
         if (cached) {
-          newMap.set(item.id, cached.imageUrl);
+          newUrlMap.set(item.id, cached.imageUrl);
+          newSourceMap.set(item.id, cached.source || null);
         }
       });
-      setPreloadedImageUrls(newMap);
+      setPreloadedImageUrls(newUrlMap);
+      setPreloadedImageSources(newSourceMap);
       setIsPreloading(false);
       setPreloadProgress(null);
 
@@ -984,6 +991,7 @@ const MediaTracker = () => {
                 current_episode={item.current_episode}
                 current_chapter={item.current_chapter}
                 preloadedImageUrl={preloadedImageUrls.get(item.id)}
+                preloadedSource={preloadedImageSources.get(item.id)}
                 onEdit={() => handleEditMedia(item)}
                 onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
               />

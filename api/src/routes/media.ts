@@ -97,7 +97,8 @@ router.post('/batch-search', async (req, res, next) => {
             return {
               id: item.id,
               found: true,
-              data: searchResults[0]
+              data: searchResults[0],
+              source: searchResults[0].source || 'api'
             };
           }
           
