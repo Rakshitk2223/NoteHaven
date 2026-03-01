@@ -15,6 +15,7 @@ interface MediaCardProps {
   current_season?: number;
   current_episode?: number;
   current_chapter?: number;
+  preloadedImageUrl?: string | null;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -46,6 +47,7 @@ export const MediaCard = ({
   current_season,
   current_episode,
   current_chapter,
+  preloadedImageUrl,
   onEdit,
   onDelete,
 }: MediaCardProps) => {
@@ -54,15 +56,15 @@ export const MediaCard = ({
   const [error, setError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [fetchResult, setFetchResult] = useState<FetchResult>({ 
-    imageUrl: null, 
-    source: null 
+    imageUrl: preloadedImageUrl || null, 
+    source: preloadedImageUrl ? 'database' : null 
   });
   const [isFetching, setIsFetching] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const imgRef = useRef<HTMLDivElement>(null);
   const hasAttemptedFetch = useRef(false);
 
-  // Use the fetched URL from MongoDB cache (via backend API)
+  // Use preloaded image if available, otherwise fetch
   const displayImageUrl = fetchResult.imageUrl;
   const imageSource = fetchResult.source;
 
@@ -85,8 +87,13 @@ export const MediaCard = ({
   }, []);
 
   // Lazy image fetching when card comes into view
-  // Backend API handles MongoDB caching with 24hr TTL
+  // Only fetch if no preloaded image is available
   useEffect(() => {
+    // If we have a preloaded image, don't fetch again
+    if (preloadedImageUrl) {
+      return;
+    }
+
     if (isInView && !hasAttemptedFetch.current && !isRefreshing) {
       hasAttemptedFetch.current = true;
       setIsFetching(true);
@@ -101,7 +108,7 @@ export const MediaCard = ({
           setIsFetching(false);
         });
     }
-  }, [isInView, id, title, type, isRefreshing]);
+  }, [isInView, id, title, type, isRefreshing, preloadedImageUrl]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

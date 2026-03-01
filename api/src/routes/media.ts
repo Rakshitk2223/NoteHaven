@@ -72,4 +72,64 @@ router.get('/trending/:type', async (req, res, next) => {
   }
 });
 
+// Batch search for multiple media items (used for bulk image fetching)
+router.post('/batch-search', async (req, res, next) => {
+  try {
+    const { items } = req.body;
+    
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required' });
+    }
+    
+    if (items.length > 50) {
+      return res.status(400).json({ error: 'Maximum 50 items per batch' });
+    }
+    
+    console.log(`🔄 [Batch Search] Processing ${items.length} items`);
+    
+    // Process all items in parallel
+    const results = await Promise.all(
+      items.map(async (item: { title: string; type: string; id: number }) => {
+        try {
+          const searchResults = await mediaService.search(item.title, item.type, 1);
+          
+          if (searchResults.length > 0) {
+            return {
+              id: item.id,
+              found: true,
+              data: searchResults[0]
+            };
+          }
+          
+          return {
+            id: item.id,
+            found: false,
+            data: null
+          };
+        } catch (error) {
+          console.error(`Error searching for ${item.title}:`, error);
+          return {
+            id: item.id,
+            found: false,
+            data: null,
+            error: 'Search failed'
+          };
+        }
+      })
+    );
+    
+    const foundCount = results.filter(r => r.found).length;
+    console.log(`✅ [Batch Search] Found ${foundCount}/${items.length} items`);
+    
+    res.json({
+      success: true,
+      count: results.length,
+      found: foundCount,
+      results
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

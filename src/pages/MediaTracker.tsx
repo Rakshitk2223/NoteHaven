@@ -42,6 +42,7 @@ import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
 import { CustomGroupBuilder, type CustomGroup, itemBelongsToCustomGroup } from "@/components/media/CustomGroupBuilder";
+import { batchImageFetcher, type BatchFetchProgress } from "@/lib/batch-image-fetcher";
 
 interface MediaItem {
   id: number;
@@ -141,6 +142,11 @@ const MediaTracker = () => {
   });
   const [activeGroupId, setActiveGroupId] = useState<string | 'all'>('all');
 
+  // Image preloading state
+  const [preloadProgress, setPreloadProgress] = useState<BatchFetchProgress | null>(null);
+  const [isPreloading, setIsPreloading] = useState(false);
+  const [preloadedImageUrls, setPreloadedImageUrls] = useState<Map<number, string | null>>(new Map());
+
   // Save custom groups to localStorage
   useEffect(() => {
     try {
@@ -233,10 +239,62 @@ const MediaTracker = () => {
   });
 
   // Expose combined items
-  const mediaItems: MediaItem[] = useMemo(() => 
-    (data?.pages.flatMap(p => p.items.map(normalizeMediaItem)) ?? []), 
+  const mediaItems: MediaItem[] = useMemo(() =>
+    (data?.pages.flatMap(p => p.items.map(normalizeMediaItem)) ?? []),
     [data]
   );
+
+  // Preload all images when media items are loaded
+  useEffect(() => {
+    const preloadImages = async () => {
+      if (mediaItems.length === 0 || isPreloading) return;
+
+      // Check if we already have cached images
+      const stats = batchImageFetcher.getCacheStats();
+      if (stats.total >= mediaItems.length * 0.8) {
+        console.log('📦 Images already cached, skipping preload');
+        // Update preloaded URLs from cache
+        const newMap = new Map<number, string | null>();
+        mediaItems.forEach(item => {
+          const cached = batchImageFetcher.getCached(item.id);
+          if (cached) {
+            newMap.set(item.id, cached.imageUrl);
+          }
+        });
+        setPreloadedImageUrls(newMap);
+        return;
+      }
+
+      setIsPreloading(true);
+      console.log(`🚀 Starting preload of ${mediaItems.length} images...`);
+
+      const itemsToFetch = mediaItems.map(item => ({
+        id: item.id,
+        title: item.title,
+        type: item.type
+      }));
+
+      await batchImageFetcher.fetchBatch(itemsToFetch, (progress) => {
+        setPreloadProgress(progress);
+      });
+
+      // Update the preloaded URLs map
+      const newMap = new Map<number, string | null>();
+      mediaItems.forEach(item => {
+        const cached = batchImageFetcher.getCached(item.id);
+        if (cached) {
+          newMap.set(item.id, cached.imageUrl);
+        }
+      });
+      setPreloadedImageUrls(newMap);
+      setIsPreloading(false);
+      setPreloadProgress(null);
+
+      console.log('✅ Image preload complete');
+    };
+
+    preloadImages();
+  }, [mediaItems, isPreloading]);
 
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
@@ -925,6 +983,7 @@ const MediaTracker = () => {
                 current_season={item.current_season}
                 current_episode={item.current_episode}
                 current_chapter={item.current_chapter}
+                preloadedImageUrl={preloadedImageUrls.get(item.id)}
                 onEdit={() => handleEditMedia(item)}
                 onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
               />
@@ -1069,7 +1128,32 @@ const MediaTracker = () => {
               </Button>
             </div>
           </div>
-          
+
+          {/* Image Preload Progress Indicator */}
+          {isPreloading && preloadProgress && (
+            <div className="bg-blue-50 border-b border-blue-200 p-3">
+              <div className="max-w-4xl mx-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-blue-800">
+                    📸 Loading cover images... {preloadProgress.loaded}/{preloadProgress.total}
+                  </span>
+                  <span className="text-sm text-blue-600">
+                    {preloadProgress.percentage}%
+                  </span>
+                </div>
+                <div className="w-full bg-blue-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${preloadProgress.percentage}%` }}
+                  />
+                </div>
+                <p className="text-xs text-blue-600 mt-1">
+                  First time loading may take a few minutes. Next time will be instant!
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
