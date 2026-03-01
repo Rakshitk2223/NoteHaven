@@ -133,4 +133,45 @@ router.post('/batch-search', async (req, res, next) => {
   }
 });
 
+// Save images fetched by frontend to database
+// This is the MangaBuddy pattern - frontend fetches from Jikan/AniList, backend saves to MongoDB
+router.post('/save-images', async (req, res, next) => {
+  try {
+    const { items } = req.body;
+    
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items array is required' });
+    }
+    
+    console.log(`💾 [Save Images] Saving ${items.length} images to database`);
+    
+    const saved = [];
+    const failed = [];
+    
+    for (const item of items) {
+      try {
+        if (item.imageUrl) {
+          // Save to MediaMetadata collection
+          await mediaService.saveImageUrl(item.title, item.type, item.imageUrl, item.source);
+          saved.push(item.id);
+        }
+      } catch (error) {
+        console.error(`Failed to save image for ${item.title}:`, error);
+        failed.push(item.id);
+      }
+    }
+    
+    console.log(`✅ [Save Images] Saved ${saved.length}, Failed ${failed.length}`);
+    
+    res.json({
+      success: true,
+      saved: saved.length,
+      failed: failed.length,
+      total: items.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

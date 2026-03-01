@@ -42,7 +42,7 @@ import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
 import { CustomGroupBuilder, type CustomGroup, itemBelongsToCustomGroup } from "@/components/media/CustomGroupBuilder";
-import { batchImageFetcher, type BatchFetchProgress } from "@/lib/batch-image-fetcher";
+import { fetchImagesBatchWithCache, type BatchFetchProgress } from "@/lib/batch-image-fetcher-v2";
 
 interface MediaItem {
   id: number;
@@ -119,7 +119,6 @@ const MediaTracker = () => {
   const [typedSearchTerm, setTypedSearchTerm] = useState(''); // immediate input echo
   const searchDebounceRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const hasAttemptedPreloadRef = useRef<boolean>(false);
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
@@ -147,7 +146,7 @@ const MediaTracker = () => {
   const [preloadProgress, setPreloadProgress] = useState<BatchFetchProgress | null>(null);
   const [isPreloading, setIsPreloading] = useState(false);
   const [preloadedImageUrls, setPreloadedImageUrls] = useState<Map<number, string | null>>(new Map());
-  const [preloadedImageSources, setPreloadedImageSources] = useState<Map<number, 'mongodb' | 'api' | null>>(new Map());
+  const [preloadedImageSources, setPreloadedImageSources] = useState<Map<number, 'mongodb' | 'api' | 'jikan' | 'anilist' | null>>(new Map());
 
   // Save custom groups to localStorage
   useEffect(() => {
@@ -190,7 +189,7 @@ const MediaTracker = () => {
   };
 
   // Infinite query for media items
-  const pageSize = 50;
+  const pageSize = 200;
   const {
     data,
     error: queryError,
@@ -247,41 +246,13 @@ const MediaTracker = () => {
   );
 
   // Preload all images when media items are loaded
-  // This runs ONCE when media items change (not on every isPreloading change)
-  useEffect(() => {
-    // Reset the ref when media items change (new filter, search, etc.)
-    hasAttemptedPreloadRef.current = false;
-  }, [filterType, filterStatus, searchTerm, sortOrder]);
-
+  // Uses client-side fetching from Jikan/AniList (MangaBuddy pattern)
   useEffect(() => {
     const preloadImages = async () => {
-      // Prevent multiple runs
-      if (mediaItems.length === 0 || hasAttemptedPreloadRef.current || isPreloading) return;
+      if (mediaItems.length === 0 || isPreloading) return;
       
-      // Mark as attempted immediately to prevent race conditions
-      hasAttemptedPreloadRef.current = true;
-
-      // Check if we already have cached images
-      const stats = batchImageFetcher.getCacheStats();
-      if (stats.total >= mediaItems.length * 0.8) {
-        console.log('📦 Images already cached, skipping preload');
-        // Update preloaded URLs and sources from cache
-        const newUrlMap = new Map<number, string | null>();
-        const newSourceMap = new Map<number, 'mongodb' | 'api' | null>();
-        mediaItems.forEach(item => {
-          const cached = batchImageFetcher.getCached(item.id);
-          if (cached) {
-            newUrlMap.set(item.id, cached.imageUrl);
-            newSourceMap.set(item.id, cached.source || null);
-          }
-        });
-        setPreloadedImageUrls(newUrlMap);
-        setPreloadedImageSources(newSourceMap);
-        return;
-      }
-
       setIsPreloading(true);
-      console.log(`🚀 Starting preload of ${mediaItems.length} images...`);
+      console.log(`🚀 Starting client-side preload of ${mediaItems.length} images...`);
 
       const itemsToFetch = mediaItems.map(item => ({
         id: item.id,
@@ -289,30 +260,35 @@ const MediaTracker = () => {
         type: item.type
       }));
 
-      await batchImageFetcher.fetchBatch(itemsToFetch, (progress) => {
-        setPreloadProgress(progress);
-      });
+      try {
+        // Check MongoDB first, then fetch from Jikan only if needed
+        const results = await fetchImagesBatchWithCache(itemsToFetch, (progress) => {
+          setPreloadProgress(progress);
+        });
 
-      // Update the preloaded URLs and sources maps
-      const newUrlMap = new Map<number, string | null>();
-      const newSourceMap = new Map<number, 'mongodb' | 'api' | null>();
-      mediaItems.forEach(item => {
-        const cached = batchImageFetcher.getCached(item.id);
-        if (cached) {
-          newUrlMap.set(item.id, cached.imageUrl);
-          newSourceMap.set(item.id, cached.source || null);
-        }
-      });
-      setPreloadedImageUrls(newUrlMap);
-      setPreloadedImageSources(newSourceMap);
-      setIsPreloading(false);
-      setPreloadProgress(null);
-
-      console.log('✅ Image preload complete');
+        // Update the preloaded URLs and sources maps
+        const newUrlMap = new Map<number, string | null>();
+        const newSourceMap = new Map<number, 'mongodb' | 'api' | 'jikan' | 'anilist' | null>();
+        
+        results.forEach(result => {
+          newUrlMap.set(result.id, result.imageUrl);
+          newSourceMap.set(result.id, result.source || null);
+        });
+        
+        setPreloadedImageUrls(newUrlMap);
+        setPreloadedImageSources(newSourceMap);
+        
+        console.log('✅ Image preload complete');
+      } catch (error) {
+        console.error('❌ Image preload failed:', error);
+      } finally {
+        setIsPreloading(false);
+        setPreloadProgress(null);
+      }
     };
 
     preloadImages();
-  }, [mediaItems]); // Removed isPreloading to prevent infinite loop
+  }, [mediaItems]);
 
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
@@ -1167,7 +1143,7 @@ const MediaTracker = () => {
                   />
                 </div>
                 <p className="text-xs text-blue-600 mt-1">
-                  First time loading may take a few minutes. Next time will be instant!
+                  Checking database first, then fetching missing images. Next time will be instant!
                 </p>
               </div>
             </div>

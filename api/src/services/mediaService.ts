@@ -358,5 +358,58 @@ export const mediaService = {
     }
     
     return results.slice(0, limit);
+  },
+
+  // Save image URL from frontend to database (MangaBuddy pattern)
+  async saveImageUrl(
+    title: string,
+    type: string,
+    imageUrl: string,
+    source: string
+  ): Promise<void> {
+    try {
+      // Convert frontend type to backend enum format
+      const typeMap: Record<string, string> = {
+        'Manga': 'manga',
+        'Manhwa': 'manhwa',
+        'Manhua': 'manhua',
+        'Anime': 'anime',
+        'Series': 'series',
+        'Movie': 'movie',
+        'KDrama': 'kdrama',
+        'JDrama': 'jdrama'
+      };
+      
+      const normalizedType = typeMap[type] || type.toLowerCase();
+      
+      // Check if media already exists
+      const existing = await MediaMetadata.findOne({
+        title: { $regex: new RegExp('^' + escapeRegex(title) + '$', 'i') },
+        type: normalizedType
+      });
+
+      if (existing) {
+        // Update existing with new image URL
+        existing.coverImage = imageUrl;
+        await existing.save();
+        console.log(`🔄 Updated image for: ${title}`);
+      } else {
+        // Create new entry
+        await MediaMetadata.create({
+          title,
+          type: normalizedType,
+          coverImage: imageUrl,
+          description: '',
+          genres: [],
+          rating: 0,
+          status: 'upcoming',
+          searchKeywords: [title.toLowerCase()]
+        });
+        console.log(`💾 Saved new image for: ${title}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error saving image for ${title}:`, error);
+      throw error;
+    }
   }
 };

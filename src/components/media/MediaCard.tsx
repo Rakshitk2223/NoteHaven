@@ -16,7 +16,7 @@ interface MediaCardProps {
   current_episode?: number;
   current_chapter?: number;
   preloadedImageUrl?: string | null;
-  preloadedSource?: 'mongodb' | 'api' | null;
+  preloadedSource?: 'mongodb' | 'api' | 'jikan' | 'anilist' | null;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -59,7 +59,7 @@ export const MediaCard = ({
   const [isHovered, setIsHovered] = useState(false);
   const [fetchResult, setFetchResult] = useState<FetchResult>({ 
     imageUrl: preloadedImageUrl || null, 
-    source: preloadedSource === 'mongodb' ? 'database' : preloadedSource === 'api' ? 'api' : null 
+    source: preloadedSource === 'mongodb' ? 'database' : preloadedSource ? 'api' : null 
   });
   const [isFetching, setIsFetching] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
