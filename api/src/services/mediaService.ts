@@ -109,29 +109,37 @@ export const mediaService = {
     
     results = dbResults.map(doc => mapToMediaItem(doc, 'mongodb'));
     
-    // If not enough results, search external APIs
+    // Search external APIs if we need more results
+    let externalResults: MediaItem[] = [];
     if (results.length < limit) {
-      const externalResults = await this.searchExternalAPIs(
-        query, 
-        type, 
+      externalResults = await this.searchExternalAPIs(
+        query,
+        type,
         limit - results.length
       );
-      
-      // Save external results to MongoDB
-      for (const result of externalResults) {
-        await MediaMetadata.findOneAndUpdate(
-          { 
-            $or: [
-              { anilistId: result.anilistId },
-              { tmdbId: result.tmdbId }
-            ]
-          },
-          result,
-          { upsert: true, new: true }
-        );
-      }
-      
       results = [...results, ...externalResults];
+    }
+    
+    // ALWAYS save external results to PERMANENT storage (MediaMetadata)
+    // This ensures images are cached forever, not just for 24 hours
+    for (const result of externalResults) {
+      if (result.anilistId || result.tmdbId) {
+        try {
+          await MediaMetadata.findOneAndUpdate(
+            {
+              $or: [
+                { anilistId: result.anilistId },
+                { tmdbId: result.tmdbId }
+              ].filter((id: any) => Object.values(id)[0])
+            },
+            result,
+            { upsert: true, new: true }
+          );
+          console.log(`💾 Saved to permanent storage: ${result.title}`);
+        } catch (saveError) {
+          console.error(`❌ Failed to save ${result.title}:`, saveError);
+        }
+      }
     }
     
     // Cache results
