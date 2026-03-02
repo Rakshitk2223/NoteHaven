@@ -70,7 +70,7 @@ interface SidebarItemProps {
 
 const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal }: SidebarItemProps) => {
   const baseClasses = cn(
-    "flex items-center gap-3 rounded-lg font-body font-medium zen-transition relative group",
+    "flex items-center gap-3 rounded-lg font-body font-medium transition-colors duration-200 relative group",
     "hover:bg-secondary/50",
     isActive 
       ? "bg-primary/10 text-primary border border-primary/20" 
@@ -87,7 +87,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
         isActive ? "text-primary" : "text-muted-foreground"
       )} />
       <span className={cn(
-        "zen-transition whitespace-nowrap",
+        "whitespace-nowrap",
         isCollapsed && "lg:hidden"
       )}>
         {name}
@@ -128,16 +128,40 @@ const AppSidebar = () => {
   const location = useLocation();
   const { signOut } = useAuth();
   const { isCollapsed, toggle } = useSidebar();
-  const [mainNavigation, setMainNavigation] = useState<NavItem[]>(defaultMainNavigation);
-
-  useEffect(() => {
-    // Load custom sidebar order from localStorage
+  const [mainNavigation, setMainNavigation] = useState<NavItem[]>(() => {
+    // Load synchronously during initialization to prevent flash
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Map saved items to full nav items with icons
-        const orderedNav = parsed
+        const validNames = new Set(defaultMainNavigation.map(item => item.name));
+        const validItems = parsed.filter((item: { name: string }) => validNames.has(item.name));
+        
+        const orderedNav = validItems
+          .map((item: { name: string; href: string }) => {
+            const fullItem = defaultMainNavigation.find(nav => nav.name === item.name);
+            return fullItem || null;
+          })
+          .filter(Boolean) as NavItem[];
+        
+        return orderedNav.length > 0 ? orderedNav : defaultMainNavigation;
+      } catch (e) {
+        return defaultMainNavigation;
+      }
+    }
+    return defaultMainNavigation;
+  });
+
+  // Function to reload sidebar order when changed from Settings
+  const loadSidebarOrder = () => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const validNames = new Set(defaultMainNavigation.map(item => item.name));
+        const validItems = parsed.filter((item: { name: string }) => validNames.has(item.name));
+        
+        const orderedNav = validItems
           .map((item: { name: string; href: string }) => {
             const fullItem = defaultMainNavigation.find(nav => nav.name === item.name);
             return fullItem || null;
@@ -151,6 +175,20 @@ const AppSidebar = () => {
         console.error('Failed to parse sidebar order:', e);
       }
     }
+  };
+
+  useEffect(() => {
+    // Listen for sidebar order changes from Settings page (only, not initial load)
+    const handleSidebarOrderChange = () => {
+      loadSidebarOrder();
+    };
+
+    window.addEventListener('sidebar-order-changed', handleSidebarOrderChange);
+
+    // Cleanup listener on unmount
+    return () => {
+      window.removeEventListener('sidebar-order-changed', handleSidebarOrderChange);
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -173,8 +211,8 @@ const AppSidebar = () => {
       
       {/* Sidebar */}
       <div className={cn(
-        "fixed lg:static inset-y-0 left-0 z-50 bg-background border-r border-border zen-transition",
-        "flex flex-col h-full",
+        "fixed lg:sticky lg:top-0 lg:self-start lg:h-screen inset-y-0 left-0 z-50 bg-background border-r border-border",
+        "flex flex-col h-full lg:h-screen",
         isCollapsed 
           ? "-translate-x-full lg:translate-x-0 lg:w-16" 
           : "translate-x-0 w-64 lg:w-64"
@@ -185,7 +223,7 @@ const AppSidebar = () => {
           isCollapsed ? "lg:justify-center lg:p-2" : "justify-between p-4"
         )}>
           <h1 className={cn(
-            "font-heading font-bold text-xl text-foreground zen-transition",
+            "font-heading font-bold text-xl text-foreground",
             isCollapsed && "lg:hidden"
           )}>
             NoteHaven
@@ -254,7 +292,7 @@ const AppSidebar = () => {
           <button 
             onClick={handleLogout}
             className={cn(
-              "flex items-center rounded-lg font-body font-medium zen-transition w-full relative group",
+              "flex items-center rounded-lg font-body font-medium transition-colors duration-200 w-full relative group",
               "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
               isCollapsed 
                 ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0" 
@@ -263,9 +301,10 @@ const AppSidebar = () => {
           >
             <LogOut className="h-5 w-5 flex-shrink-0" />
             <span className={cn(
-              "zen-transition whitespace-nowrap",
+              "whitespace-nowrap",
               isCollapsed && "lg:hidden"
-            )}>
+            )}
+          >
               Logout
             </span>
             {/* Tooltip for collapsed state */}

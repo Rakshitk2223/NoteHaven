@@ -93,6 +93,8 @@ export const anilistService = {
     limit: number = 10
   ): Promise<Partial<IMediaMetadata>[]> {
     try {
+      console.log(`   📡 [AniList] Searching: "${query}" (${type})`);
+      
       const response = await axios.post(
         ANILIST_API,
         {
@@ -113,11 +115,19 @@ export const anilistService = {
       
       const media: AniListMedia[] = response.data.data.Page.media;
       
+      if (media.length > 0) {
+        console.log(`   ✅ [AniList] Found ${media.length} results for "${query}"`);
+        console.log(`      🎯 Best match: "${media[0].title.english || media[0].title.romaji}"`);
+        console.log(`      🖼️  Cover: ${media[0].coverImage.large ? 'YES' : 'NO'}`);
+      } else {
+        console.log(`   ⚠️ [AniList] No results for "${query}"`);
+      }
+      
       return media.map((item) => ({
         title: item.title.english || item.title.romaji,
         type: mapFormatToType(item.format || '', type) as any,
         anilistId: item.id,
-        description: item.description?.replace(/<[^\u003e]*>/g, '') || '',
+        description: item.description?.replace(/<[^>]*>/g, '') || '',
         genres: item.genres || [],
         coverImage: item.coverImage.large || item.coverImage.medium,
         bannerImage: item.bannerImage,
@@ -136,7 +146,7 @@ export const anilistService = {
         externalData: item
       }));
     } catch (error) {
-      console.error('AniList API error:', error);
+      console.error('   ❌ [AniList] API error:', error);
       return [];
     }
   }

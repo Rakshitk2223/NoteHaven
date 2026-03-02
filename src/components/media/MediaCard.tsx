@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { Star, Edit2, Trash2, RefreshCw, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Star, Edit2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { lazyImageFetcher, type FetchResult } from '@/lib/lazy-image-fetcher';
 
 interface MediaCardProps {
   id: number;
@@ -15,8 +14,8 @@ interface MediaCardProps {
   current_season?: number;
   current_episode?: number;
   current_chapter?: number;
-  preloadedImageUrl?: string | null;
-  preloadedSource?: 'mongodb' | 'api' | 'jikan' | 'anilist' | null;
+  imageUrl?: string | null;
+  isLoading?: boolean; // New prop for skeleton state
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -40,7 +39,6 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export const MediaCard = ({
-  id,
   title,
   type,
   status,
@@ -48,85 +46,21 @@ export const MediaCard = ({
   current_season,
   current_episode,
   current_chapter,
-  preloadedImageUrl,
-  preloadedSource,
+  imageUrl,
+  isLoading = false,
   onEdit,
   onDelete,
 }: MediaCardProps) => {
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [isInView, setIsInView] = useState(false);
-  const [error, setError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const [fetchResult, setFetchResult] = useState<FetchResult>({ 
-    imageUrl: preloadedImageUrl || null, 
-    source: preloadedSource === 'mongodb' ? 'database' : preloadedSource ? 'api' : null 
-  });
-  const [isFetching, setIsFetching] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const imgRef = useRef<HTMLDivElement>(null);
-  const hasAttemptedFetch = useRef(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [error, setError] = useState(false);
 
-  // Use preloaded image if available, otherwise fetch
-  const displayImageUrl = fetchResult.imageUrl;
-  const imageSource = fetchResult.source;
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsInView(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '50px' }
-    );
-
-    if (imgRef.current) {
-      observer.observe(imgRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, []);
-
-  // Lazy image fetching when card comes into view
-  // Only fetch if no preloaded image is available
-  useEffect(() => {
-    // If we have a preloaded image, don't fetch again
-    if (preloadedImageUrl) {
-      return;
-    }
-
-    if (isInView && !hasAttemptedFetch.current && !isRefreshing) {
-      hasAttemptedFetch.current = true;
-      setIsFetching(true);
-
-      lazyImageFetcher.fetchImage(id, title, type)
-        .then((result) => {
-          setFetchResult(result);
-          setIsFetching(false);
-        })
-        .catch((err) => {
-          console.error(`Failed to fetch image for ${title}:`, err);
-          setIsFetching(false);
-        });
-    }
-  }, [isInView, id, title, type, isRefreshing, preloadedImageUrl]);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    setIsLoaded(false);
-    
-    const result = await lazyImageFetcher.refreshImage(id, title, type);
-    setFetchResult(result);
-    setIsRefreshing(false);
-  };
-  
   const progressText = current_episode 
     ? `S${current_season || 1} E${current_episode}`
     : current_chapter 
     ? `Ch. ${current_chapter}`
     : '';
-  
+
   const typeColors: Record<string, string> = {
     'Anime': 'bg-orange-500',
     'Manga': 'bg-purple-500',
@@ -137,14 +71,30 @@ export const MediaCard = ({
     'KDrama': 'bg-emerald-500',
     'JDrama': 'bg-cyan-500',
   };
-  
-  // Determine loading text based on source
-  const getLoadingText = () => {
-    if (isRefreshing) return 'Refreshing...';
-    if (imageSource === 'database') return 'Loading';
-    return 'Searching';
-  };
-  
+
+  const displayImageUrl = imageUrl || PLACEHOLDER_IMAGE;
+
+  if (isLoading) {
+    // Skeleton loading state
+    return (
+      <div className="group relative">
+        <div className={cn(
+          "relative overflow-hidden rounded-lg bg-muted aspect-[2/3]",
+          "shadow-md"
+        )}>
+          <Skeleton className="w-full h-full" />
+          <div className="absolute top-2 left-2 z-10">
+            <Skeleton className="h-5 w-16 rounded" />
+          </div>
+        </div>
+        <div className="mt-3 space-y-1">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-3 w-1/2" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="group relative"
@@ -153,56 +103,34 @@ export const MediaCard = ({
     >
       {/* Cover Image Container */}
       <div
-        ref={imgRef}
         className={cn(
           "relative overflow-hidden rounded-lg bg-muted aspect-[2/3]",
           "shadow-md group-hover:shadow-xl transition-shadow duration-300"
         )}
       >
-        {/* Loading Skeleton or Fetching Indicator */}
-        {((!isLoaded && displayImageUrl) || isFetching || isRefreshing) && (
+        {/* Loading Skeleton or Actual Image */}
+        {!isLoaded && !error && (
           <div className="absolute inset-0 flex items-center justify-center bg-muted z-10">
-            <div className="flex flex-col items-center gap-2">
-              <Loader2 className={cn(
-                "h-8 w-8 animate-spin",
-                imageSource === 'database' ? "text-blue-500" : "text-amber-500"
-              )} />
-              <span className="text-xs text-muted-foreground">
-                {getLoadingText()}
-              </span>
-              {imageSource && (
-                <span className={cn(
-                  "text-[10px] px-2 py-0.5 rounded-full font-medium",
-                  imageSource === 'database'
-                    ? "bg-green-100 text-green-700 border border-green-300"
-                    : "bg-amber-100 text-amber-700 border border-amber-300"
-                )}>
-                  {imageSource === 'database' ? '✓ MongoDB' : '⟳ API'}
-                </span>
-              )}
-            </div>
+            <Skeleton className="w-full h-full" />
           </div>
         )}
         
-        {/* Actual Image */}
-        {isInView && (
-          <img
-            src={error || !displayImageUrl ? PLACEHOLDER_IMAGE : displayImageUrl}
-            alt={title}
-            onLoad={() => setIsLoaded(true)}
-            onError={() => {
-              setError(true);
-              setIsLoaded(true);
-            }}
-            className={cn(
-              "w-full h-full object-cover transition-all duration-300",
-              isLoaded ? "opacity-100" : "opacity-0",
-              "group-hover:scale-105"
-            )}
-          />
-        )}
+        <img
+          src={error ? PLACEHOLDER_IMAGE : displayImageUrl}
+          alt={title}
+          onLoad={() => setIsLoaded(true)}
+          onError={() => {
+            setError(true);
+            setIsLoaded(true);
+          }}
+          className={cn(
+            "w-full h-full object-cover transition-all duration-300",
+            isLoaded ? "opacity-100" : "opacity-0",
+            "group-hover:scale-105"
+          )}
+        />
         
-        {/* Hover Overlay with Edit/Delete/Refresh */}
+        {/* Hover Overlay with Edit/Delete */}
         <div
           className={cn(
             "absolute inset-0 bg-black/60 flex items-center justify-center gap-2",
@@ -227,23 +155,6 @@ export const MediaCard = ({
             <Trash2 className="h-3 w-3" />
           </Button>
         </div>
-
-        {/* Refresh Button - Top Right, visible on hover */}
-        <button
-          onClick={handleRefresh}
-          className={cn(
-            "absolute top-2 right-2 z-20",
-            "w-8 h-8 rounded-full bg-background/90 backdrop-blur",
-            "flex items-center justify-center",
-            "shadow-md border border-border",
-            "transition-all duration-200",
-            "hover:bg-primary hover:text-primary-foreground hover:scale-110",
-            isHovered ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-2"
-          )}
-          title="Refresh cover from different source"
-        >
-          <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
-        </button>
         
         {/* Type Badge */}
         <Badge
@@ -257,7 +168,7 @@ export const MediaCard = ({
         
         {/* Rating Badge */}
         {rating && rating > 0 && (
-          <div className="absolute top-2 right-12 z-10 bg-black/70 text-white px-2 py-1 rounded flex items-center gap-1">
+          <div className="absolute top-2 right-2 z-10 bg-black/70 text-white px-2 py-1 rounded flex items-center gap-1">
             <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
             <span className="text-sm font-medium">{rating.toFixed(1)}</span>
           </div>

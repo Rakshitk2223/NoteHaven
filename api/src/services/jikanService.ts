@@ -56,7 +56,7 @@ export const jikanService = {
     limit: number = 5
   ): Promise<Partial<IMediaMetadata>[]> {
     try {
-      console.log(`🔍 [Jikan/MAL] Searching for: ${query} (${type})`);
+      console.log(`   📡 [Jikan/MAL] Searching: "${query}" (${type})`);
       
       // Add delay to respect rate limit (3 requests per second)
       await new Promise(resolve => setTimeout(resolve, 350));
@@ -72,7 +72,14 @@ export const jikanService = {
       });
       
       const results: JikanResult[] = response.data.data || [];
-      console.log(`✅ [Jikan/MAL] Found ${results.length} results`);
+      
+      if (results.length > 0) {
+        console.log(`   ✅ [Jikan/MAL] Found ${results.length} results for "${query}"`);
+        console.log(`      🎯 Best match: "${results[0].title}"`);
+        console.log(`      🖼️  Cover: ${results[0].images.jpg.large_image_url ? 'YES' : 'NO'}`);
+      } else {
+        console.log(`   ⚠️ [Jikan/MAL] No results for "${query}"`);
+      }
       
       return results.map((item) => ({
         title: item.title,
@@ -91,7 +98,7 @@ export const jikanService = {
         externalData: item
       }));
     } catch (error) {
-      console.error('❌ [Jikan/MAL] API error:', error);
+      console.error('   ❌ [Jikan/MAL] API error:', error);
       return [];
     }
   }

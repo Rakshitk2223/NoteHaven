@@ -74,9 +74,13 @@ export const mediaService = {
       expiresAt: { $gt: new Date() }
     });
     
-    if (cached) {
-      console.log('🎯 Cache hit for:', query);
+    if (cached && cached.results && cached.results.length > 0) {
+      console.log('🎯 Cache hit for:', query, `(${cached.results.length} results)`);
       return cached.results.slice(0, limit);
+    }
+    
+    if (cached && cached.results.length === 0) {
+      console.log('⚠️ Cache hit but empty results for:', query, '- querying MediaMetadata directly');
     }
     
     console.log('🔄 Cache miss, searching external APIs for:', query);
@@ -84,12 +88,25 @@ export const mediaService = {
     // Search MongoDB first
     let results: MediaItem[] = [];
     
+    // Normalize type to match database format
+    const typeMap: Record<string, string> = {
+      'Manga': 'manga',
+      'Manhwa': 'manhwa',
+      'Manhua': 'manhua',
+      'Anime': 'anime',
+      'Series': 'series',
+      'Movie': 'movie',
+      'KDrama': 'kdrama',
+      'JDrama': 'jdrama'
+    };
+    const normalizedType = type ? (typeMap[type] || type.toLowerCase()) : undefined;
+    
     // Escape special regex characters to prevent MongoDB errors
     const escapedQuery = escapeRegex(query);
     
-    const dbQuery = type 
+    const dbQuery = normalizedType 
       ? {
-          type,
+          type: normalizedType,
           $or: [
             { title: { $regex: escapedQuery, $options: 'i' } },
             { searchKeywords: { $in: [query.toLowerCase()] } }
@@ -102,10 +119,22 @@ export const mediaService = {
           ]
         };
     
+    console.log(`[MONGODB-DEBUG] Query:`, JSON.stringify(dbQuery));
+    
     const dbResults = await MediaMetadata.find(dbQuery)
       .sort({ rating: -1 })
       .limit(limit)
       .lean();
+    
+    console.log(`[MONGODB-DEBUG] Found ${dbResults.length} results in MediaMetadata`);
+    if (dbResults.length > 0) {
+      console.log(`[MONGODB-DEBUG] First result:`, {
+        title: dbResults[0].title,
+        type: dbResults[0].type,
+        coverImage: dbResults[0].coverImage,
+        keys: Object.keys(dbResults[0])
+      });
+    }
     
     results = dbResults.map(doc => mapToMediaItem(doc, 'mongodb'));
     
@@ -142,13 +171,17 @@ export const mediaService = {
       }
     }
     
-    // Cache results
-    await MediaCache.create({
-      query: cacheKey,
-      type: type || 'all',
-      results: results.slice(0, limit),
-      expiresAt: new Date(Date.now() + CACHE_TTL)
-    });
+    // Cache results (upsert to avoid duplicate key errors)
+    await MediaCache.findOneAndUpdate(
+      { query: cacheKey, type: type || 'all' },
+      {
+        query: cacheKey,
+        type: type || 'all',
+        results: results.slice(0, limit),
+        expiresAt: new Date(Date.now() + CACHE_TTL)
+      },
+      { upsert: true, new: true }
+    );
     
     return results.slice(0, limit);
   },
@@ -358,6 +391,83 @@ export const mediaService = {
     }
     
     return results.slice(0, limit);
+  },
+
+  // Force search from external APIs and save to MongoDB (for items not in database)
+  // BYPASSES CACHE - always searches external APIs directly
+  async forceSearchAndSave(
+    query: string,
+    type?: string
+  ): Promise<MediaItem | null> {
+    console.log(`\n🎯 [FORCE SEARCH] =========================================`);
+    console.log(`🔍 Searching external APIs for: "${query}" (${type || 'any type'})`);
+    console.log(`📝 BYPASSING CACHE - Direct API call`);
+    
+    // Normalize type to match database format
+    const typeMap: Record<string, string> = {
+      'Manga': 'manga',
+      'Manhwa': 'manhwa',
+      'Manhua': 'manhua',
+      'Anime': 'anime',
+      'Series': 'series',
+      'Movie': 'movie',
+      'KDrama': 'kdrama',
+      'JDrama': 'jdrama'
+    };
+    const normalizedType = type ? (typeMap[type] || type.toLowerCase()) : undefined;
+    
+    // Search external APIs directly (bypass cache)
+    const results = await this.searchExternalAPIs(query, normalizedType, 3);
+    
+    if (results.length > 0) {
+      // Take the best match (first result)
+      const bestMatch = results[0];
+      
+      console.log(`✅ [FORCE SEARCH] Found: "${bestMatch.title}" (${bestMatch.type})`);
+      console.log(`🖼️  Cover Image: ${bestMatch.coverImage ? 'YES' : 'NO'} - ${bestMatch.coverImage || 'N/A'}`);
+      
+      try {
+        // Save to permanent storage (MediaMetadata)
+        const saved = await MediaMetadata.findOneAndUpdate(
+          {
+            $or: [
+              { anilistId: bestMatch.anilistId },
+              { tmdbId: bestMatch.tmdbId },
+              { malId: bestMatch.malId }
+            ].filter((id: any) => Object.values(id)[0])
+          },
+          {
+            ...bestMatch,
+            searchKeywords: [
+              query.toLowerCase(),
+              bestMatch.title.toLowerCase(),
+              ...(bestMatch.searchKeywords || [])
+            ]
+          },
+          { upsert: true, new: true }
+        );
+        
+        console.log(`💾 [FORCE SEARCH] SAVED TO MONGODB: "${bestMatch.title}"`);
+        console.log(`📄 MongoDB ID: ${saved._id}`);
+        console.log(`🎨 Cover Image URL: ${saved.coverImage}`);
+        console.log(`🔖 Type: ${saved.type}`);
+        console.log(`=========================================\n`);
+        
+        // Clear any empty cache entries for this query so future searches get fresh results
+        const cacheKey = `${query}_${type || 'all'}`;
+        await MediaCache.deleteOne({ query: cacheKey });
+        console.log(`🧹 [FORCE SEARCH] Cleared empty cache for: "${query}"`);
+        
+        return mapToMediaItem(saved, 'api');
+      } catch (saveError) {
+        console.error(`❌ [FORCE SEARCH] FAILED TO SAVE "${bestMatch.title}":`, saveError);
+        return null;
+      }
+    }
+    
+    console.log(`⚠️ [FORCE SEARCH] NO RESULTS found for: "${query}"`);
+    console.log(`=========================================\n`);
+    return null;
   },
 
   // Save image URL from frontend to database (MangaBuddy pattern)

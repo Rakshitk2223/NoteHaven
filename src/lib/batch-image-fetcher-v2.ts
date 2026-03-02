@@ -1,7 +1,7 @@
 // Batch image fetcher with MongoDB first strategy
-// 1. Check MongoDB first via backend API
-// 2. Only fetch from Jikan for items not in MongoDB
-// 3. Save newly fetched images to MongoDB
+// 1. FETCH from MongoDB first (fast, cached)
+// 2. SEARCH from Jikan API for items not in MongoDB (slow, external)
+// 3. Save newly searched images to MongoDB for future fetches
 
 import axios from 'axios';
 
@@ -13,7 +13,7 @@ export interface BatchImageResult {
   imageUrl: string | null;
   title: string;
   type: string;
-  source: 'mongodb' | 'jikan' | null;
+  source: 'cached' | 'api' | null;
 }
 
 export interface BatchFetchProgress {
@@ -38,11 +38,11 @@ function getSearchType(type: string): string | undefined {
   return typeMap[type];
 }
 
-// Check MongoDB for existing images via backend batch-search
-async function checkMongoDBBatch(
+// Fetch images from MongoDB via backend batch-search
+async function fetchFromMongoDBBatch(
   items: Array<{ id: number; title: string; type: string }>
-): Promise<Map<number, { imageUrl: string; source: 'mongodb' }>> {
-  const foundImages = new Map<number, { imageUrl: string; source: 'mongodb' }>();
+): Promise<Map<number, { imageUrl: string; source: 'cached' }>> {
+  const foundImages = new Map<number, { imageUrl: string; source: 'cached' }>();
   
   if (items.length === 0) return foundImages;
 
@@ -64,7 +64,7 @@ async function checkMongoDBBatch(
         if (result.found && result.data?.coverImage) {
           foundImages.set(result.id, {
             imageUrl: result.data.coverImage,
-            source: 'mongodb'
+            source: 'cached'
           });
         }
       });
@@ -117,7 +117,7 @@ async function fetchFromJikan(
   }
 }
 
-// Save images to MongoDB via backend
+// Save searched images to MongoDB via backend
 async function saveImagesToMongoDB(
   items: Array<{ id: number; title: string; type: string; imageUrl: string; source: string }>
 ): Promise<void> {
@@ -129,7 +129,7 @@ async function saveImagesToMongoDB(
       { items },
       { timeout: 30000 }
     );
-    console.log(`💾 Saved ${items.length} images to MongoDB`);
+    console.log(`💾 Saved ${items.length} searched images to MongoDB`);
   } catch (error) {
     console.error('Error saving images to MongoDB:', error);
   }
@@ -142,15 +142,15 @@ export async function fetchImagesBatchWithCache(
 ): Promise<BatchImageResult[]> {
   if (items.length === 0) return [];
 
-  console.log(`🚀 [Batch Fetch] Checking ${items.length} items in MongoDB first...`);
+  console.log(`🚀 [Batch Fetch] Fetching ${items.length} items from MongoDB...`);
 
   const results: BatchImageResult[] = [];
   const itemsToFetchFromJikan: Array<{ id: number; title: string; type: string }> = [];
   
-  // Step 1: Check MongoDB for all items
-  const mongoDBResults = await checkMongoDBBatch(items);
+  // Step 1: FETCH from MongoDB for all items
+  const mongoDBResults = await fetchFromMongoDBBatch(items);
   
-  // Separate items found in MongoDB vs items needing fetch
+  // Separate items found in MongoDB vs items needing API search
   items.forEach(item => {
     const mongoResult = mongoDBResults.get(item.id);
     if (mongoResult) {
@@ -159,30 +159,30 @@ export async function fetchImagesBatchWithCache(
         imageUrl: mongoResult.imageUrl,
         title: item.title,
         type: item.type,
-        source: 'mongodb'
+        source: 'cached'
       });
     } else {
       itemsToFetchFromJikan.push(item);
     }
   });
 
-  const foundInMongoDB = results.length;
-  const needToFetch = itemsToFetchFromJikan.length;
+  const fetchedFromMongoDB = results.length;
+  const needToSearch = itemsToFetchFromJikan.length;
   
-  console.log(`✅ Found ${foundInMongoDB} in MongoDB, need to fetch ${needToFetch} from Jikan`);
+  console.log(`✅ Fetched ${fetchedFromMongoDB} from MongoDB, need to search ${needToSearch} from Jikan`);
 
-  // Report progress after MongoDB check
+  // Report progress after MongoDB fetch
   if (onProgress) {
     onProgress({
-      loaded: foundInMongoDB,
+      loaded: fetchedFromMongoDB,
       total: items.length,
-      percentage: Math.round((foundInMongoDB / items.length) * 100)
+      percentage: Math.round((fetchedFromMongoDB / items.length) * 100)
     });
   }
 
-  // Step 2: Fetch missing items from Jikan
-  if (needToFetch > 0) {
-    console.log(`🔄 Fetching ${needToFetch} items from Jikan...`);
+  // Step 2: SEARCH missing items from Jikan API
+  if (needToSearch > 0) {
+    console.log(`🔍 Searching ${needToSearch} items from Jikan API...`);
     
     const itemsToSave: Array<{ id: number; title: string; type: string; imageUrl: string; source: string }> = [];
     
@@ -212,7 +212,7 @@ export async function fetchImagesBatchWithCache(
           imageUrl: jikanResult.imageUrl,
           title: item.title,
           type: item.type,
-          source: 'jikan'
+          source: 'api'
         });
         
         itemsToSave.push({
@@ -220,7 +220,7 @@ export async function fetchImagesBatchWithCache(
           title: item.title,
           type: item.type,
           imageUrl: jikanResult.imageUrl,
-          source: 'jikan'
+          source: 'api'
         });
       } else {
         results.push({
@@ -233,7 +233,7 @@ export async function fetchImagesBatchWithCache(
       }
 
       // Report progress
-      const totalLoaded = foundInMongoDB + i + 1;
+      const totalLoaded = fetchedFromMongoDB + i + 1;
       if (onProgress) {
         onProgress({
           loaded: totalLoaded,
@@ -243,7 +243,7 @@ export async function fetchImagesBatchWithCache(
       }
 
       if ((i + 1) % 10 === 0) {
-        console.log(`✅ [Jikan Fetch] ${i + 1}/${needToFetch} done`);
+        console.log(`✅ [Jikan Search] ${i + 1}/${needToSearch} done`);
       }
     }
 
@@ -254,9 +254,9 @@ export async function fetchImagesBatchWithCache(
     }
   }
 
-  console.log(`✅ [Batch Fetch] Complete: ${results.filter(r => r.imageUrl).length}/${items.length} images found`);
-  console.log(`   - From MongoDB: ${results.filter(r => r.source === 'mongodb').length}`);
-  console.log(`   - From Jikan: ${results.filter(r => r.source === 'jikan').length}`);
+  console.log(`✅ [Batch Complete] ${results.filter(r => r.imageUrl).length}/${items.length} images found`);
+  console.log(`   - Fetched from MongoDB: ${results.filter(r => r.source === 'cached').length}`);
+  console.log(`   - Searched from Jikan: ${results.filter(r => r.source === 'api').length}`);
   
   return results;
 }

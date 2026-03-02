@@ -79,20 +79,27 @@ const Settings = () => {
   }, []);
 
   // Load saved sidebar order and merge with any new items from DEFAULT_ORDER
+  // Also removes stale items that are no longer in DEFAULT_ORDER (like old "Prompts")
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as SidebarItem[];
         
-        // Create a set of existing item names for quick lookup
-        const existingNames = new Set(parsed.map(item => item.name));
+        // Create a set of valid item names from DEFAULT_ORDER
+        const validNames = new Set(DEFAULT_ORDER.map(item => item.name));
+        
+        // Filter out stale items (like "Prompts") that are no longer valid
+        const validSavedItems = parsed.filter(item => validNames.has(item.name));
+        
+        // Create a set of existing valid item names
+        const existingNames = new Set(validSavedItems.map(item => item.name));
         
         // Add any new items from DEFAULT_ORDER that aren't in the saved order
         const newItems = DEFAULT_ORDER.filter(item => !existingNames.has(item.name));
         
         // Merge saved order with new items (new items added at their default positions)
-        const mergedItems = [...parsed];
+        const mergedItems = [...validSavedItems];
         
         // Insert new items at their positions from DEFAULT_ORDER
         newItems.forEach(newItem => {
@@ -146,15 +153,19 @@ const Settings = () => {
 
   const handleSaveSidebarOrder = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sidebarItems));
+    // Dispatch event to notify AppSidebar to reload immediately
+    window.dispatchEvent(new CustomEvent('sidebar-order-changed'));
     toast({
       title: 'Sidebar order saved',
-      description: 'Refresh the page to see the new order.',
+      description: 'Your new sidebar order is now active.',
     });
   };
 
   const handleResetSidebarOrder = () => {
     setSidebarItems(DEFAULT_ORDER);
     localStorage.removeItem(STORAGE_KEY);
+    // Dispatch event to notify AppSidebar to reload immediately
+    window.dispatchEvent(new CustomEvent('sidebar-order-changed'));
     toast({
       title: 'Sidebar order reset',
       description: 'Sidebar has been reset to default order.',

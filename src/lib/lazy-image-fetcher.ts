@@ -17,7 +17,7 @@ interface FetchQueueItem {
 
 export interface FetchResult {
   imageUrl: string | null;
-  source: 'database' | 'api' | null;
+  source: 'cached' | 'api' | null;
 }
 
 class LazyImageFetcher {
@@ -146,11 +146,12 @@ class LazyImageFetcher {
     // 3. Saves to MongoDB for future requests
     try {
       const results = await mediaApi.search(item.title, searchType, 1);
-      
+
       if (results.length > 0) {
         const bestMatch = results[0];
-        console.log(`✅ [API] Found image for "${item.title}" via backend: ${bestMatch.coverImage}`);
-        return { imageUrl: bestMatch.coverImage, source: 'api' };
+        console.log(`✅ [Database] Found cached image for "${item.title}": ${bestMatch.coverImage}`);
+        // Return 'cached' source since backend checked MongoDB first
+        return { imageUrl: bestMatch.coverImage, source: 'cached' };
       }
     } catch (error) {
       console.error(`Backend API search failed for "${item.title}":`, error);

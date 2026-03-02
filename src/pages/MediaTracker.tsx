@@ -42,7 +42,7 @@ import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
 import { CustomGroupBuilder, type CustomGroup, itemBelongsToCustomGroup } from "@/components/media/CustomGroupBuilder";
-import { fetchImagesBatchWithCache, type BatchFetchProgress } from "@/lib/batch-image-fetcher-v2";
+import { fetchImagesFromMongoDB } from "@/lib/simple-image-fetcher";
 
 interface MediaItem {
   id: number;
@@ -142,11 +142,9 @@ const MediaTracker = () => {
   });
   const [activeGroupId, setActiveGroupId] = useState<string | 'all'>('all');
 
-  // Image preloading state
-  const [preloadProgress, setPreloadProgress] = useState<BatchFetchProgress | null>(null);
-  const [isPreloading, setIsPreloading] = useState(false);
-  const [preloadedImageUrls, setPreloadedImageUrls] = useState<Map<number, string | null>>(new Map());
-  const [preloadedImageSources, setPreloadedImageSources] = useState<Map<number, 'mongodb' | 'api' | 'jikan' | 'anilist' | null>>(new Map());
+  // Image loading state - simple MongoDB-only fetch
+  const [imageUrls, setImageUrls] = useState<Map<number, string | null>>(new Map());
+  const [isLoadingImages, setIsLoadingImages] = useState(false);
 
   // Save custom groups to localStorage
   useEffect(() => {
@@ -247,47 +245,61 @@ const MediaTracker = () => {
 
   // Preload all images when media items are loaded
   // Uses client-side fetching from Jikan/AniList (MangaBuddy pattern)
+  // Priority image loading - load visible items first, then rest in background
   useEffect(() => {
-    const preloadImages = async () => {
-      if (mediaItems.length === 0 || isPreloading) return;
+    const loadImagesPriority = async () => {
+      if (mediaItems.length === 0 || isLoadingImages) return;
       
-      setIsPreloading(true);
-      console.log(`🚀 Starting client-side preload of ${mediaItems.length} images...`);
+      setIsLoadingImages(true);
+      console.log(`🚀 Loading ${mediaItems.length} cover images with priority...`);
 
-      const itemsToFetch = mediaItems.map(item => ({
-        id: item.id,
-        title: item.title,
-        type: item.type
-      }));
+      // Split items into priority (first 60) and background (rest)
+      const PRIORITY_COUNT = 60;
+      const priorityItems = mediaItems.slice(0, PRIORITY_COUNT);
+      const backgroundItems = mediaItems.slice(PRIORITY_COUNT);
 
-      try {
-        // Check MongoDB first, then fetch from Jikan only if needed
-        const results = await fetchImagesBatchWithCache(itemsToFetch, (progress) => {
-          setPreloadProgress(progress);
-        });
-
-        // Update the preloaded URLs and sources maps
-        const newUrlMap = new Map<number, string | null>();
-        const newSourceMap = new Map<number, 'mongodb' | 'api' | 'jikan' | 'anilist' | null>();
-        
-        results.forEach(result => {
-          newUrlMap.set(result.id, result.imageUrl);
-          newSourceMap.set(result.id, result.source || null);
-        });
-        
-        setPreloadedImageUrls(newUrlMap);
-        setPreloadedImageSources(newSourceMap);
-        
-        console.log('✅ Image preload complete');
-      } catch (error) {
-        console.error('❌ Image preload failed:', error);
-      } finally {
-        setIsPreloading(false);
-        setPreloadProgress(null);
+      // Load priority items first (visible on initial screen)
+      if (priorityItems.length > 0) {
+        console.log(`⚡ Loading ${priorityItems.length} priority images (visible)...`);
+        try {
+          const priorityResponse = await fetchImagesFromMongoDB(
+            priorityItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
+          );
+          
+          const newUrlMap = new Map<number, string | null>();
+          priorityResponse.results.forEach(result => {
+            newUrlMap.set(result.id, result.imageUrl);
+          });
+          setImageUrls(prev => new Map([...prev, ...newUrlMap]));
+          console.log(`✅ Priority images loaded: ${priorityResponse.found}/${priorityItems.length}`);
+        } catch (error) {
+          console.error('❌ Failed to load priority images:', error);
+        }
       }
+
+      // Then load background items
+      if (backgroundItems.length > 0) {
+        console.log(`🔄 Loading ${backgroundItems.length} background images...`);
+        try {
+          const backgroundResponse = await fetchImagesFromMongoDB(
+            backgroundItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
+          );
+          
+          const newUrlMap = new Map<number, string | null>();
+          backgroundResponse.results.forEach(result => {
+            newUrlMap.set(result.id, result.imageUrl);
+          });
+          setImageUrls(prev => new Map([...prev, ...newUrlMap]));
+          console.log(`✅ Background images loaded: ${backgroundResponse.found}/${backgroundItems.length}`);
+        } catch (error) {
+          console.error('❌ Failed to load background images:', error);
+        }
+      }
+
+      setIsLoadingImages(false);
     };
 
-    preloadImages();
+    loadImagesPriority();
   }, [mediaItems]);
 
   // Total count from all pages
@@ -956,7 +968,7 @@ const MediaTracker = () => {
     return () => clearTimeout(t);
   }, [location.search, mediaItems, viewMode]);
 
-  // Grid view component
+  // Grid view component with skeleton loading
   const MediaGridView = ({ items }: { items: MediaItem[] }) => (
     <div className="space-y-10">
       {groupedByStatus.keys.map((statusKey) => (
@@ -977,8 +989,8 @@ const MediaTracker = () => {
                 current_season={item.current_season}
                 current_episode={item.current_episode}
                 current_chapter={item.current_chapter}
-                preloadedImageUrl={preloadedImageUrls.get(item.id)}
-                preloadedSource={preloadedImageSources.get(item.id)}
+                imageUrl={imageUrls.get(item.id)}
+                isLoading={isLoadingImages && !imageUrls.has(item.id)}
                 onEdit={() => handleEditMedia(item)}
                 onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
               />
@@ -1124,30 +1136,7 @@ const MediaTracker = () => {
             </div>
           </div>
 
-          {/* Image Preload Progress Indicator */}
-          {isPreloading && preloadProgress && (
-            <div className="bg-blue-50 border-b border-blue-200 p-3">
-              <div className="max-w-4xl mx-auto">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-blue-800">
-                    📸 Loading cover images... {preloadProgress.loaded}/{preloadProgress.total}
-                  </span>
-                  <span className="text-sm text-blue-600">
-                    {preloadProgress.percentage}%
-                  </span>
-                </div>
-                <div className="w-full bg-blue-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${preloadProgress.percentage}%` }}
-                  />
-                </div>
-                <p className="text-xs text-blue-600 mt-1">
-                  Checking database first, then fetching missing images. Next time will be instant!
-                </p>
-              </div>
-            </div>
-          )}
+
 
           <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
             <div className="flex items-center justify-between mb-4">

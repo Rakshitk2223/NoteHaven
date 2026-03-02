@@ -71,6 +71,8 @@ const Notes = () => {
   // Track local edit state to prevent remote overwrites
   const localEditTimestampRef = useRef<number>(Date.now());
   const hasLocalChangesRef = useRef<boolean>(false);
+  // Track last loaded note ID to prevent cursor reset on auto-save
+  const lastLoadedNoteIdRef = useRef<number | null>(null);
   // Sharing state
   const [shareOpen, setShareOpen] = useState(false);
   const [allowEditShare, setAllowEditShare] = useState(false);
@@ -250,6 +252,17 @@ const Notes = () => {
   useEffect(() => {
     if (!editor) return;
     
+    // Check if we're actually switching to a different note
+    // If it's the same note (e.g., auto-save update), don't reload to prevent cursor reset
+    const isSameNote = selectedNote?.id === lastLoadedNoteIdRef.current;
+    if (isSameNote) {
+      // Still update server update timestamp for conflict detection
+      if (selectedNote) {
+        setLastServerUpdate(selectedNote.updated_at);
+      }
+      return;
+    }
+    
     // Save any pending changes before switching notes
     if (titleTimeoutRef.current) {
       clearTimeout(titleTimeoutRef.current);
@@ -262,16 +275,19 @@ const Notes = () => {
     
     if (selectedNote) {
       const title = selectedNote.title || '';
-    const html = selectedNote.content || '';
-    setTitleValue(title);
-    setContentValue(html);
-    setLastServerUpdate(selectedNote.updated_at);
-    editor.commands.setContent(html);
+      const html = selectedNote.content || '';
+      setTitleValue(title);
+      setContentValue(html);
+      setLastServerUpdate(selectedNote.updated_at);
+      editor.commands.setContent(html);
+      // Track that we loaded this note
+      lastLoadedNoteIdRef.current = selectedNote.id;
     } else {
       setTitleValue('');
       setContentValue('');
       setLastServerUpdate(null);
       editor.commands.clearContent();
+      lastLoadedNoteIdRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNote, editor]);

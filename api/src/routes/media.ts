@@ -3,6 +3,40 @@ import { mediaService } from '../services/mediaService';
 
 const router = Router();
 
+// Diagnostic endpoint to check database health (must be before /:id route)
+router.get('/diagnostic', async (req, res) => {
+  try {
+    const { MediaMetadata } = require('../models/MediaMetadata');
+    const { MediaCache } = require('../models/MediaCache');
+    
+    const metadataCount = await MediaMetadata.countDocuments();
+    const cacheCount = await MediaCache.countDocuments();
+    
+    // Sample a document to check structure
+    const sampleDoc = await MediaMetadata.findOne().lean();
+    
+    res.json({
+      success: true,
+      database: {
+        metadataCount,
+        cacheCount,
+        sampleDocument: sampleDoc ? {
+          title: sampleDoc.title,
+          type: sampleDoc.type,
+          coverImage: sampleDoc.coverImage,
+          allFields: Object.keys(sampleDoc)
+        } : null
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Diagnostic failed',
+      details: (error as Error).message
+    });
+  }
+});
+
 // Search media
 router.get('/search', async (req, res, next) => {
   try {
@@ -76,57 +110,174 @@ router.get('/trending/:type', async (req, res, next) => {
 router.post('/batch-search', async (req, res, next) => {
   try {
     const { items } = req.body;
-    
+
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Items array is required' });
     }
-    
+
     if (items.length > 50) {
       return res.status(400).json({ error: 'Maximum 50 items per batch' });
     }
-    
+
     console.log(`🔄 [Batch Search] Processing ${items.length} items`);
-    
-    // Process all items in parallel
-    const results = await Promise.all(
-      items.map(async (item: { title: string; type: string; id: number }) => {
+
+    // Define interface for items
+    interface BatchItem {
+      title: string;
+      type: string;
+      id: number;
+    }
+
+    // Define interface for results
+    interface BatchResult {
+      id: number;
+      found: boolean;
+      data: any;
+      source?: 'mongodb' | 'api';
+      retryNeeded: boolean;
+      title?: string;
+      type?: string;
+      error?: string;
+    }
+
+    // Step 1: Try to find all items in MongoDB first
+    const initialResults: BatchResult[] = await Promise.all(
+      items.map(async (item: BatchItem) => {
         try {
           const searchResults = await mediaService.search(item.title, item.type, 1);
-          
-          if (searchResults.length > 0) {
+
+          if (searchResults.length > 0 && searchResults[0].coverImage) {
             return {
               id: item.id,
               found: true,
               data: searchResults[0],
-              source: searchResults[0].source || 'api'
+              source: searchResults[0].source || 'mongodb',
+              retryNeeded: false
             };
           }
-          
+
+          // Item not found or missing coverImage - needs retry
           return {
             id: item.id,
+            title: item.title,
+            type: item.type,
             found: false,
-            data: null
+            data: null,
+            retryNeeded: true
           };
         } catch (error) {
           console.error(`Error searching for ${item.title}:`, error);
           return {
             id: item.id,
+            title: item.title,
+            type: item.type,
             found: false,
             data: null,
+            retryNeeded: true,
             error: 'Search failed'
           };
         }
       })
     );
+
+    // Step 2: Identify items that need to be fetched from external APIs
+    const itemsToFetch = initialResults.filter(r => r.retryNeeded && r.title && r.type);
     
-    const foundCount = results.filter(r => r.found).length;
-    console.log(`✅ [Batch Search] Found ${foundCount}/${items.length} items`);
+    if (itemsToFetch.length > 0) {
+      console.log(`\n📋 [BATCH SEARCH] ITEMS NOT FOUND (will fetch from APIs):`);
+      itemsToFetch.forEach((item, i) => {
+        console.log(`   ${i + 1}. "${item.title}" (${item.type})`);
+      });
+      console.log(`🔍 [Batch Search] ${itemsToFetch.length} items not found in MongoDB, fetching from external APIs...\n`);
+
+      // Step 3: Force fetch from external APIs and save to MongoDB
+      await Promise.all(
+        itemsToFetch.map(async (item) => {
+          try {
+            if (item.title && item.type) {
+              console.log(`⏳ [Batch Search] Fetching: "${item.title}" (${item.type})`);
+              await mediaService.forceSearchAndSave(item.title, item.type);
+            }
+          } catch (error) {
+            console.error(`❌ [Batch Search] Failed to fetch "${item.title}" from external APIs:`, error);
+          }
+        })
+      );
+
+      // Step 4: Retry searching for the items we just saved
+      console.log(`🔄 [Batch Search] Retrying search for ${itemsToFetch.length} items after saving to MongoDB...`);
+
+      const retryResults = await Promise.all(
+        itemsToFetch.map(async (item) => {
+          try {
+            // Search again - should now find in MongoDB
+            const searchResults = await mediaService.search(item.title!, item.type!, 1);
+
+            if (searchResults.length > 0 && searchResults[0].coverImage) {
+              console.log(`✅ [Batch Search] Retry successful for "${item.title}"`);
+              return {
+                id: item.id,
+                found: true,
+                data: searchResults[0],
+                source: 'api' as const, // Was fetched from API and saved
+                retryNeeded: false
+              };
+            }
+
+            return {
+              id: item.id,
+              found: false,
+              data: null,
+              retryNeeded: false,
+              error: 'Still not found after retry'
+            };
+          } catch (error) {
+            console.error(`❌ [Batch Search] Retry failed for "${item.title}":`, error);
+            return {
+              id: item.id,
+              found: false,
+              data: null,
+              retryNeeded: false,
+              error: 'Retry failed'
+            };
+          }
+        })
+      );
+
+      // Step 5: Merge retry results with initial results
+      const retryMap = new Map(retryResults.map(r => [r.id, r]));
+
+      for (let i = 0; i < initialResults.length; i++) {
+        if (initialResults[i].retryNeeded && retryMap.has(initialResults[i].id)) {
+          const retryResult = retryMap.get(initialResults[i].id)!;
+          initialResults[i] = retryResult;
+        }
+        // Clean up retryNeeded field from response
+        delete (initialResults[i] as any).retryNeeded;
+      }
+    }
+
+    const foundCount = initialResults.filter(r => r.found).length;
+    const mongoDbCount = initialResults.filter(r => r.found && r.source === 'mongodb').length;
+    const apiCount = initialResults.filter(r => r.found && r.source === 'api').length;
+    const notFoundCount = items.length - foundCount;
     
+    console.log(`\n📊 [BATCH SEARCH SUMMARY]`);
+    console.log(`   Total Items: ${items.length}`);
+    console.log(`   ✅ Found in MongoDB: ${mongoDbCount}`);
+    console.log(`   🌐 Fetched from APIs: ${apiCount}`);
+    console.log(`   ❌ Not Found: ${notFoundCount}`);
+    console.log(`   📈 Success Rate: ${Math.round((foundCount / items.length) * 100)}%`);
+    console.log(`=========================================\n`);
+
     res.json({
       success: true,
-      count: results.length,
+      count: initialResults.length,
       found: foundCount,
-      results
+      fetchedFromAPI: apiCount,
+      fromMongoDB: mongoDbCount,
+      notFound: notFoundCount,
+      results: initialResults
     });
   } catch (error) {
     next(error);
