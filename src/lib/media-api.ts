@@ -1,11 +1,8 @@
 import axios from 'axios';
+import { supabase } from '@/integrations/supabase/client';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
-const apiClient = axios.create({
-  baseURL: API_URL,
-  timeout: 10000,
-});
+// Supabase Edge Function URL
+const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
 
 // Jikan API (MyAnimeList wrapper) - free, no API key needed
 const JIKAN_API = 'https://api.jikan.moe/v4';
@@ -36,6 +33,7 @@ export interface SearchResponse {
   type: string;
   count: number;
   results: ExternalMedia[];
+  source?: 'database' | 'api' | 'none';
 }
 
 // Jikan API search
@@ -43,7 +41,6 @@ const searchJikan = async (query: string, type: string): Promise<ExternalMedia[]
   try {
     console.log(`🔍 Searching Jikan for: ${query} (${type})`);
     
-    // Map our types to Jikan types
     const jikanType = ['manga', 'manhwa', 'manhua'].includes(type.toLowerCase()) ? 'manga' : 'anime';
     
     const response = await axios.get(`${JIKAN_API}/${jikanType}`, {
@@ -87,24 +84,60 @@ function mapJikanStatus(status: string): string {
   return statusMap[status] || 'upcoming';
 }
 
-// Try backend API first, then Jikan as fallback
+// Map Supabase media_metadata to ExternalMedia format
+function mapSupabaseToExternalMedia(item: any): ExternalMedia {
+  return {
+    _id: item.id?.toString(),
+    title: item.title,
+    type: item.type,
+    anilistId: item.anilist_id,
+    tmdbId: item.tmdb_id,
+    malId: item.mal_id,
+    description: item.description || '',
+    genres: [], // Not stored in simplified schema
+    coverImage: item.cover_image || '',
+    bannerImage: item.banner_image || '',
+    rating: item.rating || 0,
+    releaseDate: undefined,
+    status: item.status || 'upcoming',
+    episodes: item.episodes,
+    chapters: item.chapters,
+  };
+}
+
 export const mediaApi = {
   async search(query: string, type?: string, limit: number = 10): Promise<ExternalMedia[]> {
     try {
-      // Try backend API first
-      console.log(`🔍 Searching backend API for: ${query} (${type || 'all'})`);
-      const response = await apiClient.get<SearchResponse>('/api/media/search', {
-        params: { q: query, type, limit }
+      console.log(`🔍 Searching Supabase Edge Function for: ${query} (${type || 'all'})`);
+      
+      const url = new URL(EDGE_FUNCTION_URL);
+      url.searchParams.set('q', query);
+      if (type) url.searchParams.set('type', type);
+      url.searchParams.set('limit', limit.toString());
+      
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
       
-      if (response.data.results && response.data.results.length > 0) {
-        console.log(`✅ Backend API found ${response.data.results.length} results`);
-        return response.data.results;
+      if (!response.ok) {
+        throw new Error(`Edge function error: ${response.status}`);
       }
       
-      console.log('⚠️ Backend API returned no results, trying Jikan...');
+      const data: SearchResponse = await response.json();
+      
+      if (data.success && data.results && data.results.length > 0) {
+        console.log(`✅ Found ${data.results.length} results from ${data.source || 'unknown'}`);
+        
+        // Map Supabase results to ExternalMedia format
+        return data.results.map(mapSupabaseToExternalMedia);
+      }
+      
+      console.log('⚠️ Edge function returned no results, trying Jikan...');
     } catch (error) {
-      console.error('❌ Backend API error:', error);
+      console.error('❌ Edge function error:', error);
       console.log('⚠️ Trying Jikan API as fallback...');
     }
     
@@ -118,8 +151,19 @@ export const mediaApi = {
 
   async getById(id: string): Promise<ExternalMedia | null> {
     try {
-      const response = await apiClient.get<{ success: boolean; media: ExternalMedia }>(`/api/media/${id}`);
-      return response.data.success ? response.data.media : null;
+      // Query Supabase directly for single item using raw SQL
+      const { data, error } = await supabase
+        .from('media_metadata' as any)
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (error || !data) {
+        console.error('Failed to get media by ID:', error);
+        return null;
+      }
+      
+      return mapSupabaseToExternalMedia(data);
     } catch (error) {
       console.error('Failed to get media by ID:', error);
       return null;
