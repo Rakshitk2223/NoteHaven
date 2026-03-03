@@ -1,13 +1,13 @@
 # NoteHaven
 
-Personal productivity & media companion built with React + TypeScript + Vite + Supabase + MongoDB.
+Personal productivity & media companion built with React + TypeScript + Vite + Supabase.
 
 ## Features
 
 - **Authentication**: Email/password auth via Supabase Auth
 - **Notes**: Auto-save with rich text support, tagging, sharing
 - **Tasks**: Due dates, pinning, completion tracking
-- **Media Tracker**: Track movies, series, anime, manga with automatic cover images from AniList/Jikan
+- **Media Tracker**: Track movies, series, anime, manga with automatic cover images from AniList/Jikan/TMDB
 - **AI Prompts**: Save and organize AI prompts with categories
 - **Money Ledger**: Track income and expenses with categories
 - **Subscriptions**: Monitor recurring subscriptions with renewal alerts
@@ -20,20 +20,24 @@ Personal productivity & media companion built with React + TypeScript + Vite + S
 ## Tech Stack
 
 - **Frontend**: React 18, TypeScript, Vite
-- **Backend API**: Express.js with TypeScript
-- **Database**: 
-  - Supabase (PostgreSQL) for user data
-  - MongoDB for media metadata and cover images
+- **Backend**: Supabase Edge Functions (serverless)
+- **Database**: Supabase (PostgreSQL) - everything in one place
 - **Styling**: Tailwind CSS + shadcn/ui components
 - **State Management**: React Query (TanStack Query)
 - **Routing**: React Router v6
 
+## Architecture
+
+**Before:** Frontend → Express API → MongoDB (images) + Supabase (auth/data)  
+**After:** Frontend → Supabase Edge Function → Supabase DB (everything!)
+
+All data including cover images are now stored in Supabase. No separate backend hosting needed!
+
 ## Prerequisites
 
-- Node.js 18+
-- Bun package manager
-- MongoDB Atlas account (for media metadata)
+- Node.js 18+ or Bun
 - Supabase account
+- (Optional) TMDB API key for movie/series covers
 
 ## Getting Started
 
@@ -43,7 +47,6 @@ Personal productivity & media companion built with React + TypeScript + Vite + S
 git clone <repository-url>
 cd NoteHaven
 bun install
-cd api && bun install
 ```
 
 ### 2. Environment Setup
@@ -51,46 +54,51 @@ cd api && bun install
 Create `.env` in the root directory:
 
 ```bash
-# Supabase
-VITE_SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
-VITE_SUPABASE_ANON_KEY="YOUR_ANON_KEY"
-VITE_SUPABASE_PROJECT_ID="YOUR_PROJECT_REF"
+# Supabase (Required)
+VITE_SUPABASE_URL="https://your-project-ref.supabase.co"
+VITE_SUPABASE_ANON_KEY="your-anon-key"
+VITE_SUPABASE_PROJECT_ID="your-project-ref"
 
-# API (for media covers)
-VITE_API_URL="http://localhost:3001"
-```
-
-Create `api/.env`:
-
-```bash
-# MongoDB
-MONGODB_URI="mongodb+srv://username:password@cluster.mongodb.net/notehaven?retryWrites=true&w=majority"
-
-# External APIs (optional - used for media metadata)
+# External APIs (Optional - for fetching new cover images)
 TMDB_API_KEY="your_tmdb_api_key"
+OMDB_API_KEY="your_omdb_api_key"
 
-# Server
-PORT=3001
-NODE_ENV=development
-ALLOWED_ORIGINS=http://localhost:5173
+# Supabase Service Role Key (for edge functions only)
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 ```
 
 ### 3. Database Setup
 
-Run the consolidated migration files in Supabase SQL Editor:
+Run the migration files in Supabase SQL Editor in order:
 
-1. First, run `supabase/migrations/01_create_base_schema.sql`
-2. Then, run `supabase/migrations/02_add_all_features.sql`
+1. `supabase/migrations/01_create_base_schema.sql` - Core tables
+2. `supabase/migrations/02_add_all_features.sql` - Additional features
+3. `supabase/migrations/03_create_media_metadata.sql` - Media cover images
 
-### 4. Start Development Servers
+### 4. Deploy Edge Function
 
-Terminal 1 - Backend API:
+Deploy the media-search edge function:
+
 ```bash
-cd api
-bun run dev
+# Login to Supabase
+supabase login
+
+# Deploy the function
+supabase functions deploy media-search --no-verify-jwt
+
+# Set environment variables for the function
+supabase secrets set TMDB_API_KEY="your_tmdb_api_key"
 ```
 
-Terminal 2 - Frontend:
+Or deploy manually via Supabase Dashboard:
+1. Go to Edge Functions → New Function
+2. Name: `media-search`
+3. Copy code from `supabase/functions/media-search/index.ts`
+4. Add secret: `TMDB_API_KEY`
+5. Deploy
+
+### 5. Start Development
+
 ```bash
 bun run dev
 ```
@@ -100,43 +108,42 @@ The app will be available at http://localhost:5173
 ## Production Build
 
 ```bash
-# Build frontend
 bun run build
-
-# Build backend API
-cd api && bun run build
 ```
 
-## Architecture
+## Project Structure
 
 ### Frontend
 - `src/pages/` - Page components
 - `src/components/` - Reusable UI components
 - `src/lib/` - Utility functions and API clients
+  - `media-api.ts` - Media search via Supabase edge function
+  - `simple-image-fetcher.ts` - Cover image fetching
 - `src/hooks/` - Custom React hooks
 - `src/integrations/supabase/` - Supabase client and types
 
-### Backend API
-- `api/src/routes/` - API route handlers
-- `api/src/services/` - External API integrations (AniList, Jikan, TMDB)
-- `api/src/models/` - MongoDB/Mongoose models
+### Supabase
+- `supabase/functions/media-search/` - Edge function for media search
+- `supabase/migrations/` - Database schema migrations
 
 ### Database Schema
 
-**Supabase (PostgreSQL)** - User Data:
-- `tasks`, `notes`, `prompts`, `media_tracker`
-- `tags` with junction tables for many-to-many relationships
-- `ledger_categories`, `ledger_entries` (money tracking)
-- `subscription_categories`, `subscriptions`
-- `birthdays`, `countdowns`, `shared_notes`, `code_snippets`
+**Supabase (PostgreSQL)** - All Data:
 
-**MongoDB** - Media Metadata:
-- `MediaMetadata` - Cover images, descriptions, ratings from external APIs
-- All media cover images cached for performance
+**Core Tables:**
+- `tasks`, `notes`, `prompts`, `media_tracker` - Main features
+- `tags` with junction tables for many-to-many relationships
+- `ledger_categories`, `ledger_entries` - Money tracking
+- `subscription_categories`, `subscriptions` - Subscription monitoring
+- `birthdays`, `countdowns`, `shared_notes`, `code_snippets` - Additional features
+
+**Media Metadata:**
+- `media_metadata` - Cover images, descriptions, ratings cached from external APIs
+- 653+ media items pre-cached
 
 ### RLS Policy Pattern
 
-All tables use Row Level Security (RLS):
+All user tables use Row Level Security (RLS):
 ```sql
 CREATE POLICY "Users can manage their own data"
   ON table_name FOR ALL
@@ -144,15 +151,38 @@ CREATE POLICY "Users can manage their own data"
   WITH CHECK (auth.uid() = user_id);
 ```
 
+Public tables (like `media_metadata`) allow read access to all:
+```sql
+CREATE POLICY "Allow public read access" 
+  ON media_metadata FOR SELECT USING (true);
+```
+
 ## Media Cover Images
 
 Cover images are fetched automatically using this cascade:
-1. **Check MongoDB** - Fast cache lookup
-2. **AniList API** - Primary source for anime/manga
-3. **Jikan API** - Fallback for anime/manga (MyAnimeList data)
-4. **MangaDex API** - Final fallback for manga/manhwa/manhua
+1. **Check Supabase** - Fast database lookup (653+ items cached)
+2. **AniList API** - Primary source for anime/manga (no key needed)
+3. **Jikan API** - Fallback for anime/manga (no key needed)
+4. **TMDB API** - For movies/series (API key required)
 
-All fetched images are saved to MongoDB for future requests.
+All newly fetched images are saved to Supabase for future requests.
+
+## Edge Function
+
+The `media-search` edge function is deployed at:
+```
+https://your-project-ref.supabase.co/functions/v1/media-search?q=QUERY&type=TYPE
+```
+
+**Query Parameters:**
+- `q` - Search query (required)
+- `type` - Media type: anime, manga, movie, series, kdrama, jdrama (optional)
+- `limit` - Max results (default: 10)
+
+**Example:**
+```bash
+curl "https://your-project.supabase.co/functions/v1/media-search?q=naruto&type=anime"
+```
 
 ## Troubleshooting
 
@@ -162,14 +192,44 @@ All fetched images are saved to MongoDB for future requests.
 3. Ensure database migrations have been applied
 
 **Media covers not loading:**
-1. Check that backend API is running on port 3001
-2. Verify MongoDB connection string in `api/.env`
-3. Check browser console for API errors
+1. Check that edge function is deployed: Supabase Dashboard → Edge Functions
+2. Test the function directly with curl
+3. Check browser console for CORS errors
+4. Verify edge function environment variables are set
+
+**Edge function returning 401:**
+- Make sure you deployed with `--no-verify-jwt` flag
+- Or configure the function to allow anonymous access in Supabase Dashboard
 
 **Auth not persisting:**
 1. Confirm only one Supabase client exists
 2. Clear localStorage and sign in again
 3. Check RLS policies are correct
+
+## Migration from Old Architecture
+
+If you're migrating from the Express + MongoDB setup:
+
+1. ✅ Data already migrated to Supabase (653 media items)
+2. ✅ Edge function deployed
+3. ✅ Frontend updated to use Supabase
+4. 🗑️ Delete old `api/` folder (already done)
+5. 🗑️ Delete MongoDB Atlas cluster (do this manually to save money)
+
+See `MIGRATION_COMPLETE.md` for detailed migration notes.
+
+## Cost Savings
+
+**Old Architecture:**
+- Frontend hosting (Netlify/Vercel) - Free tier
+- Backend hosting (Render/Railway) - $5-10/month
+- MongoDB Atlas - $0-5/month
+
+**New Architecture:**
+- Frontend hosting (Netlify/Vercel) - Free tier
+- Supabase - Free tier (using ~2MB of 500MB storage)
+
+**Savings:** $5-15/month
 
 ## Contributing
 
