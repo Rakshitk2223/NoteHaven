@@ -6,8 +6,8 @@ import { connectDatabase } from './config/database';
 import mediaRoutes from './routes/media';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from root .env file
+dotenv.config({ path: '../.env' });
 
 const app = express();
 const PORT = process.env.PORT || 3001;

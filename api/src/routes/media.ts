@@ -210,7 +210,7 @@ router.post('/batch-search', async (req, res, next) => {
       const retryResults = await Promise.all(
         itemsToFetch.map(async (item) => {
           try {
-            // Search again - should now find in MongoDB
+            // Search again - should now find in MongoDB (cache removed, always queries DB)
             const searchResults = await mediaService.search(item.title!, item.type!, 1);
 
             if (searchResults.length > 0 && searchResults[0].coverImage) {

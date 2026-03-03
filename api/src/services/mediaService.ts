@@ -1,17 +1,30 @@
 import { MediaMetadata, IMediaMetadata } from '../models/MediaMetadata';
-import { MediaCache } from '../models/MediaCache';
 import { anilistService } from './anilistService';
 import { tmdbService } from './tmdbService';
 import { omdbService } from './omdbService';
 import { tvmazeService } from './tvmazeService';
 import { jikanService } from './jikanService';
-
-// Cache TTL in milliseconds (24 hours)
-const CACHE_TTL = 24 * 60 * 60 * 1000;
+import { mangadexService } from './mangadexService';
 
 // Escape special regex characters to prevent MongoDB errors
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Normalize type to match database format
+const typeMap: Record<string, string> = {
+  'Manga': 'manga',
+  'Manhwa': 'manhwa',
+  'Manhua': 'manhua',
+  'Anime': 'anime',
+  'Series': 'series',
+  'Movie': 'movie',
+  'KDrama': 'kdrama',
+  'JDrama': 'jdrama'
+};
+
+function normalizeType(type?: string): string | undefined {
+  return type ? (typeMap[type] || type.toLowerCase()) : undefined;
 }
 
 // Media item interface for API responses
@@ -67,39 +80,10 @@ export const mediaService = {
     type?: string, 
     limit: number = 10
   ): Promise<MediaItem[]> {
-    // Check cache first
-    const cacheKey = `${query}_${type || 'all'}`;
-    const cached = await MediaCache.findOne({ 
-      query: cacheKey,
-      expiresAt: { $gt: new Date() }
-    });
-    
-    if (cached && cached.results && cached.results.length > 0) {
-      console.log('🎯 Cache hit for:', query, `(${cached.results.length} results)`);
-      return cached.results.slice(0, limit);
-    }
-    
-    if (cached && cached.results.length === 0) {
-      console.log('⚠️ Cache hit but empty results for:', query, '- querying MediaMetadata directly');
-    }
-    
-    console.log('🔄 Cache miss, searching external APIs for:', query);
-    
-    // Search MongoDB first
-    let results: MediaItem[] = [];
+    console.log(`\n🔍 [SEARCH] Looking for: "${query}" (${type || 'any type'})`);
     
     // Normalize type to match database format
-    const typeMap: Record<string, string> = {
-      'Manga': 'manga',
-      'Manhwa': 'manhwa',
-      'Manhua': 'manhua',
-      'Anime': 'anime',
-      'Series': 'series',
-      'Movie': 'movie',
-      'KDrama': 'kdrama',
-      'JDrama': 'jdrama'
-    };
-    const normalizedType = type ? (typeMap[type] || type.toLowerCase()) : undefined;
+    const normalizedType = normalizeType(type);
     
     // Escape special regex characters to prevent MongoDB errors
     const escapedQuery = escapeRegex(query);
@@ -119,71 +103,64 @@ export const mediaService = {
           ]
         };
     
-    console.log(`[MONGODB-DEBUG] Query:`, JSON.stringify(dbQuery));
-    
+    // Step 1: Search MongoDB first
+    console.log(`📦 [MongoDB] Checking database...`);
     const dbResults = await MediaMetadata.find(dbQuery)
       .sort({ rating: -1 })
       .limit(limit)
       .lean();
     
-    console.log(`[MONGODB-DEBUG] Found ${dbResults.length} results in MediaMetadata`);
     if (dbResults.length > 0) {
-      console.log(`[MONGODB-DEBUG] First result:`, {
-        title: dbResults[0].title,
-        type: dbResults[0].type,
-        coverImage: dbResults[0].coverImage,
-        keys: Object.keys(dbResults[0])
-      });
+      console.log(`✅ [MongoDB] Found ${dbResults.length} result(s)`);
+      console.log(`   🎯 Best match: "${dbResults[0].title}"`);
+      console.log(`   🖼️  Cover: ${dbResults[0].coverImage ? 'YES ✓' : 'NO ✗'}`);
+      return dbResults.map(doc => mapToMediaItem(doc, 'mongodb'));
     }
     
-    results = dbResults.map(doc => mapToMediaItem(doc, 'mongodb'));
+    console.log(`⚠️ [MongoDB] Not found in database`);
     
-    // Search external APIs if we need more results
-    let externalResults: MediaItem[] = [];
-    if (results.length < limit) {
-      externalResults = await this.searchExternalAPIs(
-        query,
-        type,
-        limit - results.length
-      );
-      results = [...results, ...externalResults];
-    }
+    // Step 2: Not in MongoDB, search external APIs
+    console.log(`🌐 [External APIs] Fetching from AniList/Jikan...`);
+    const externalResults = await this.searchExternalAPIs(query, type, limit);
     
-    // ALWAYS save external results to PERMANENT storage (MediaMetadata)
-    // This ensures images are cached forever, not just for 24 hours
-    for (const result of externalResults) {
-      if (result.anilistId || result.tmdbId) {
-        try {
-          await MediaMetadata.findOneAndUpdate(
-            {
-              $or: [
-                { anilistId: result.anilistId },
-                { tmdbId: result.tmdbId }
-              ].filter((id: any) => Object.values(id)[0])
-            },
-            result,
-            { upsert: true, new: true }
-          );
-          console.log(`💾 Saved to permanent storage: ${result.title}`);
-        } catch (saveError) {
-          console.error(`❌ Failed to save ${result.title}:`, saveError);
-        }
+    if (externalResults.length > 0) {
+      console.log(`✅ [External APIs] Found ${externalResults.length} result(s)`);
+      const bestMatch = externalResults[0];
+      console.log(`   🎯 Best match: "${bestMatch.title}"`);
+      console.log(`   🖼️  Cover: ${bestMatch.coverImage ? 'YES ✓' : 'NO ✗'}`);
+      
+      // Step 3: Save to MongoDB for future requests
+      console.log(`💾 [MongoDB] Saving to database...`);
+      try {
+        const saved = await MediaMetadata.findOneAndUpdate(
+          {
+            $or: [
+              { anilistId: bestMatch.anilistId },
+              { tmdbId: bestMatch.tmdbId },
+              { malId: bestMatch.malId }
+            ].filter((id: any) => Object.values(id)[0])
+          },
+          {
+            ...bestMatch,
+            searchKeywords: [
+              query.toLowerCase(),
+              bestMatch.title.toLowerCase(),
+              ...(bestMatch.searchKeywords || [])
+            ]
+          },
+          { upsert: true, new: true }
+        );
+        console.log(`✅ [MongoDB] Saved: "${bestMatch.title}" (ID: ${saved._id})`);
+      } catch (saveError) {
+        console.error(`❌ [MongoDB] Failed to save:`, saveError);
       }
+      
+      return externalResults;
     }
     
-    // Cache results (upsert to avoid duplicate key errors)
-    await MediaCache.findOneAndUpdate(
-      { query: cacheKey, type: type || 'all' },
-      {
-        query: cacheKey,
-        type: type || 'all',
-        results: results.slice(0, limit),
-        expiresAt: new Date(Date.now() + CACHE_TTL)
-      },
-      { upsert: true, new: true }
-    );
-    
-    return results.slice(0, limit);
+    console.log(`❌ [External APIs] No results found`);
+    console.log(`   Could not find: "${query}"\n`);
+    return [];
   },
 
   async getById(id: string): Promise<MediaItem | null> {
@@ -198,11 +175,16 @@ export const mediaService = {
   ): Promise<MediaItem[]> {
     const results: MediaItem[] = [];
     
-    // Search anime/manga with fallback chain: AniList -> Jikan/MAL
-    if (!type || ['anime', 'manga', 'manhwa', 'manhua'].includes(type)) {
+    // STRICT TYPE CHECKING: Only search anime/manga APIs if type is explicitly set
+    // This prevents K-Dramas from getting anime covers
+    const animeMangaTypes = ['anime', 'manga', 'manhwa', 'manhua'];
+    const isAnimeManga = type && animeMangaTypes.includes(type.toLowerCase());
+    
+    if (isAnimeManga) {
+      console.log(`🎬 Searching Anime/Manga APIs for: "${query}" (${type})`);
       let animeResults: MediaItem[] = [];
       
-      // Try AniList first
+      // Step 1: Try AniList first
       try {
         let anilistType: 'anime' | 'manga' = 'anime';
         if (type === 'manga' || type === 'manhwa' || type === 'manhua') {
@@ -232,12 +214,17 @@ export const mediaService = {
             searchKeywords: r.searchKeywords || [],
             source: 'api' as const
           }));
+          console.log(`✅ AniList found results, using them.`);
+        } else {
+          console.log(`⚠️ AniList returned no results, will try Jikan...`);
         }
       } catch (error) {
-        console.error('AniList search failed:', error);
+        console.error('❌ AniList search failed:', error);
+        console.log('⚠️ Will try Jikan as fallback...');
       }
       
-      // Fallback to Jikan/MAL if AniList returned no results
+      // Step 2: Always try Jikan/MAL (even if AniList found results - for better coverage)
+      // Actually, let's only try Jikan if AniList didn't find anything
       if (animeResults.length === 0) {
         try {
           let jikanType: 'anime' | 'manga' = 'anime';
@@ -268,9 +255,48 @@ export const mediaService = {
               searchKeywords: r.searchKeywords || [],
               source: 'api' as const
             }));
+            console.log(`✅ Jikan found results.`);
+          } else {
+            console.log(`⚠️ Jikan also returned no results, will try MangaDex...`);
           }
         } catch (error) {
-          console.error('Jikan/MAL search failed:', error);
+          console.error('❌ Jikan/MAL search failed:', error);
+          console.log('⚠️ Will try MangaDex as final fallback...');
+        }
+      }
+      
+      // Step 3: Try MangaDex as final fallback (especially good for manga/manhwa/manhua)
+      if (animeResults.length === 0 && (type === 'manga' || type === 'manhwa' || type === 'manhua')) {
+        try {
+          const mangadexResults = await mangadexService.search(query, limit);
+          
+          if (mangadexResults.length > 0) {
+            animeResults = mangadexResults.map(r => ({
+              title: r.title || '',
+              type: (r.type as string) || 'manga',
+              anilistId: r.anilistId,
+              tmdbId: r.tmdbId,
+              malId: r.malId,
+              description: r.description || '',
+              genres: r.genres || [],
+              coverImage: r.coverImage || '',
+              bannerImage: r.bannerImage,
+              rating: r.rating || 0,
+              releaseDate: r.releaseDate,
+              status: (r.status as string) || 'upcoming',
+              episodes: r.episodes,
+              chapters: r.chapters,
+              duration: r.duration,
+              season: r.season,
+              searchKeywords: r.searchKeywords || [],
+              source: 'api' as const
+            }));
+            console.log(`✅ MangaDex found results.`);
+          } else {
+            console.log(`⚠️ MangaDex also returned no results.`);
+          }
+        } catch (error) {
+          console.error('❌ MangaDex search failed:', error);
         }
       }
       
@@ -282,11 +308,15 @@ export const mediaService = {
       results.push(...filtered);
     }
     
-    // Search movies/series with fallback chain: TMDB -> OMDb -> TVmaze
-    if (!type || ['movie', 'series', 'kdrama', 'jdrama'].includes(type)) {
+    // STRICT TYPE CHECKING: Only search movie/series APIs if type is explicitly set
+    const movieSeriesTypes = ['movie', 'series', 'kdrama', 'jdrama'];
+    const isMovieSeries = type && movieSeriesTypes.includes(type.toLowerCase());
+    
+    if (isMovieSeries) {
+      console.log(`🎬 Searching Movie/Series APIs for: "${query}" (${type})`);
       let movieResults: MediaItem[] = [];
       
-      // Try TMDB first
+      // Step 1: Try TMDB first
       try {
         const tmdbType = type === 'movie' ? 'movie' : 'series';
         const tmdbResults = await tmdbService.search(query, tmdbType as any, limit);
@@ -312,12 +342,16 @@ export const mediaService = {
             searchKeywords: r.searchKeywords || [],
             source: 'api' as const
           }));
+          console.log(`✅ TMDB found results.`);
+        } else {
+          console.log(`⚠️ TMDB returned no results, will try OMDb...`);
         }
       } catch (error) {
-        console.error('TMDB search failed:', error);
+        console.error('❌ TMDB search failed:', error);
+        console.log('⚠️ Will try OMDb as fallback...');
       }
       
-      // Fallback to OMDb if TMDB returned no results
+      // Step 2: Try OMDb if TMDB didn't find anything
       if (movieResults.length === 0) {
         try {
           const omdbType = type === 'movie' ? 'movie' : 'series';
@@ -344,13 +378,17 @@ export const mediaService = {
               searchKeywords: r.searchKeywords || [],
               source: 'api' as const
             }));
+            console.log(`✅ OMDb found results.`);
+          } else {
+            console.log(`⚠️ OMDb also returned no results, will try TVmaze...`);
           }
         } catch (error) {
-          console.error('OMDb search failed:', error);
+          console.error('❌ OMDb search failed:', error);
+          console.log('⚠️ Will try TVmaze as final fallback...');
         }
       }
       
-      // Fallback to TVmaze for TV shows if still no results
+      // Step 3: Try TVmaze as final fallback for TV shows
       if (movieResults.length === 0 && type !== 'movie') {
         try {
           const tvmazeResults = await tvmazeService.search(query, limit);
@@ -376,9 +414,12 @@ export const mediaService = {
               searchKeywords: r.searchKeywords || [],
               source: 'api' as const
             }));
+            console.log(`✅ TVmaze found results.`);
+          } else {
+            console.log(`⚠️ TVmaze also returned no results.`);
           }
         } catch (error) {
-          console.error('TVmaze search failed:', error);
+          console.error('❌ TVmaze search failed:', error);
         }
       }
       
@@ -404,17 +445,7 @@ export const mediaService = {
     console.log(`📝 BYPASSING CACHE - Direct API call`);
     
     // Normalize type to match database format
-    const typeMap: Record<string, string> = {
-      'Manga': 'manga',
-      'Manhwa': 'manhwa',
-      'Manhua': 'manhua',
-      'Anime': 'anime',
-      'Series': 'series',
-      'Movie': 'movie',
-      'KDrama': 'kdrama',
-      'JDrama': 'jdrama'
-    };
-    const normalizedType = type ? (typeMap[type] || type.toLowerCase()) : undefined;
+    const normalizedType = normalizeType(type);
     
     // Search external APIs directly (bypass cache)
     const results = await this.searchExternalAPIs(query, normalizedType, 3);
@@ -452,11 +483,6 @@ export const mediaService = {
         console.log(`🎨 Cover Image URL: ${saved.coverImage}`);
         console.log(`🔖 Type: ${saved.type}`);
         console.log(`=========================================\n`);
-        
-        // Clear any empty cache entries for this query so future searches get fresh results
-        const cacheKey = `${query}_${type || 'all'}`;
-        await MediaCache.deleteOne({ query: cacheKey });
-        console.log(`🧹 [FORCE SEARCH] Cleared empty cache for: "${query}"`);
         
         return mapToMediaItem(saved, 'api');
       } catch (saveError) {
