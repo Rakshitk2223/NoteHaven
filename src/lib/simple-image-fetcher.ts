@@ -1,12 +1,11 @@
-// Image fetcher with automatic fallback to external APIs via Supabase Edge Function
-// Fetches from Supabase first, then from external APIs if not found
-// Chunks requests to avoid overloading (max 50 per batch)
+// Image fetcher with direct Supabase queries for maximum performance
+// Fetches ALL cached images in ONE database query (~100ms)
+// Only uses external APIs for missing items
 
-import axios from 'axios';
+import { supabase } from '@/integrations/supabase/client';
 
-// Supabase Edge Function URL
+// Supabase Edge Function URL (for fetching new images only)
 const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
-const BATCH_SIZE = 50; // Backend limit
 
 export interface ImageResult {
   id: number;
@@ -20,175 +19,226 @@ export interface BatchImageResponse {
   results: ImageResult[];
 }
 
-// Interface for batch response with API fetch count
-interface BatchResponseWithCount {
-  results: ImageResult[];
-  fetchedFromAPI: number;
+// Cache key for localStorage
+const getCacheKey = () => `media_images_${new Date().toDateString()}`;
+
+// Check localStorage cache
+function getCachedImages(): Map<number, string> | null {
+  try {
+    const cached = localStorage.getItem(getCacheKey());
+    if (cached) {
+      const data = JSON.parse(cached);
+      console.log('📦 Using localStorage cache:', Object.keys(data).length, 'images');
+      return new Map(Object.entries(data).map(([k, v]) => [parseInt(k), v as string]));
+    }
+  } catch (e) {
+    console.error('Cache read error:', e);
+  }
+  return null;
 }
 
-// AniList API - free, no key needed
-async function searchAniList(title: string, type: string) {
+// Save to localStorage cache
+function cacheImages(images: Map<number, string>) {
   try {
-    const searchType = type === 'anime' ? 'ANIME' : type === 'manga' ? 'MANGA' : null;
-    if (!searchType) return null;
-
-    const response = await fetch('https://graphql.anilist.co', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        query: `
-          query ($search: String, $type: MediaType) {
-            Media(search: $search, type: $type) {
-              id
-              title {
-                romaji
-                english
-                native
-              }
-              coverImage {
-                large
-                extraLarge
-              }
-            }
-          }
-        `,
-        variables: { search: title, type: searchType },
-      }),
-    });
-
-    if (!response.ok) return null;
-    const data = await response.json();
-    const media = data?.data?.Media;
-    
-    if (!media) return null;
-
-    return {
-      coverImage: media.coverImage?.extraLarge || media.coverImage?.large || '',
-      anilistId: media.id,
-    };
-  } catch (error) {
-    return null;
+    const obj = Object.fromEntries(images);
+    localStorage.setItem(getCacheKey(), JSON.stringify(obj));
+    console.log('💾 Saved to localStorage cache:', images.size, 'images');
+  } catch (e) {
+    console.error('Cache write error:', e);
   }
 }
 
-// Jikan API - free, no key needed
-async function searchJikan(title: string, type: string) {
-  try {
-    const jikanType = ['manga', 'manhwa', 'manhua'].includes(type.toLowerCase()) ? 'manga' : 'anime';
-    
-    const response = await fetch(
-      `https://api.jikan.moe/v4/${jikanType}?q=${encodeURIComponent(title)}&limit=1`
-    );
-
-    if (!response.ok) return null;
-    const data = await response.json();
-    const result = data?.data?.[0];
-    
-    if (!result) return null;
-
-    return {
-      coverImage: result.images?.jpg?.large_image_url || result.images?.jpg?.image_url || '',
-      malId: result.mal_id,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-// Search Supabase edge function
-async function searchSupabaseEdge(title: string, type: string) {
-  try {
-    const url = new URL(EDGE_FUNCTION_URL);
-    url.searchParams.set('q', title);
-    url.searchParams.set('type', type);
-    url.searchParams.set('limit', '1');
-    
-    const response = await fetch(url.toString());
-    if (!response.ok) return null;
-    
-    const data = await response.json();
-    if (!data.success || !data.results || data.results.length === 0) return null;
-    
-    const item = data.results[0];
-    return {
-      coverImage: item.cover_image,
-      source: data.source,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-// Fetch images using Supabase Edge Function or fallback to direct APIs
-export async function fetchImagesFromSupabase(
+// Query Supabase directly for ALL items at once (FAST!)
+async function fetchFromSupabaseDatabase(
   items: Array<{ id: number; title: string; type: string }>
-): Promise<BatchImageResponse> {
+): Promise<Map<number, string>> {
+  console.log('🔍 Querying Supabase database for', items.length, 'items...');
+  
+  const startTime = performance.now();
+  const results = new Map<number, string>();
+  
+  // Extract titles to search
+  const titles = items.map(item => item.title);
+  
+  try {
+    // Query all matching titles in ONE database call
+    const { data, error } = await supabase
+      .from('media_metadata' as any)
+      .select('title, type, cover_image')
+      .in('title', titles);
+    
+    if (error) {
+      console.error('Supabase query error:', error);
+      return results;
+    }
+    
+    // Create a lookup map by title+type
+    const dbMap = new Map<string, string>();
+    data?.forEach((item: any) => {
+      const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
+      dbMap.set(key, item.cover_image);
+    });
+    
+    // Match with requested items
+    items.forEach(item => {
+      const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
+      const coverImage = dbMap.get(key);
+      if (coverImage) {
+        results.set(item.id, coverImage);
+      }
+    });
+    
+    const duration = (performance.now() - startTime).toFixed(0);
+    console.log(`✅ Database query complete: ${results.size}/${items.length} found in ${duration}ms`);
+    
+  } catch (error) {
+    console.error('Database fetch error:', error);
+  }
+  
+  return results;
+}
+
+// Fetch missing items from edge function in PARALLEL batches
+async function fetchMissingItemsFromAPI(
+  missingItems: Array<{ id: number; title: string; type: string }>
+): Promise<Map<number, string>> {
+  const results = new Map<number, string>();
+  
+  if (missingItems.length === 0) return results;
+  
+  console.log(`🌐 Fetching ${missingItems.length} missing items from APIs...`);
+  
+  // Process in parallel with Promise.all
+  const batchSize = 10; // Process 10 at a time to avoid overwhelming
+  
+  for (let i = 0; i < missingItems.length; i += batchSize) {
+    const batch = missingItems.slice(i, i + batchSize);
+    
+    const promises = batch.map(async (item) => {
+      try {
+        const url = new URL(EDGE_FUNCTION_URL);
+        url.searchParams.set('q', item.title);
+        url.searchParams.set('type', item.type);
+        url.searchParams.set('limit', '1');
+        
+        const response = await fetch(url.toString());
+        if (!response.ok) return null;
+        
+        const data = await response.json();
+        if (data.success && data.results?.[0]?.cover_image) {
+          return {
+            id: item.id,
+            imageUrl: data.results[0].cover_image
+          };
+        }
+      } catch (error) {
+        console.error(`Error fetching ${item.title}:`, error);
+      }
+      return null;
+    });
+    
+    const batchResults = await Promise.all(promises);
+    
+    batchResults.forEach(result => {
+      if (result) {
+        results.set(result.id, result.imageUrl);
+      }
+    });
+    
+    // Small delay between batches to be nice to the API
+    if (i + batchSize < missingItems.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  
+  console.log(`✅ Fetched ${results.size}/${missingItems.length} missing items from APIs`);
+  
+  return results;
+}
+
+// Main function - FAST!
+export async function fetchImagesFromSupabase(
+  items: Array<{ id: number; title: string; type: string }
+>): Promise<BatchImageResponse> {
   if (items.length === 0) {
     return { found: 0, notFound: 0, fetchedFromAPI: 0, results: [] };
   }
-
+  
   console.log(`🚀 Loading ${items.length} cover images...`);
-  console.log('📝 Items not found will be fetched from external APIs');
-
+  const startTime = performance.now();
+  
   const results: ImageResult[] = [];
   let fetchedFromAPI = 0;
-
-  // Process items one by one (edge function handles caching)
-  for (const item of items) {
-    try {
-      // Try Supabase edge function first
-      const supabaseResult = await searchSupabaseEdge(item.title, item.type);
-      
-      if (supabaseResult?.coverImage) {
-        results.push({ id: item.id, imageUrl: supabaseResult.coverImage });
-        if (supabaseResult.source === 'api') {
-          fetchedFromAPI++;
-        }
-        continue;
+  
+  // Step 1: Check localStorage cache first
+  const cachedImages = getCachedImages();
+  const cacheHits = new Map<number, string>();
+  const needsFetch: Array<{ id: number; title: string; type: string }> = [];
+  
+  if (cachedImages) {
+    items.forEach(item => {
+      const cached = cachedImages.get(item.id);
+      if (cached) {
+        cacheHits.set(item.id, cached);
+      } else {
+        needsFetch.push(item);
       }
-
-      // Fallback to AniList for anime/manga
-      if (['anime', 'manga', 'manhwa', 'manhua'].includes(item.type.toLowerCase())) {
-        const aniListResult = await searchAniList(item.title, item.type);
-        if (aniListResult?.coverImage) {
-          results.push({ id: item.id, imageUrl: aniListResult.coverImage });
-          fetchedFromAPI++;
-          continue;
-        }
-
-        // Fallback to Jikan
-        const jikanResult = await searchJikan(item.title, item.type);
-        if (jikanResult?.coverImage) {
-          results.push({ id: item.id, imageUrl: jikanResult.coverImage });
-          fetchedFromAPI++;
-          continue;
-        }
-      }
-
-      // Not found anywhere
-      results.push({ id: item.id, imageUrl: null });
-      
-    } catch (error) {
-      console.error(`Error fetching image for ${item.title}:`, error);
-      results.push({ id: item.id, imageUrl: null });
+    });
+    console.log(`💾 Cache hits: ${cacheHits.size}, Need to fetch: ${needsFetch.length}`);
+  } else {
+    needsFetch.push(...items);
+  }
+  
+  // Step 2: Query Supabase database for non-cached items (ONE query!)
+  const dbImages = await fetchFromSupabaseDatabase(needsFetch);
+  
+  // Step 3: Find items still missing
+  const stillMissing: Array<{ id: number; title: string; type: string }> = [];
+  needsFetch.forEach(item => {
+    const dbImage = dbImages.get(item.id);
+    if (!dbImage) {
+      stillMissing.push(item);
     }
-  }
-
-  console.log(`✅ Loaded ${results.filter(r => r.imageUrl).length}/${items.length} images`);
-  if (fetchedFromAPI > 0) {
-    console.log(`🌐 Fetched ${fetchedFromAPI} images from external APIs`);
-  }
-
+  });
+  
+  // Step 4: Fetch missing items from external APIs (parallel batches)
+  const apiImages = await fetchMissingItemsFromAPI(stillMissing);
+  fetchedFromAPI = apiImages.size;
+  
+  // Step 5: Combine all results
+  const allImages = new Map<number, string>([
+    ...cacheHits,
+    ...dbImages,
+    ...apiImages
+  ]);
+  
+  // Step 6: Build final results array
+  items.forEach(item => {
+    results.push({
+      id: item.id,
+      imageUrl: allImages.get(item.id) || null
+    });
+  });
+  
+  // Step 7: Cache results for next time
+  cacheImages(allImages);
+  
+  const totalTime = (performance.now() - startTime).toFixed(0);
+  const found = results.filter(r => r.imageUrl).length;
+  
+  console.log(`✅ Total: ${found}/${items.length} images loaded in ${totalTime}ms`);
+  console.log(`   - Cache hits: ${cacheHits.size}`);
+  console.log(`   - Database: ${dbImages.size}`);
+  console.log(`   - From APIs: ${fetchedFromAPI}`);
+  console.log(`   - Missing: ${items.length - found}`);
+  
   return {
-    found: results.filter(r => r.imageUrl).length,
-    notFound: results.filter(r => !r.imageUrl).length,
+    found,
+    notFound: items.length - found,
     fetchedFromAPI,
     results
   };
 }
 
-// Backward compatibility - alias for the old function name
+// Backward compatibility
 export const fetchImagesFromMongoDB = fetchImagesFromSupabase;
