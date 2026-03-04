@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Star, Edit2, Trash2 } from 'lucide-react';
+import { Star, Edit2, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { refreshCoverImage } from '@/lib/media-refresh';
+import { useToast } from '@/components/ui/use-toast';
 
 interface MediaCardProps {
   id: number;
@@ -15,9 +17,11 @@ interface MediaCardProps {
   current_episode?: number;
   current_chapter?: number;
   imageUrl?: string | null;
-  isLoading?: boolean; // New prop for skeleton state
+  apiSource?: string; // Track which API provided the current image
+  isLoading?: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onImageUpdate?: (newImageUrl: string, newApiSource: string) => void; // Callback when image is refreshed
 }
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
@@ -39,6 +43,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export const MediaCard = ({
+  id,
   title,
   type,
   status,
@@ -47,13 +52,19 @@ export const MediaCard = ({
   current_episode,
   current_chapter,
   imageUrl,
+  apiSource,
   isLoading = false,
   onEdit,
   onDelete,
+  onImageUpdate,
 }: MediaCardProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState(false);
+  const [currentImage, setCurrentImage] = useState(imageUrl);
+  const [currentApi, setCurrentApi] = useState(apiSource);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const { toast } = useToast();
 
   const progressText = current_episode 
     ? `S${current_season || 1} E${current_episode}`
@@ -72,10 +83,49 @@ export const MediaCard = ({
     'JDrama': 'bg-cyan-500',
   };
 
-  const displayImageUrl = imageUrl || PLACEHOLDER_IMAGE;
+  const displayImageUrl = currentImage || PLACEHOLDER_IMAGE;
+
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    
+    setIsRefreshing(true);
+    try {
+      const result = await refreshCoverImage(title, type, currentApi);
+      
+      if (result) {
+        // Update local state immediately (optimistic UI)
+        setCurrentImage(result.coverImage);
+        setCurrentApi(result.apiSource);
+        setIsLoaded(true);
+        setError(false);
+        
+        // Notify parent component
+        onImageUpdate?.(result.coverImage, result.apiSource);
+        
+        toast({
+          title: 'Cover updated',
+          description: `Found better cover from ${result.apiSource}`,
+        });
+      } else {
+        toast({
+          title: 'No better cover found',
+          description: 'Tried all available sources',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      console.error('Refresh error:', err);
+      toast({
+        title: 'Failed to refresh',
+        description: 'Please try again later',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   if (isLoading) {
-    // Skeleton loading state
     return (
       <div className="group relative">
         <div className={cn(
@@ -130,7 +180,7 @@ export const MediaCard = ({
           )}
         />
         
-        {/* Hover Overlay with Edit/Delete */}
+        {/* Hover Overlay with Refresh/Edit/Delete */}
         <div
           className={cn(
             "absolute inset-0 bg-black/60 flex items-center justify-center gap-2",
@@ -138,6 +188,19 @@ export const MediaCard = ({
             isHovered ? "opacity-100" : "opacity-0"
           )}
         >
+          {/* Refresh Button */}
+          <Button 
+            size="sm" 
+            variant="secondary" 
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="gap-1"
+            title="Refresh cover image"
+          >
+            <RefreshCw className={cn("h-3 w-3", isRefreshing && "animate-spin")} />
+            {isRefreshing ? '...' : ''}
+          </Button>
+          
           <Button 
             size="sm" 
             variant="secondary" 
@@ -147,6 +210,7 @@ export const MediaCard = ({
             <Edit2 className="h-3 w-3" />
             Edit
           </Button>
+          
           <Button 
             size="sm" 
             variant="destructive" 
@@ -204,3 +268,5 @@ export const MediaCard = ({
     </div>
   );
 };
+
+export default MediaCard;
