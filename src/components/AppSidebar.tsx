@@ -73,7 +73,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
     "flex items-center gap-3 rounded-lg font-body font-medium transition-colors duration-200 relative group",
     "hover:bg-secondary/50",
     isActive 
-      ? "bg-primary/10 text-primary border border-primary/20" 
+      ? "bg-muted/80 text-foreground font-bold" 
       : "text-muted-foreground hover:text-foreground",
     isCollapsed 
       ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0" 
@@ -84,7 +84,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
     <>
       <Icon className={cn(
         "h-5 w-5 flex-shrink-0",
-        isActive ? "text-primary" : "text-muted-foreground"
+        isActive ? "text-foreground" : "text-muted-foreground"
       )} />
       <span className={cn(
         "whitespace-nowrap",

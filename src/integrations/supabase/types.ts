@@ -528,6 +528,41 @@ export type Database = {
         }
         Relationships: []
       }
+      user_preferences: {
+        Row: {
+          id: string
+          user_id: string
+          preference_key: string
+          preference_value: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          preference_key: string
+          preference_value?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          preference_key?: string
+          preference_value?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_preferences_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -872,4 +907,13 @@ export interface SubscriptionSummary {
   yearlyTotal: number
   activeCount: number
   upcomingRenewals: number
+}
+
+export interface UserPreference {
+  id: string
+  user_id: string
+  preference_key: string
+  preference_value: unknown
+  created_at: string
+  updated_at: string
 }

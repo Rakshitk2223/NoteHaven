@@ -126,7 +126,8 @@ All colors MUST be HSL.
 
   /* Zen Garden specific styles */
   .zen-card {
-    @apply bg-card border border-border rounded-lg shadow-sm;
+    @apply bg-card border border-border/60 rounded-lg shadow-sm;
+    background-color: hsl(var(--card) / 0.85);
     transition: transform 0.2s ease-out, box-shadow 0.3s ease-out, border-color 0.2s ease;
   }
 
