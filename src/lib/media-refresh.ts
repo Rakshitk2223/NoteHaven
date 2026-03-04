@@ -3,12 +3,12 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-// API priority order based on media type
+// API priority order based on media type - EXPANDED with MangaDex
 const API_PRIORITY: Record<string, string[]> = {
   'anime': ['anilist', 'jikan', 'tmdb'],
-  'manga': ['anilist', 'jikan', 'tmdb'],
-  'manhwa': ['anilist', 'jikan', 'tmdb'],
-  'manhua': ['anilist', 'jikan', 'tmdb'],
+  'manga': ['anilist', 'jikan', 'mangadex', 'tmdb'],
+  'manhwa': ['anilist', 'jikan', 'mangadex', 'tmdb'],
+  'manhua': ['anilist', 'jikan', 'mangadex', 'tmdb'],
   'movie': ['tmdb', 'omdb'],
   'series': ['tmdb', 'omdb'],
   'kdrama': ['tmdb', 'tvmaze'],
@@ -30,6 +30,8 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
         return await fetchFromAniList(title, normalizedType);
       case 'jikan':
         return await fetchFromJikan(title, normalizedType);
+      case 'mangadex':
+        return await fetchFromMangaDex(title, normalizedType);
       case 'tmdb':
         return await fetchFromTMDB(title, normalizedType);
       case 'omdb':
@@ -110,6 +112,42 @@ async function fetchFromJikan(title: string, type: string): Promise<RefreshResul
   };
 }
 
+// MangaDex API - NEW!
+async function fetchFromMangaDex(title: string, type: string): Promise<RefreshResult | null> {
+  try {
+    // Search for manga
+    const searchResponse = await fetch(
+      `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=5&includes[]=cover_art`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+
+    if (!searchResponse.ok) return null;
+    
+    const searchData = await searchResponse.json();
+    const manga = searchData?.data?.[0];
+    
+    if (!manga) return null;
+    
+    // Get cover art relationship
+    const coverArt = manga.relationships?.find((rel: any) => rel.type === 'cover_art');
+    if (!coverArt?.attributes?.fileName) return null;
+    
+    const coverFileName = coverArt.attributes.fileName;
+    const mangaId = manga.id;
+    
+    // Construct cover URL
+    const coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${coverFileName}`;
+    
+    return {
+      coverImage: coverUrl,
+      apiSource: 'mangadex',
+    };
+  } catch (error) {
+    console.error('MangaDex error:', error);
+    return null;
+  }
+}
+
 // TMDB API
 async function fetchFromTMDB(title: string, type: string): Promise<RefreshResult | null> {
   const tmdbType = type === 'movie' ? 'movie' : 'tv';
@@ -158,7 +196,7 @@ async function fetchFromOMDB(title: string, type: string): Promise<RefreshResult
   };
 }
 
-// Main refresh function
+// Main refresh function - FIXED: Cycles through ALL APIs
 export async function refreshCoverImage(
   title: string,
   type: string,
@@ -169,32 +207,31 @@ export async function refreshCoverImage(
   
   // Determine which API to try next
   const currentIndex = currentApiSource ? priority.indexOf(currentApiSource) : -1;
-  const nextApi = priority[(currentIndex + 1) % priority.length];
   
-  console.log(`🔄 Refreshing cover for "${title}" (${type}) - trying ${nextApi}...`);
+  console.log(`🔄 Refreshing cover for "${title}" (${type})`);
+  console.log(`   Current API: ${currentApiSource || 'none'}`);
+  console.log(`   Priority list: ${priority.join(' → ')}`);
   
-  // Try the next API
-  const result = await fetchFromApi(nextApi, title, type);
-  
-  if (!result) {
-    console.log(`❌ ${nextApi} failed, trying next...`);
-    // Try the one after that
-    const nextNextApi = priority[(currentIndex + 2) % priority.length];
-    const fallbackResult = await fetchFromApi(nextNextApi, title, type);
+  // Try each API in order starting from the next one
+  for (let i = 1; i <= priority.length; i++) {
+    const apiIndex = (currentIndex + i) % priority.length;
+    const apiToTry = priority[apiIndex];
     
-    if (fallbackResult) {
-      await updateMediaMetadata(title, type, fallbackResult);
-      return fallbackResult;
+    console.log(`   Trying ${apiToTry}...`);
+    
+    const result = await fetchFromApi(apiToTry, title, type);
+    
+    if (result) {
+      console.log(`✅ Success! Got cover from ${result.apiSource}`);
+      await updateMediaMetadata(title, type, result);
+      return result;
     }
     
-    return null;
+    console.log(`❌ ${apiToTry} failed`);
   }
   
-  // Update database
-  await updateMediaMetadata(title, type, result);
-  
-  console.log(`✅ Got new cover from ${result.apiSource}`);
-  return result;
+  console.log(`❌ Tried all ${priority.length} APIs, none succeeded`);
+  return null;
 }
 
 // Update database with new cover image
@@ -216,7 +253,7 @@ async function updateMediaMetadata(
     if (error) {
       console.error('Failed to update database:', error);
     } else {
-      console.log('💾 Updated database with new cover');
+      console.log('💾 Updated database with new cover from', newData.apiSource);
     }
   } catch (error) {
     console.error('Database update error:', error);
