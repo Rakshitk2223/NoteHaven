@@ -10,6 +10,7 @@ const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/med
 export interface ImageResult {
   id: number;
   imageUrl: string | null;
+  apiSource?: string; // Track which API provided the image
 }
 
 export interface BatchImageResponse {
@@ -20,12 +21,13 @@ export interface BatchImageResponse {
 }
 
 // Cache key for localStorage
-const getCacheKey = () => `media_images_${new Date().toDateString()}`;
+const getImageCacheKey = () => `media_images_${new Date().toDateString()}`;
+const getSourceCacheKey = () => `media_image_sources_${new Date().toDateString()}`;
 
-// Check localStorage cache
+// Check localStorage cache for images
 function getCachedImages(): Map<number, string> | null {
   try {
-    const cached = localStorage.getItem(getCacheKey());
+    const cached = localStorage.getItem(getImageCacheKey());
     if (cached) {
       const data = JSON.parse(cached);
       console.log('📦 Using localStorage cache:', Object.keys(data).length, 'images');
@@ -37,12 +39,31 @@ function getCachedImages(): Map<number, string> | null {
   return null;
 }
 
+// Check localStorage cache for API sources
+function getCachedApiSources(): Map<number, string> | null {
+  try {
+    const cached = localStorage.getItem(getSourceCacheKey());
+    if (cached) {
+      const data = JSON.parse(cached);
+      return new Map(Object.entries(data).map(([k, v]) => [parseInt(k), v as string]));
+    }
+  } catch (e) {
+    console.error('Source cache read error:', e);
+  }
+  return null;
+}
+
 // Save to localStorage cache
-function cacheImages(images: Map<number, string>) {
+function cacheImages(images: Map<number, string>, apiSources?: Map<number, string>) {
   try {
     const obj = Object.fromEntries(images);
-    localStorage.setItem(getCacheKey(), JSON.stringify(obj));
+    localStorage.setItem(getImageCacheKey(), JSON.stringify(obj));
     console.log('💾 Saved to localStorage cache:', images.size, 'images');
+    
+    if (apiSources) {
+      const sourceObj = Object.fromEntries(apiSources);
+      localStorage.setItem(getSourceCacheKey(), JSON.stringify(sourceObj));
+    }
   } catch (e) {
     console.error('Cache write error:', e);
   }
@@ -51,11 +72,12 @@ function cacheImages(images: Map<number, string>) {
 // Query Supabase directly for ALL items at once (FAST!)
 async function fetchFromSupabaseDatabase(
   items: Array<{ id: number; title: string; type: string }>
-): Promise<Map<number, string>> {
+): Promise<{ images: Map<number, string>; sources: Map<number, string> }> {
   console.log('🔍 Querying Supabase database for', items.length, 'items...');
   
   const startTime = performance.now();
-  const results = new Map<number, string>();
+  const images = new Map<number, string>();
+  const sources = new Map<number, string>();
   
   // Extract titles to search
   const titles = items.map(item => item.title);
@@ -69,42 +91,47 @@ async function fetchFromSupabaseDatabase(
     
     if (error) {
       console.error('Supabase query error:', error);
-      return results;
+      return { images, sources };
     }
     
     // Create a lookup map by title+type
-    const dbMap = new Map<string, string>();
+    const dbMap = new Map<string, { coverImage: string; source: string }>();
     data?.forEach((item: any) => {
       const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
-      dbMap.set(key, item.cover_image);
+      dbMap.set(key, { 
+        coverImage: item.cover_image,
+        source: 'database'
+      });
     });
     
     // Match with requested items
     items.forEach(item => {
       const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
-      const coverImage = dbMap.get(key);
-      if (coverImage) {
-        results.set(item.id, coverImage);
+      const dbItem = dbMap.get(key);
+      if (dbItem) {
+        images.set(item.id, dbItem.coverImage);
+        sources.set(item.id, dbItem.source);
       }
     });
     
     const duration = (performance.now() - startTime).toFixed(0);
-    console.log(`✅ Database query complete: ${results.size}/${items.length} found in ${duration}ms`);
+    console.log(`✅ Database query complete: ${images.size}/${items.length} found in ${duration}ms`);
     
   } catch (error) {
     console.error('Database fetch error:', error);
   }
   
-  return results;
+  return { images, sources };
 }
 
 // Fetch missing items from edge function in PARALLEL batches
 async function fetchMissingItemsFromAPI(
   missingItems: Array<{ id: number; title: string; type: string }>
-): Promise<Map<number, string>> {
-  const results = new Map<number, string>();
+): Promise<{ images: Map<number, string>; sources: Map<number, string> }> {
+  const images = new Map<number, string>();
+  const sources = new Map<number, string>();
   
-  if (missingItems.length === 0) return results;
+  if (missingItems.length === 0) return { images, sources };
   
   console.log(`🌐 Fetching ${missingItems.length} missing items from APIs...`);
   
@@ -128,7 +155,8 @@ async function fetchMissingItemsFromAPI(
         if (data.success && data.results?.[0]?.cover_image) {
           return {
             id: item.id,
-            imageUrl: data.results[0].cover_image
+            imageUrl: data.results[0].cover_image,
+            apiSource: data.source || 'api'
           };
         }
       } catch (error) {
@@ -141,7 +169,8 @@ async function fetchMissingItemsFromAPI(
     
     batchResults.forEach(result => {
       if (result) {
-        results.set(result.id, result.imageUrl);
+        images.set(result.id, result.imageUrl);
+        sources.set(result.id, result.apiSource);
       }
     });
     
@@ -151,9 +180,9 @@ async function fetchMissingItemsFromAPI(
     }
   }
   
-  console.log(`✅ Fetched ${results.size}/${missingItems.length} missing items from APIs`);
+  console.log(`✅ Fetched ${images.size}/${missingItems.length} missing items from APIs`);
   
-  return results;
+  return { images, sources };
 }
 
 // Main function - FAST!
@@ -172,7 +201,9 @@ export async function fetchImagesFromSupabase(
   
   // Step 1: Check localStorage cache first
   const cachedImages = getCachedImages();
+  const cachedSources = getCachedApiSources();
   const cacheHits = new Map<number, string>();
+  const cacheSources = new Map<number, string>();
   const needsFetch: Array<{ id: number; title: string; type: string }> = [];
   
   if (cachedImages) {
@@ -180,6 +211,7 @@ export async function fetchImagesFromSupabase(
       const cached = cachedImages.get(item.id);
       if (cached) {
         cacheHits.set(item.id, cached);
+        cacheSources.set(item.id, cachedSources?.get(item.id) || 'cache');
       } else {
         needsFetch.push(item);
       }
@@ -190,7 +222,7 @@ export async function fetchImagesFromSupabase(
   }
   
   // Step 2: Query Supabase database for non-cached items (ONE query!)
-  const dbImages = await fetchFromSupabaseDatabase(needsFetch);
+  const { images: dbImages, sources: dbSources } = await fetchFromSupabaseDatabase(needsFetch);
   
   // Step 3: Find items still missing
   const stillMissing: Array<{ id: number; title: string; type: string }> = [];
@@ -202,7 +234,7 @@ export async function fetchImagesFromSupabase(
   });
   
   // Step 4: Fetch missing items from external APIs (parallel batches)
-  const apiImages = await fetchMissingItemsFromAPI(stillMissing);
+  const { images: apiImages, sources: apiSources } = await fetchMissingItemsFromAPI(stillMissing);
   fetchedFromAPI = apiImages.size;
   
   // Step 5: Combine all results
@@ -212,16 +244,23 @@ export async function fetchImagesFromSupabase(
     ...apiImages
   ]);
   
+  const allSources = new Map<number, string>([
+    ...cacheSources,
+    ...dbSources,
+    ...apiSources
+  ]);
+  
   // Step 6: Build final results array
   items.forEach(item => {
     results.push({
       id: item.id,
-      imageUrl: allImages.get(item.id) || null
+      imageUrl: allImages.get(item.id) || null,
+      apiSource: allSources.get(item.id) || undefined
     });
   });
   
   // Step 7: Cache results for next time
-  cacheImages(allImages);
+  cacheImages(allImages, allSources);
   
   const totalTime = (performance.now() - startTime).toFixed(0);
   const found = results.filter(r => r.imageUrl).length;

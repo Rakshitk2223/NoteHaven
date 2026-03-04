@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Star, Edit2, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -65,6 +65,13 @@ export const MediaCard = ({
   const [currentApi, setCurrentApi] = useState(apiSource);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { toast } = useToast();
+
+  // Sync apiSource prop with currentApi state when it changes
+  useEffect(() => {
+    if (apiSource && apiSource !== currentApi) {
+      setCurrentApi(apiSource);
+    }
+  }, [apiSource]);
 
   const progressText = current_episode 
     ? `S${current_season || 1} E${current_episode}`

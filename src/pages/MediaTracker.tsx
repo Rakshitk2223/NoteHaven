@@ -144,6 +144,7 @@ const MediaTracker = () => {
 
   // Image loading state - simple MongoDB-only fetch
   const [imageUrls, setImageUrls] = useState<Map<number, string | null>>(new Map());
+  const [imageApiSources, setImageApiSources] = useState<Map<number, string>>(new Map());
   const [isLoadingImages, setIsLoadingImages] = useState(false);
 
   // Save custom groups to localStorage
@@ -267,10 +268,15 @@ const MediaTracker = () => {
           );
           
           const newUrlMap = new Map<number, string | null>();
+          const newSourceMap = new Map<number, string>();
           priorityResponse.results.forEach(result => {
             newUrlMap.set(result.id, result.imageUrl);
+            if (result.apiSource) {
+              newSourceMap.set(result.id, result.apiSource);
+            }
           });
           setImageUrls(prev => new Map([...prev, ...newUrlMap]));
+          setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
           console.log(`✅ Priority images loaded: ${priorityResponse.found}/${priorityItems.length}`);
         } catch (error) {
           console.error('❌ Failed to load priority images:', error);
@@ -286,10 +292,15 @@ const MediaTracker = () => {
           );
           
           const newUrlMap = new Map<number, string | null>();
+          const newSourceMap = new Map<number, string>();
           backgroundResponse.results.forEach(result => {
             newUrlMap.set(result.id, result.imageUrl);
+            if (result.apiSource) {
+              newSourceMap.set(result.id, result.apiSource);
+            }
           });
           setImageUrls(prev => new Map([...prev, ...newUrlMap]));
+          setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
           console.log(`✅ Background images loaded: ${backgroundResponse.found}/${backgroundItems.length}`);
         } catch (error) {
           console.error('❌ Failed to load background images:', error);
@@ -990,9 +1001,14 @@ const MediaTracker = () => {
                 current_episode={item.current_episode}
                 current_chapter={item.current_chapter}
                 imageUrl={imageUrls.get(item.id)}
+                apiSource={imageApiSources.get(item.id)}
                 isLoading={isLoadingImages && !imageUrls.has(item.id)}
                 onEdit={() => handleEditMedia(item)}
                 onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
+                onImageUpdate={(newImageUrl, newApiSource) => {
+                  setImageUrls(prev => new Map([...prev, [item.id, newImageUrl]]));
+                  setImageApiSources(prev => new Map([...prev, [item.id, newApiSource]]));
+                }}
               />
             ))}
           </div>
