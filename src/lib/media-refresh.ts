@@ -3,12 +3,12 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-// API priority order based on media type - EXPANDED with MangaDex
+// API priority order based on media type
 const API_PRIORITY: Record<string, string[]> = {
   'anime': ['anilist', 'jikan', 'tmdb'],
-  'manga': ['anilist', 'jikan', 'mangadex', 'tmdb'],
-  'manhwa': ['anilist', 'jikan', 'mangadex', 'tmdb'],
-  'manhua': ['anilist', 'jikan', 'mangadex', 'tmdb'],
+  'manga': ['anilist', 'jikan', 'kitsu', 'tmdb'],
+  'manhwa': ['anilist', 'jikan', 'kitsu', 'tmdb'],
+  'manhua': ['anilist', 'jikan', 'kitsu', 'tmdb'],
   'movie': ['tmdb', 'omdb'],
   'series': ['tmdb', 'omdb'],
   'kdrama': ['tmdb', 'tvmaze'],
@@ -30,8 +30,8 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
         return await fetchFromAniList(title, normalizedType);
       case 'jikan':
         return await fetchFromJikan(title, normalizedType);
-      case 'mangadex':
-        return await fetchFromMangaDex(title, normalizedType);
+      case 'kitsu':
+        return await fetchFromKitsu(title, normalizedType);
       case 'tmdb':
         return await fetchFromTMDB(title, normalizedType);
       case 'omdb':
@@ -112,38 +112,35 @@ async function fetchFromJikan(title: string, type: string): Promise<RefreshResul
   };
 }
 
-// MangaDex API - NEW!
-async function fetchFromMangaDex(title: string, type: string): Promise<RefreshResult | null> {
+// Kitsu API
+async function fetchFromKitsu(title: string, type: string): Promise<RefreshResult | null> {
   try {
-    // Search for manga
-    const searchResponse = await fetch(
-      `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=5&includes[]=cover_art`,
-      { signal: AbortSignal.timeout(5000) }
+    const kitsuType = type === 'anime' ? 'anime' : 'manga';
+    
+    const response = await fetch(
+      `https://kitsu.io/api/edge/${kitsuType}?filter[text]=${encodeURIComponent(title)}&page[limit]=1`,
+      {
+        headers: {
+          'Accept': 'application/vnd.api+json',
+          'Content-Type': 'application/vnd.api+json',
+        },
+        signal: AbortSignal.timeout(5000),
+      }
     );
 
-    if (!searchResponse.ok) return null;
+    if (!response.ok) return null;
     
-    const searchData = await searchResponse.json();
-    const manga = searchData?.data?.[0];
+    const data = await response.json();
+    const result = data?.data?.[0];
     
-    if (!manga) return null;
-    
-    // Get cover art relationship
-    const coverArt = manga.relationships?.find((rel: any) => rel.type === 'cover_art');
-    if (!coverArt?.attributes?.fileName) return null;
-    
-    const coverFileName = coverArt.attributes.fileName;
-    const mangaId = manga.id;
-    
-    // Construct cover URL
-    const coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${coverFileName}`;
+    if (!result?.attributes?.posterImage?.original) return null;
     
     return {
-      coverImage: coverUrl,
-      apiSource: 'mangadex',
+      coverImage: result.attributes.posterImage.original,
+      apiSource: 'kitsu',
     };
   } catch (error) {
-    console.error('MangaDex error:', error);
+    console.error('Kitsu error:', error);
     return null;
   }
 }
