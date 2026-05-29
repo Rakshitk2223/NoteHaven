@@ -32,8 +32,12 @@ api/dist
 
 # Opencode configuration
 /opencode
+/.opencode/
 
 # Extras folder with cached data
 /Extras/
 
 /mangabuddy
+
+# Supabase local temp files
+/supabase/.temp/
