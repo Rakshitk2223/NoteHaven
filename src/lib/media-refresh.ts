@@ -268,15 +268,21 @@ async function updateMediaTracker(
   try {
     // Update media_tracker.cover_image if we have the ID
     if (mediaId) {
-      const { error: trackerError } = await supabase
-        .from('media_tracker')
-        .update({ cover_image: newData.coverImage })
-        .eq('id', mediaId);
-      
-      if (trackerError) {
-        console.error('Failed to update media_tracker:', trackerError);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.error('Failed to update media_tracker: user not authenticated');
       } else {
-        console.log('💾 Updated media_tracker.cover_image');
+        const { error: trackerError } = await supabase
+          .from('media_tracker')
+          .update({ cover_image: newData.coverImage })
+          .eq('id', mediaId)
+          .eq('user_id', user.id);
+
+        if (trackerError) {
+          console.error('Failed to update media_tracker:', trackerError);
+        } else {
+          console.log('💾 Updated media_tracker.cover_image');
+        }
       }
     }
 

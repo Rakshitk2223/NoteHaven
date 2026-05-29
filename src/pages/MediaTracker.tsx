@@ -1021,26 +1021,27 @@ const MediaTracker = () => {
           </h2>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {groupedByStatus.groups[statusKey].map((item) => (
-              <MediaCard
-                key={item.id}
-                id={item.id}
-                title={item.title}
-                type={item.type}
-                status={item.status}
-                rating={item.rating}
-                current_season={item.current_season}
-                current_episode={item.current_episode}
-                current_chapter={item.current_chapter}
-                imageUrl={imageUrls.get(item.id)}
-                apiSource={imageApiSources.get(item.id)}
-                isLoading={isLoadingImages && !imageUrls.has(item.id)}
-                onEdit={() => handleEditMedia(item)}
-                onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
-                onImageUpdate={(newImageUrl, newApiSource) => {
-                  setImageUrls(prev => new Map([...prev, [item.id, newImageUrl]]));
-                  setImageApiSources(prev => new Map([...prev, [item.id, newApiSource]]));
-                }}
-              />
+                <MediaCard
+                  key={item.id}
+                  id={item.id}
+                  title={item.title}
+                  type={item.type}
+                  status={item.status}
+                  rating={item.rating}
+                  current_season={item.current_season}
+                  current_episode={item.current_episode}
+                  current_chapter={item.current_chapter}
+                  imageUrl={imageUrls.get(item.id)}
+                  apiSource={imageApiSources.get(item.id)}
+                  isLoading={isLoadingImages && !imageUrls.has(item.id)}
+                  onEdit={() => handleEditMedia(item)}
+                  onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
+                  onVisibleChange={scheduleImageLoad}
+                  onImageUpdate={(newImageUrl, newApiSource) => {
+                    setImageUrls(prev => new Map([...prev, [item.id, newImageUrl]]));
+                    setImageApiSources(prev => new Map([...prev, [item.id, newApiSource]]));
+                  }}
+                />
             ))}
           </div>
         </div>

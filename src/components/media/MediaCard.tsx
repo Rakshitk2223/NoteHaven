@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useInView } from 'react-intersection-observer';
 import { Star, Edit2, Trash2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,7 @@ interface MediaCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onImageUpdate?: (newImageUrl: string, newApiSource: string) => void; // Callback when image is refreshed
+  onVisibleChange?: (id: number, visible: boolean) => void;
 }
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
@@ -57,6 +59,7 @@ export const MediaCard = ({
   onEdit,
   onDelete,
   onImageUpdate,
+  onVisibleChange,
 }: MediaCardProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -65,6 +68,7 @@ export const MediaCard = ({
   const [currentApi, setCurrentApi] = useState(apiSource);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { toast } = useToast();
+  const { ref, inView } = useInView({ rootMargin: '200px' });
 
   // Sync apiSource prop with currentApi state when it changes
   useEffect(() => {
@@ -72,6 +76,10 @@ export const MediaCard = ({
       setCurrentApi(apiSource);
     }
   }, [apiSource]);
+
+  useEffect(() => {
+    onVisibleChange?.(id, inView);
+  }, [id, inView, onVisibleChange]);
 
   const progressText = current_episode 
     ? `S${current_season || 1} E${current_episode}`
@@ -154,6 +162,7 @@ export const MediaCard = ({
 
   return (
     <div
+      ref={ref}
       className="group relative"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
