@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
 import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, ChevronDown } from "lucide-react";
@@ -42,7 +42,7 @@ import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
 import { CustomGroupBuilder, type CustomGroup, itemBelongsToCustomGroup } from "@/components/media/CustomGroupBuilder";
-import { fetchImagesFromMongoDB } from "@/lib/simple-image-fetcher";
+import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 
 interface MediaItem {
   id: number;
@@ -55,6 +55,7 @@ interface MediaItem {
   current_season?: number;
   current_episode?: number;
   current_chapter?: number;
+  cover_image?: string;
   created_at: string;
   updated_at?: string;
   tags?: Tag[];
@@ -65,6 +66,28 @@ const VALID_TYPES = ['Movie', 'Series', 'Anime', 'Manga', 'Manhwa', 'Manhua', 'K
 const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 'Completed'] as const;
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
+
+const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
+
+async function fetchCoverImage(title: string, type: string): Promise<string | null> {
+  try {
+    const url = new URL(EDGE_FUNCTION_URL);
+    url.searchParams.set('q', title);
+    url.searchParams.set('type', type.toLowerCase());
+    url.searchParams.set('limit', '1');
+
+    const response = await fetch(url.toString());
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data.success && data.results?.[0]?.cover_image) {
+      return data.results[0].cover_image;
+    }
+  } catch (error) {
+    console.error(`Failed to fetch cover for ${title}:`, error);
+  }
+  return null;
+}
 
 // Normalize media item to ensure valid types and statuses
 const normalizeMediaItem = (item: MediaItem): MediaItem => {
@@ -142,7 +165,7 @@ const MediaTracker = () => {
   });
   const [activeGroupId, setActiveGroupId] = useState<string | 'all'>('all');
 
-  // Image loading state - simple MongoDB-only fetch
+  // Image loading state - direct Supabase fetch
   const [imageUrls, setImageUrls] = useState<Map<number, string | null>>(new Map());
   const [imageApiSources, setImageApiSources] = useState<Map<number, string>>(new Map());
   const [isLoadingImages, setIsLoadingImages] = useState(false);
@@ -244,73 +267,60 @@ const MediaTracker = () => {
     [data]
   );
 
-  // Preload all images when media items are loaded
-  // Uses client-side fetching from Jikan/AniList (MangaBuddy pattern)
-  // Priority image loading - load visible items first, then rest in background
+  // Lazy loading: only fetch covers for visible items
+  const visibleItemsRef = useRef<Set<number>>(new Set());
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const fetchVisibleImages = useCallback(() => {
+    if (mediaItems.length === 0) return;
+
+    const visible = mediaItems.filter(item => visibleItemsRef.current.has(item.id));
+    const unloaded = visible.filter(item => !imageUrls.has(item.id));
+
+    if (unloaded.length === 0) return;
+
+    console.log(` lazy loading ${unloaded.length} visible covers...`);
+    fetchImagesFromSupabaseBatch(
+      unloaded.map(item => ({ id: item.id, title: item.title, type: item.type }))
+    ).then((response) => {
+      const newUrlMap = new Map<number, string | null>();
+      const newSourceMap = new Map<number, string>();
+      response.results.forEach(result => {
+        newUrlMap.set(result.id, result.imageUrl);
+        if (result.apiSource) newSourceMap.set(result.id, result.apiSource);
+      });
+      setImageUrls(prev => new Map([...prev, ...newUrlMap]));
+      setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
+    }).catch(err => console.error('Lazy load error:', err));
+  }, [mediaItems, imageUrls]);
+
+  const scheduleImageLoad = useCallback((itemId: number, visible: boolean) => {
+    if (visible) {
+      visibleItemsRef.current.add(itemId);
+    } else {
+      visibleItemsRef.current.delete(itemId);
+    }
+    if (loadTimerRef.current) clearTimeout(loadTimerRef.current);
+    loadTimerRef.current = setTimeout(fetchVisibleImages, 150);
+  }, [fetchVisibleImages]);
+
+  // Initial load: fetch first 30 items immediately
   useEffect(() => {
-    const loadImagesPriority = async () => {
-      if (mediaItems.length === 0 || isLoadingImages) return;
-      
-      setIsLoadingImages(true);
-      console.log(`🚀 Loading ${mediaItems.length} cover images with priority...`);
+    if (mediaItems.length === 0 || imageUrls.size > 0) return;
 
-      // Split items into priority (first 60) and background (rest)
-      const PRIORITY_COUNT = 60;
-      const priorityItems = mediaItems.slice(0, PRIORITY_COUNT);
-      const backgroundItems = mediaItems.slice(PRIORITY_COUNT);
-
-      // Load priority items first (visible on initial screen)
-      if (priorityItems.length > 0) {
-        console.log(`⚡ Loading ${priorityItems.length} priority images (visible)...`);
-        try {
-          const priorityResponse = await fetchImagesFromMongoDB(
-            priorityItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
-          );
-          
-          const newUrlMap = new Map<number, string | null>();
-          const newSourceMap = new Map<number, string>();
-          priorityResponse.results.forEach(result => {
-            newUrlMap.set(result.id, result.imageUrl);
-            if (result.apiSource) {
-              newSourceMap.set(result.id, result.apiSource);
-            }
-          });
-          setImageUrls(prev => new Map([...prev, ...newUrlMap]));
-          setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
-          console.log(`✅ Priority images loaded: ${priorityResponse.found}/${priorityItems.length}`);
-        } catch (error) {
-          console.error('❌ Failed to load priority images:', error);
-        }
-      }
-
-      // Then load background items
-      if (backgroundItems.length > 0) {
-        console.log(`🔄 Loading ${backgroundItems.length} background images...`);
-        try {
-          const backgroundResponse = await fetchImagesFromMongoDB(
-            backgroundItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
-          );
-          
-          const newUrlMap = new Map<number, string | null>();
-          const newSourceMap = new Map<number, string>();
-          backgroundResponse.results.forEach(result => {
-            newUrlMap.set(result.id, result.imageUrl);
-            if (result.apiSource) {
-              newSourceMap.set(result.id, result.apiSource);
-            }
-          });
-          setImageUrls(prev => new Map([...prev, ...newUrlMap]));
-          setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
-          console.log(`✅ Background images loaded: ${backgroundResponse.found}/${backgroundItems.length}`);
-        } catch (error) {
-          console.error('❌ Failed to load background images:', error);
-        }
-      }
-
-      setIsLoadingImages(false);
-    };
-
-    loadImagesPriority();
+    const initialItems = mediaItems.slice(0, 30);
+    fetchImagesFromSupabaseBatch(
+      initialItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
+    ).then((response) => {
+      const newUrlMap = new Map<number, string | null>();
+      const newSourceMap = new Map<number, string>();
+      response.results.forEach(result => {
+        newUrlMap.set(result.id, result.imageUrl);
+        if (result.apiSource) newSourceMap.set(result.id, result.apiSource);
+      });
+      setImageUrls(prev => new Map([...prev, ...newUrlMap]));
+      setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
+    }).catch(err => console.error('Initial load error:', err));
   }, [mediaItems]);
 
   // Total count from all pages
@@ -323,22 +333,27 @@ const MediaTracker = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return { all: 0 };
 
-      // Get total count
-      const { count: allCount } = await supabase
+      // Single query with GROUP BY for all types
+      const { data, error } = await supabase
         .from('media_tracker')
-        .select('*', { count: 'exact', head: true })
+        .select('type')
         .eq('user_id', user.id);
 
-      // Get count for each custom group
-      const groupCounts: Record<string, number> = { all: allCount ?? 0 };
-      
+      if (error || !data) return { all: 0 };
+
+      // Count by type
+      const typeCounts: Record<string, number> = {};
+      data.forEach((row) => {
+        typeCounts[row.type] = (typeCounts[row.type] || 0) + 1;
+      });
+
+      const groupCounts: Record<string, number> = { all: data.length };
       for (const group of customGroups) {
-        const { count } = await supabase
-          .from('media_tracker')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .in('type', group.types);
-        groupCounts[group.id] = count ?? 0;
+        let count = 0;
+        for (const t of group.types) {
+          count += typeCounts[t] || 0;
+        }
+        groupCounts[group.id] = count;
       }
 
       return groupCounts;
@@ -682,6 +697,22 @@ const MediaTracker = () => {
 
       if (error) {
         throw error;
+      }
+
+      // Fetch and store cover image in background (non-blocking)
+      if (newMedia) {
+        fetchCoverImage(formData.title, formData.type).then((coverUrl) => {
+          if (coverUrl) {
+            supabase
+              .from('media_tracker')
+              .update({ cover_image: coverUrl })
+              .eq('id', newMedia.id)
+              .then(() => {
+                // Update local state
+                setImageUrls((prev) => new Map([...prev, [newMedia.id, coverUrl]]));
+              });
+          }
+        });
       }
 
       // Save tags for new media item

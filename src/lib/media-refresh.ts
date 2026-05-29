@@ -3,12 +3,14 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
+const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
+
 // API priority order based on media type
 const API_PRIORITY: Record<string, string[]> = {
   'anime': ['anilist', 'jikan', 'tmdb'],
   'manga': ['anilist', 'jikan', 'kitsu', 'tmdb'],
-  'manhwa': ['anilist', 'jikan', 'kitsu', 'tmdb'],
-  'manhua': ['anilist', 'jikan', 'kitsu', 'tmdb'],
+  'manhwa': ['mangaupdates', 'anilist', 'jikan', 'kitsu', 'tmdb'],
+  'manhua': ['mangaupdates', 'anilist', 'jikan', 'kitsu', 'tmdb'],
   'movie': ['tmdb', 'omdb'],
   'series': ['tmdb', 'omdb'],
   'kdrama': ['tmdb', 'tvmaze'],
@@ -18,6 +20,7 @@ const API_PRIORITY: Record<string, string[]> = {
 interface RefreshResult {
   coverImage: string;
   apiSource: string;
+  id?: number;
 }
 
 // Fetch from specific API
@@ -26,6 +29,8 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
   
   try {
     switch (api) {
+      case 'mangaupdates':
+        return await fetchFromMangaUpdates(title, normalizedType);
       case 'anilist':
         return await fetchFromAniList(title, normalizedType);
       case 'jikan':
@@ -43,6 +48,26 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
     console.error(`Error fetching from ${api}:`, error);
     return null;
   }
+}
+
+async function fetchFromMangaUpdates(title: string, type: string): Promise<RefreshResult | null> {
+  // MangaUpdates does not currently provide CORS headers. Use our edge function as a server-side proxy.
+  const response = await fetch(
+    `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(title)}&type=${encodeURIComponent(type)}&limit=1`,
+    { signal: AbortSignal.timeout(5000) }
+  );
+
+  if (!response.ok) return null;
+
+  const data = await response.json();
+  const cover = data?.results?.[0]?.cover_image;
+  if (!data?.success || !cover) return null;
+
+  const source = typeof data?.source === 'string' ? data.source.toLowerCase() : '';
+  return {
+    coverImage: cover,
+    apiSource: source.includes('mangaupdates') ? 'mangaupdates' : 'mangaupdates',
+  };
 }
 
 // AniList API
@@ -197,7 +222,8 @@ async function fetchFromOMDB(title: string, type: string): Promise<RefreshResult
 export async function refreshCoverImage(
   title: string,
   type: string,
-  currentApiSource?: string
+  currentApiSource?: string,
+  mediaId?: number
 ): Promise<{ coverImage: string; apiSource: string } | null> {
   const normalizedType = type.toLowerCase();
   const priority = API_PRIORITY[normalizedType] || ['anilist', 'tmdb'];
@@ -220,7 +246,8 @@ export async function refreshCoverImage(
     
     if (result) {
       console.log(`✅ Success! Got cover from ${result.apiSource}`);
-      await updateMediaMetadata(title, type, result);
+      await updateMediaTracker(title, type, result, mediaId);
+      invalidateImageCache(mediaId);
       return result;
     }
     
@@ -231,15 +258,31 @@ export async function refreshCoverImage(
   return null;
 }
 
-// Update database with new cover image
-async function updateMediaMetadata(
+// Update media_tracker.cover_image (primary source) and media_metadata
+async function updateMediaTracker(
   title: string,
   type: string,
-  newData: { coverImage: string; apiSource: string }
+  newData: { coverImage: string; apiSource: string },
+  mediaId?: number
 ) {
   try {
-    const { error } = await supabase
-      .from('media_metadata' as any)
+    // Update media_tracker.cover_image if we have the ID
+    if (mediaId) {
+      const { error: trackerError } = await supabase
+        .from('media_tracker')
+        .update({ cover_image: newData.coverImage })
+        .eq('id', mediaId);
+      
+      if (trackerError) {
+        console.error('Failed to update media_tracker:', trackerError);
+      } else {
+        console.log('💾 Updated media_tracker.cover_image');
+      }
+    }
+
+    // Also update media_metadata for API cycling
+    const { error: metaError } = await supabase
+      .from('media_metadata')
       .upsert({
         title,
         type: type.toLowerCase(),
@@ -247,12 +290,40 @@ async function updateMediaMetadata(
         last_updated: new Date().toISOString(),
       }, { onConflict: 'title,type' });
     
-    if (error) {
-      console.error('Failed to update database:', error);
+    if (metaError) {
+      console.error('Failed to update media_metadata:', metaError);
     } else {
-      console.log('💾 Updated database with new cover from', newData.apiSource);
+      console.log('💾 Updated media_metadata with new cover from', newData.apiSource);
     }
   } catch (error) {
     console.error('Database update error:', error);
+  }
+}
+
+// Invalidate localStorage cache for a specific media item
+function invalidateImageCache(mediaId?: number) {
+  if (!mediaId) return;
+  
+  try {
+    const imageCacheKey = 'media_images_v1';
+    const sourceCacheKey = 'media_image_sources_v1';
+
+    const cachedImages = localStorage.getItem(imageCacheKey);
+    if (cachedImages) {
+      const data = JSON.parse(cachedImages);
+      delete data[mediaId];
+      localStorage.setItem(imageCacheKey, JSON.stringify(data));
+    }
+
+    const cachedSources = localStorage.getItem(sourceCacheKey);
+    if (cachedSources) {
+      const data = JSON.parse(cachedSources);
+      delete data[mediaId];
+      localStorage.setItem(sourceCacheKey, JSON.stringify(data));
+    }
+
+    console.log(`🗑️ Invalidated image cache for item ${mediaId}`);
+  } catch (error) {
+    console.error('Cache invalidation error:', error);
   }
 }

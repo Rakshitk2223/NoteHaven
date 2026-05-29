@@ -20,6 +20,48 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   });
 }
 
+// MangaUpdates API for manga/manhwa/manhua
+async function searchMangaUpdates(query: string): Promise<any[]> {
+  try {
+    const response = await fetch('https://api.mangaupdates.com/v1/series/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ search: query, stype: 'title', perpage: 5, page: 1 }),
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const results = data?.results;
+    if (!Array.isArray(results)) return [];
+
+    return results.map((r: any) => {
+      const record = r?.record;
+      const image = record?.image?.url?.original || record?.image?.url?.thumb || '';
+      return {
+        title: record?.title || r?.hit_title || query,
+        type: record?.type ? String(record.type).toLowerCase() : 'manga',
+        cover_image: image,
+        banner_image: null,
+        description: (record?.description || '').substring(0, 500),
+        rating: 0,
+        status: 'upcoming',
+        episodes: null,
+        chapters: null,
+        anilist_id: null,
+        tmdb_id: null,
+        mal_id: null,
+      };
+    }).filter((x: any) => x.cover_image);
+  } catch (error) {
+    console.error('MangaUpdates error:', error);
+    return [];
+  }
+}
+
 // AniList GraphQL API - FIXED: Uses Page instead of Media for fast search
 async function searchAniList(query: string, type: string): Promise<any[]> {
   try {
@@ -203,6 +245,108 @@ function determineType(item: any, searchType: string): string {
   return 'series';
 }
 
+// Batch search: accept POST with { items: [{id, title, type}] }
+async function handleBatchSearch(req: Request, supabase: any): Promise<Response> {
+  const body = await req.json();
+  const items: Array<{ id: number; title: string; type: string }> = body.items;
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'items array is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Check media_metadata for all titles in ONE query
+  const titles = items.map(i => i.title);
+  const { data: cached } = await supabase
+    .from('media_metadata')
+    .select('title, type, cover_image')
+    .in('title', titles);
+
+  const cacheMap = new Map<string, string>();
+  cached?.forEach((row: any) => {
+    const key = `${row.title.toLowerCase()}_${row.type.toLowerCase()}`;
+    cacheMap.set(key, row.cover_image);
+  });
+
+  const results: Array<{ id: number; cover_image: string | null }> = [];
+  const missing: Array<{ id: number; title: string; type: string }> = [];
+
+  items.forEach(item => {
+    const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
+    const cover = cacheMap.get(key);
+    if (cover) {
+      results.push({ id: item.id, cover_image: cover });
+    } else {
+      missing.push(item);
+    }
+  });
+
+  // Fetch missing items from external APIs (parallel, max 20 at a time)
+  const tmdbKey = Deno.env.get('TMDB_API_KEY');
+  const fetchBatch = missing.slice(0, 20);
+
+  const apiPromises = fetchBatch.map(async (item) => {
+    const normalizedType = item.type.toLowerCase();
+    let apis: Promise<any[]>[] = [];
+
+    if (normalizedType === 'anime' || normalizedType === 'manga') {
+      apis = [
+        withTimeout(searchAniList(item.title, normalizedType), 3000, 'AniList'),
+        withTimeout(searchJikan(item.title, normalizedType), 3000, 'Jikan'),
+      ];
+
+      if (normalizedType === 'manga') {
+        apis.unshift(withTimeout(searchMangaUpdates(item.title), 4000, 'MangaUpdates'));
+      }
+    } else if (['movie', 'series', 'kdrama', 'jdrama'].includes(normalizedType)) {
+      apis = [withTimeout(searchTMDB(item.title, normalizedType, tmdbKey || ''), 3000, 'TMDB')];
+    } else if (normalizedType === 'manhwa' || normalizedType === 'manhua') {
+      apis = [
+        withTimeout(searchMangaUpdates(item.title), 4000, 'MangaUpdates'),
+        withTimeout(searchJikan(item.title, 'manga'), 3000, 'Jikan'),
+        withTimeout(searchAniList(item.title, 'manga'), 3000, 'AniList'),
+      ];
+    } else {
+      apis = [
+        withTimeout(searchAniList(item.title, 'anime'), 3000, 'AniList'),
+        withTimeout(searchTMDB(item.title, 'tv', tmdbKey || ''), 3000, 'TMDB'),
+      ];
+    }
+
+    const apiResults = await Promise.allSettled(apis);
+    let coverImage: string | null = null;
+
+    for (const result of apiResults) {
+      if (result.status === 'fulfilled' && result.value?.length > 0) {
+        coverImage = result.value[0].cover_image || null;
+        if (coverImage) break;
+      }
+    }
+
+    if (coverImage) {
+      supabase.from('media_metadata').upsert({
+        title: item.title, type: normalizedType, cover_image: coverImage,
+      }, { onConflict: 'title,type' }).then(() => {}).catch(() => {});
+    }
+
+    return { id: item.id, cover_image: coverImage };
+  });
+
+  const apiResults = await Promise.allSettled(apiPromises);
+  apiResults.forEach(result => {
+    if (result.status === 'fulfilled' && result.value.cover_image) {
+      results.push(result.value);
+    }
+  });
+
+  return new Response(
+    JSON.stringify({ success: true, results }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -210,10 +354,20 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Create Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
     const { searchParams } = new URL(req.url);
     const query = searchParams.get('q');
     const type = searchParams.get('type');
     const limit = parseInt(searchParams.get('limit') || '10');
+
+    // Batch endpoint: POST with { items: [...] }
+    if (req.method === 'POST' && !query) {
+      return await handleBatchSearch(req, supabase);
+    }
 
     if (!query) {
       return new Response(
@@ -221,11 +375,6 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    // Create Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // FIXED: Single database query with optional type filter
     const dbQuery = supabase
@@ -266,16 +415,27 @@ Deno.serve(async (req) => {
     let apiPromises: Promise<any[]>[] = [];
     
     if (normalizedType === 'anime' || normalizedType === 'manga' || !type) {
-      // For anime/manga or no type: search AniList + Jikan
+      // For anime/manga or no type: search AniList + Jikan (+ MangaUpdates for manga)
       const searchType = normalizedType || 'anime';
       apiPromises = [
         withTimeout(searchAniList(query, searchType), 3000, 'AniList'),
         withTimeout(searchJikan(query, searchType), 3000, 'Jikan'),
       ];
+
+      if (searchType === 'manga') {
+        apiPromises.push(withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'));
+      }
     } else if (['movie', 'series', 'kdrama', 'jdrama'].includes(normalizedType || '')) {
       // For movies/series: search TMDB
       apiPromises = [
         withTimeout(searchTMDB(query, normalizedType, tmdbKey || ''), 3000, 'TMDB'),
+      ];
+    } else if (['manhwa', 'manhua'].includes(normalizedType || '')) {
+      // For manhwa/manhua: MangaUpdates first, then broader manga sources
+      apiPromises = [
+        withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'),
+        withTimeout(searchJikan(query, 'manga'), 3000, 'Jikan'),
+        withTimeout(searchAniList(query, 'manga'), 3000, 'AniList'),
       ];
     } else {
       // Fallback: try all APIs

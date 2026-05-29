@@ -28,10 +28,7 @@ Personal productivity & media companion built with React + TypeScript + Vite + S
 
 ## Architecture
 
-**Before:** Frontend → Express API → MongoDB (images) + Supabase (auth/data)  
-**After:** Frontend → Supabase Edge Function → Supabase DB (everything!)
-
-All data including cover images are now stored in Supabase. No separate backend hosting needed!
+Frontend → Supabase Edge Function → Supabase DB (everything)
 
 ## Prerequisites
 
@@ -160,10 +157,10 @@ CREATE POLICY "Allow public read access"
 ## Media Cover Images
 
 Cover images are fetched automatically using this cascade:
-1. **Check Supabase** - Fast database lookup (653+ items cached)
-2. **AniList API** - Primary source for anime/manga (no key needed)
-3. **Jikan API** - Fallback for anime/manga (no key needed)
-4. **TMDB API** - For movies/series (API key required)
+1. **Check Supabase** - Fast database lookup
+2. **AniList/Jikan** - Anime/manga sources
+3. **MangaUpdates** - Manhwa/Manhua/Manga
+4. **TMDB** - Movies/series (API key required)
 
 All newly fetched images are saved to Supabase for future requests.
 
@@ -206,30 +203,9 @@ curl "https://your-project.supabase.co/functions/v1/media-search?q=naruto&type=a
 2. Clear localStorage and sign in again
 3. Check RLS policies are correct
 
-## Migration from Old Architecture
+## Cost
 
-If you're migrating from the Express + MongoDB setup:
-
-1. ✅ Data already migrated to Supabase (653 media items)
-2. ✅ Edge function deployed
-3. ✅ Frontend updated to use Supabase
-4. 🗑️ Delete old `api/` folder (already done)
-5. 🗑️ Delete MongoDB Atlas cluster (do this manually to save money)
-
-See `MIGRATION_COMPLETE.md` for detailed migration notes.
-
-## Cost Savings
-
-**Old Architecture:**
-- Frontend hosting (Netlify/Vercel) - Free tier
-- Backend hosting (Render/Railway) - $5-10/month
-- MongoDB Atlas - $0-5/month
-
-**New Architecture:**
-- Frontend hosting (Netlify/Vercel) - Free tier
-- Supabase - Free tier (using ~2MB of 500MB storage)
-
-**Savings:** $5-15/month
+Primary cost is Supabase usage. External API keys are optional.
 
 ## Contributing
 

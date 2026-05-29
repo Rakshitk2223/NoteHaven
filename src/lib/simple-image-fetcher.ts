@@ -20,9 +20,10 @@ export interface BatchImageResponse {
   results: ImageResult[];
 }
 
-// Cache key for localStorage
-const getImageCacheKey = () => `media_images_${new Date().toDateString()}`;
-const getSourceCacheKey = () => `media_image_sources_${new Date().toDateString()}`;
+// Cache key for localStorage (version-based, not date-based)
+const IMAGE_CACHE_VERSION = 'v1';
+const getImageCacheKey = () => `media_images_${IMAGE_CACHE_VERSION}`;
+const getSourceCacheKey = () => `media_image_sources_${IMAGE_CACHE_VERSION}`;
 
 // Check localStorage cache for images
 function getCachedImages(): Map<number, string> | null {
@@ -69,58 +70,70 @@ function cacheImages(images: Map<number, string>, apiSources?: Map<number, strin
   }
 }
 
-// Query Supabase directly for ALL items at once (FAST!)
-async function fetchFromSupabaseDatabase(
+// Step 1: Check media_tracker.cover_image directly (FASTEST - no cross-table lookup)
+async function fetchFromMediaTracker(
+  items: Array<{ id: number; title: string; type: string }>
+): Promise<{ images: Map<number, string>; found: Set<number> }> {
+  const images = new Map<number, string>();
+  const found = new Set<number>();
+  if (items.length === 0) return { images, found };
+
+  try {
+    const { data, error } = await supabase
+      .from('media_tracker' as any)
+      .select('id, cover_image')
+      .in('id', items.map(i => i.id))
+      .not('cover_image', 'is', null);
+
+    if (error) return { images, found };
+
+    data?.forEach((row: any) => {
+      if (row.cover_image) {
+        images.set(row.id, row.cover_image);
+        found.add(row.id);
+      }
+    });
+    console.log(`✅ media_tracker cover_image: ${images.size}/${items.length} found`);
+  } catch (error) {
+    console.error('media_tracker fetch error:', error);
+  }
+  return { images, found };
+}
+
+// Step 2: Query media_metadata for items still missing (ONE query)
+async function fetchFromMediaMetadata(
   items: Array<{ id: number; title: string; type: string }>
 ): Promise<{ images: Map<number, string>; sources: Map<number, string> }> {
-  console.log('🔍 Querying Supabase database for', items.length, 'items...');
-  
-  const startTime = performance.now();
   const images = new Map<number, string>();
   const sources = new Map<number, string>();
-  
-  // Extract titles to search
-  const titles = items.map(item => item.title);
-  
+  if (items.length === 0) return { images, sources };
+
   try {
-    // Query all matching titles in ONE database call
     const { data, error } = await supabase
       .from('media_metadata' as any)
       .select('title, type, cover_image')
-      .in('title', titles);
-    
-    if (error) {
-      console.error('Supabase query error:', error);
-      return { images, sources };
-    }
-    
-    // Create a lookup map by title+type
-    const dbMap = new Map<string, { coverImage: string; source: string }>();
+      .in('title', items.map(i => i.title));
+
+    if (error) return { images, sources };
+
+    const dbMap = new Map<string, string>();
     data?.forEach((item: any) => {
       const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
-      dbMap.set(key, { 
-        coverImage: item.cover_image,
-        source: 'database'
-      });
+      dbMap.set(key, item.cover_image);
     });
-    
-    // Match with requested items
+
     items.forEach(item => {
       const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
-      const dbItem = dbMap.get(key);
-      if (dbItem) {
-        images.set(item.id, dbItem.coverImage);
-        sources.set(item.id, dbItem.source);
+      const cover = dbMap.get(key);
+      if (cover) {
+        images.set(item.id, cover);
+        sources.set(item.id, 'database');
       }
     });
-    
-    const duration = (performance.now() - startTime).toFixed(0);
-    console.log(`✅ Database query complete: ${images.size}/${items.length} found in ${duration}ms`);
-    
+    console.log(`✅ media_metadata: ${images.size}/${items.length} found`);
   } catch (error) {
-    console.error('Database fetch error:', error);
+    console.error('media_metadata fetch error:', error);
   }
-  
   return { images, sources };
 }
 
@@ -187,25 +200,25 @@ async function fetchMissingItemsFromAPI(
 
 // Main function - FAST!
 export async function fetchImagesFromSupabase(
-  items: Array<{ id: number; title: string; type: string }
->): Promise<BatchImageResponse> {
+  items: Array<{ id: number; title: string; type: string }>
+): Promise<BatchImageResponse> {
   if (items.length === 0) {
     return { found: 0, notFound: 0, fetchedFromAPI: 0, results: [] };
   }
-  
+
   console.log(`🚀 Loading ${items.length} cover images...`);
   const startTime = performance.now();
-  
+
   const results: ImageResult[] = [];
   let fetchedFromAPI = 0;
-  
-  // Step 1: Check localStorage cache first
+
+  // Step 1: Check localStorage cache
   const cachedImages = getCachedImages();
   const cachedSources = getCachedApiSources();
   const cacheHits = new Map<number, string>();
   const cacheSources = new Map<number, string>();
-  const needsFetch: Array<{ id: number; title: string; type: string }> = [];
-  
+  const needsDbCheck: Array<{ id: number; title: string; type: string }> = [];
+
   if (cachedImages) {
     items.forEach(item => {
       const cached = cachedImages.get(item.id);
@@ -213,44 +226,36 @@ export async function fetchImagesFromSupabase(
         cacheHits.set(item.id, cached);
         cacheSources.set(item.id, cachedSources?.get(item.id) || 'cache');
       } else {
-        needsFetch.push(item);
+        needsDbCheck.push(item);
       }
     });
-    console.log(`💾 Cache hits: ${cacheHits.size}, Need to fetch: ${needsFetch.length}`);
+    console.log(`💾 Cache: ${cacheHits.size} hits, ${needsDbCheck.length} need DB`);
   } else {
-    needsFetch.push(...items);
+    needsDbCheck.push(...items);
   }
-  
-  // Step 2: Query Supabase database for non-cached items (ONE query!)
-  const { images: dbImages, sources: dbSources } = await fetchFromSupabaseDatabase(needsFetch);
-  
-  // Step 3: Find items still missing
-  const stillMissing: Array<{ id: number; title: string; type: string }> = [];
-  needsFetch.forEach(item => {
-    const dbImage = dbImages.get(item.id);
-    if (!dbImage) {
-      stillMissing.push(item);
-    }
-  });
-  
-  // Step 4: Fetch missing items from external APIs (parallel batches)
+
+  // Step 2: Check media_tracker.cover_image (fastest - direct column)
+  const { images: trackerImages, found: trackerFound } = await fetchFromMediaTracker(needsDbCheck);
+  const stillNeedMetadata = needsDbCheck.filter(item => !trackerFound.has(item.id));
+
+  // Step 3: Check media_metadata (cross-table lookup)
+  const { images: metaImages, sources: metaSources } = await fetchFromMediaMetadata(stillNeedMetadata);
+  const stillMissing = stillNeedMetadata.filter(item => !metaImages.has(item.id));
+
+  // Step 4: Fetch from external APIs (only for truly missing items)
   const { images: apiImages, sources: apiSources } = await fetchMissingItemsFromAPI(stillMissing);
   fetchedFromAPI = apiImages.size;
-  
-  // Step 5: Combine all results
+
+  // Combine all results
   const allImages = new Map<number, string>([
-    ...cacheHits,
-    ...dbImages,
-    ...apiImages
+    ...cacheHits, ...trackerImages, ...metaImages, ...apiImages
   ]);
-  
   const allSources = new Map<number, string>([
     ...cacheSources,
-    ...dbSources,
-    ...apiSources
+    ...[...trackerImages.keys()].map(k => [k, 'tracker'] as [number, string]),
+    ...metaSources, ...apiSources
   ]);
-  
-  // Step 6: Build final results array
+
   items.forEach(item => {
     results.push({
       id: item.id,
@@ -258,26 +263,14 @@ export async function fetchImagesFromSupabase(
       apiSource: allSources.get(item.id) || undefined
     });
   });
-  
-  // Step 7: Cache results for next time
+
   cacheImages(allImages, allSources);
-  
+
   const totalTime = (performance.now() - startTime).toFixed(0);
   const found = results.filter(r => r.imageUrl).length;
-  
-  console.log(`✅ Total: ${found}/${items.length} images loaded in ${totalTime}ms`);
-  console.log(`   - Cache hits: ${cacheHits.size}`);
-  console.log(`   - Database: ${dbImages.size}`);
-  console.log(`   - From APIs: ${fetchedFromAPI}`);
-  console.log(`   - Missing: ${items.length - found}`);
-  
-  return {
-    found,
-    notFound: items.length - found,
-    fetchedFromAPI,
-    results
-  };
+  console.log(`✅ Total: ${found}/${items.length} in ${totalTime}ms (cache: ${cacheHits.size}, tracker: ${trackerImages.size}, metadata: ${metaImages.size}, api: ${fetchedFromAPI})`);
+
+  return { found, notFound: items.length - found, fetchedFromAPI, results };
 }
 
-// Backward compatibility
-export const fetchImagesFromMongoDB = fetchImagesFromSupabase;
+export const fetchImagesFromSupabaseBatch = fetchImagesFromSupabase;

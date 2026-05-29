@@ -14,355 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
-      prompts: {
-        Row: {
-          id: number
-          user_id: string
-          title: string | null
-          prompt_text: string | null
-          is_favorited: boolean | null
-          category: string | null
-          is_pinned: boolean | null
-          created_at: string
-        }
-        Insert: {
-          id?: number
-          user_id: string
-          title?: string | null
-            prompt_text?: string | null
-          is_favorited?: boolean | null
-          category?: string | null
-          is_pinned?: boolean | null
-          created_at?: string
-        }
-        Update: {
-          id?: number
-          user_id?: string
-          title?: string | null
-          prompt_text?: string | null
-          is_favorited?: boolean | null
-          category?: string | null
-          is_pinned?: boolean | null
-          created_at?: string
-        }
-        Relationships: []
-      }
-      notes: {
-        Row: {
-          id: number
-          user_id: string
-          title: string | null
-          content: string | null
-          created_at: string
-          updated_at: string
-          is_pinned: boolean | null
-          background_color: string | null
-          calendar_date: string | null
-        }
-        Insert: {
-          id?: number
-          user_id: string
-          title?: string | null
-          content?: string | null
-          created_at?: string
-          updated_at?: string
-          is_pinned?: boolean | null
-          background_color?: string | null
-          calendar_date?: string | null
-        }
-        Update: {
-          id?: number
-          user_id?: string
-          title?: string | null
-          content?: string | null
-          created_at?: string
-          updated_at?: string
-          is_pinned?: boolean | null
-          background_color?: string | null
-          calendar_date?: string | null
-        }
-        Relationships: []
-      }
-      tasks: {
-        Row: {
-          id: number
-          user_id: string
-          task_text: string | null
-          is_completed: boolean | null
-          created_at: string
-          updated_at: string
-          is_pinned: boolean | null
-          due_date: string | null
-        }
-        Insert: {
-          id?: number
-          user_id: string
-          task_text?: string | null
-          is_completed?: boolean | null
-          created_at?: string
-          updated_at?: string
-          is_pinned?: boolean | null
-          due_date?: string | null
-        }
-        Update: {
-          id?: number
-          user_id?: string
-          task_text?: string | null
-          is_completed?: boolean | null
-          created_at?: string
-          updated_at?: string
-          is_pinned?: boolean | null
-          due_date?: string | null
-        }
-        Relationships: []
-      }
-      media_tracker: {
-        Row: {
-          id: number
-          user_id: string
-          title: string | null
-          type: string | null
-          status: string | null
-          rating: number | null
-          current_season: number | null
-          current_episode: number | null
-          current_chapter: number | null
-          release_date: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: number
-          user_id: string
-          title?: string | null
-          type?: string | null
-          status?: string | null
-          rating?: number | null
-          current_season?: number | null
-          current_episode?: number | null
-          current_chapter?: number | null
-          release_date?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: number
-          user_id?: string
-          title?: string | null
-          type?: string | null
-          status?: string | null
-          rating?: number | null
-          current_season?: number | null
-          current_episode?: number | null
-          current_chapter?: number | null
-          release_date?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      countdowns: {
-        Row: {
-          id: number
-          user_id: string
-          event_name: string
-          event_date: string
-          created_at: string
-        }
-        Insert: {
-          id?: number
-          user_id: string
-          event_name: string
-          event_date: string
-          created_at?: string
-        }
-        Update: {
-          id?: number
-          user_id?: string
-          event_name?: string
-          event_date?: string
-          created_at?: string
-        }
-        Relationships: []
-      }
       birthdays: {
         Row: {
-          id: number
-          user_id: string
-          name: string
-          date_of_birth: string
           created_at: string
+          date_of_birth: string
+          id: number
+          name: string
+          user_id: string | null
         }
         Insert: {
-          id?: number
-          user_id: string
-          name: string
-          date_of_birth: string
           created_at?: string
+          date_of_birth: string
+          id?: number
+          name: string
+          user_id?: string | null
         }
         Update: {
-          id?: number
-          user_id?: string
-          name?: string
+          created_at?: string
           date_of_birth?: string
-          created_at?: string
-        }
-        Relationships: []
-      }
-      shared_notes: {
-        Row: {
-          id: string
-          note_id: number
-          owner_id: string
-          allow_edit: boolean | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          note_id: number
-          owner_id: string
-          allow_edit?: boolean | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          note_id?: number
-          owner_id?: string
-          allow_edit?: boolean | null
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: string
-            columns: string[]
-            referencedRelation: string
-            referencedColumns: string[]
-          }
-        ]
-      }
-      tags: {
-        Row: {
-          id: number
-          user_id: string
-          name: string
-          color: string
-          usage_count: number
-          created_at: string
-        }
-        Insert: {
           id?: number
-          user_id: string
-          name: string
-          color?: string
-          usage_count?: number
-          created_at?: string
-        }
-        Update: {
-          id?: number
-          user_id?: string
           name?: string
-          color?: string
-          usage_count?: number
-          created_at?: string
-        }
-        Relationships: []
-      }
-      note_tags: {
-        Row: {
-          note_id: number
-          tag_id: number
-        }
-        Insert: {
-          note_id: number
-          tag_id: number
-        }
-        Update: {
-          note_id?: number
-          tag_id?: number
-        }
-        Relationships: []
-      }
-      task_tags: {
-        Row: {
-          task_id: number
-          tag_id: number
-        }
-        Insert: {
-          task_id: number
-          tag_id: number
-        }
-        Update: {
-          task_id?: number
-          tag_id?: number
-        }
-        Relationships: []
-      }
-      media_tags: {
-        Row: {
-          media_id: number
-          tag_id: number
-        }
-        Insert: {
-          media_id: number
-          tag_id: number
-        }
-        Update: {
-          media_id?: number
-          tag_id?: number
-        }
-        Relationships: []
-      }
-      prompt_tags: {
-        Row: {
-          prompt_id: number
-          tag_id: number
-        }
-        Insert: {
-          prompt_id: number
-          tag_id: number
-        }
-        Update: {
-          prompt_id?: number
-          tag_id?: number
-        }
-        Relationships: []
-      }
-      code_snippets: {
-        Row: {
-          id: number
-          user_id: string
-          title: string
-          code: string
-          language: string
-          category: string | null
-          is_favorited: boolean | null
-          is_pinned: boolean | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: number
-          user_id: string
-          title: string
-          code?: string
-          language?: string
-          category?: string | null
-          is_favorited?: boolean | null
-          is_pinned?: boolean | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: number
-          user_id?: string
-          title?: string
-          code?: string
-          language?: string
-          category?: string | null
-          is_favorited?: boolean | null
-          is_pinned?: boolean | null
-          created_at?: string
-          updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -379,237 +51,719 @@ export type Database = {
           snippet_id?: number
           tag_id?: number
         }
+        Relationships: [
+          {
+            foreignKeyName: "code_snippet_tags_snippet_id_fkey"
+            columns: ["snippet_id"]
+            isOneToOne: false
+            referencedRelation: "code_snippets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "code_snippet_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      code_snippets: {
+        Row: {
+          category: string | null
+          code: string
+          created_at: string | null
+          id: number
+          is_favorited: boolean | null
+          is_pinned: boolean | null
+          language: string
+          title: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          code?: string
+          created_at?: string | null
+          id?: number
+          is_favorited?: boolean | null
+          is_pinned?: boolean | null
+          language?: string
+          title: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          code?: string
+          created_at?: string | null
+          id?: number
+          is_favorited?: boolean | null
+          is_pinned?: boolean | null
+          language?: string
+          title?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      countdowns: {
+        Row: {
+          created_at: string
+          event_date: string
+          event_name: string
+          id: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_date: string
+          event_name: string
+          id?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_date?: string
+          event_name?: string
+          id?: number
+          user_id?: string
+        }
         Relationships: []
       }
       ledger_categories: {
         Row: {
+          color: string | null
+          created_at: string | null
+          description: string | null
           id: number
-          user_id: string
           name: string
           type: string
-          color: string
-          description: string | null
-          created_at: string
+          user_id: string
         }
         Insert: {
+          color?: string | null
+          created_at?: string | null
+          description?: string | null
           id?: number
-          user_id: string
           name: string
           type: string
-          color?: string
-          description?: string | null
-          created_at?: string
+          user_id: string
         }
         Update: {
+          color?: string | null
+          created_at?: string | null
+          description?: string | null
           id?: number
-          user_id?: string
           name?: string
           type?: string
-          color?: string
-          description?: string | null
-          created_at?: string
+          user_id?: string
         }
         Relationships: []
       }
       ledger_entries: {
         Row: {
-          id: number
-          user_id: string
-          category_id: number | null
           amount: number
-          type: string
+          category_id: number | null
+          created_at: string | null
           description: string | null
-          transaction_date: string
-          is_recurring: boolean
-          recurring_interval: string | null
+          id: number
+          is_recurring: boolean | null
           notes: string | null
-          created_at: string
-          updated_at: string
+          recurring_interval: string | null
+          transaction_date: string
+          type: string
+          updated_at: string | null
+          user_id: string
         }
         Insert: {
-          id?: number
-          user_id: string
-          category_id?: number | null
           amount: number
-          type: string
+          category_id?: number | null
+          created_at?: string | null
           description?: string | null
-          transaction_date?: string
-          is_recurring?: boolean
-          recurring_interval?: string | null
+          id?: number
+          is_recurring?: boolean | null
           notes?: string | null
-          created_at?: string
-          updated_at?: string
+          recurring_interval?: string | null
+          transaction_date?: string
+          type: string
+          updated_at?: string | null
+          user_id: string
         }
         Update: {
-          id?: number
-          user_id?: string
-          category_id?: number | null
           amount?: number
-          type?: string
+          category_id?: number | null
+          created_at?: string | null
           description?: string | null
-          transaction_date?: string
-          is_recurring?: boolean
-          recurring_interval?: string | null
+          id?: number
+          is_recurring?: boolean | null
           notes?: string | null
-          created_at?: string
-          updated_at?: string
+          recurring_interval?: string | null
+          transaction_date?: string
+          type?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ledger_entries_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "ledger_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      media_metadata: {
+        Row: {
+          anilist_id: number | null
+          banner_image: string | null
+          chapters: number | null
+          cover_image: string
+          created_at: string | null
+          description: string | null
+          episodes: number | null
+          id: number
+          last_updated: string | null
+          mal_id: number | null
+          rating: number | null
+          status: string | null
+          title: string
+          tmdb_id: number | null
+          type: string | null
+        }
+        Insert: {
+          anilist_id?: number | null
+          banner_image?: string | null
+          chapters?: number | null
+          cover_image: string
+          created_at?: string | null
+          description?: string | null
+          episodes?: number | null
+          id?: number
+          last_updated?: string | null
+          mal_id?: number | null
+          rating?: number | null
+          status?: string | null
+          title: string
+          tmdb_id?: number | null
+          type?: string | null
+        }
+        Update: {
+          anilist_id?: number | null
+          banner_image?: string | null
+          chapters?: number | null
+          cover_image?: string
+          created_at?: string | null
+          description?: string | null
+          episodes?: number | null
+          id?: number
+          last_updated?: string | null
+          mal_id?: number | null
+          rating?: number | null
+          status?: string | null
+          title?: string
+          tmdb_id?: number | null
+          type?: string | null
         }
         Relationships: []
       }
-      subscription_categories: {
+      media_tags: {
         Row: {
-          id: number
-          user_id: string
-          name: string
-          color: string
-          created_at: string
+          media_id: number
+          tag_id: number
         }
         Insert: {
-          id?: number
-          user_id: string
-          name: string
-          color?: string
-          created_at?: string
+          media_id: number
+          tag_id: number
         }
         Update: {
+          media_id?: number
+          tag_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_tags_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "media_tracker"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "media_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      media_tracker: {
+        Row: {
+          cover_image: string | null
+          created_at: string | null
+          current_chapter: number | null
+          current_episode: number | null
+          current_season: number | null
+          id: number
+          rating: number | null
+          release_date: string | null
+          status: string | null
+          title: string
+          type: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          cover_image?: string | null
+          created_at?: string | null
+          current_chapter?: number | null
+          current_episode?: number | null
+          current_season?: number | null
           id?: number
+          rating?: number | null
+          release_date?: string | null
+          status?: string | null
+          title: string
+          type?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          cover_image?: string | null
+          created_at?: string | null
+          current_chapter?: number | null
+          current_episode?: number | null
+          current_season?: number | null
+          id?: number
+          rating?: number | null
+          release_date?: string | null
+          status?: string | null
+          title?: string
+          type?: string | null
+          updated_at?: string | null
           user_id?: string
-          name?: string
-          color?: string
+        }
+        Relationships: []
+      }
+      note_tags: {
+        Row: {
+          note_id: number
+          tag_id: number
+        }
+        Insert: {
+          note_id: number
+          tag_id: number
+        }
+        Update: {
+          note_id?: number
+          tag_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_tags_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "note_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notes: {
+        Row: {
+          background_color: string | null
+          calendar_date: string | null
+          content: string | null
+          created_at: string | null
+          id: number
+          is_pinned: boolean
+          title: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          background_color?: string | null
+          calendar_date?: string | null
+          content?: string | null
+          created_at?: string | null
+          id?: number
+          is_pinned?: boolean
+          title?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          background_color?: string | null
+          calendar_date?: string | null
+          content?: string | null
+          created_at?: string | null
+          id?: number
+          is_pinned?: boolean
+          title?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      prompt_tags: {
+        Row: {
+          prompt_id: number
+          tag_id: number
+        }
+        Insert: {
+          prompt_id: number
+          tag_id: number
+        }
+        Update: {
+          prompt_id?: number
+          tag_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prompt_tags_prompt_id_fkey"
+            columns: ["prompt_id"]
+            isOneToOne: false
+            referencedRelation: "prompts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prompt_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prompts: {
+        Row: {
+          category: string | null
+          created_at: string | null
+          id: number
+          is_favorited: boolean | null
+          is_pinned: boolean
+          prompt_text: string
+          title: string | null
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string | null
+          id?: number
+          is_favorited?: boolean | null
+          is_pinned?: boolean
+          prompt_text: string
+          title?: string | null
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          created_at?: string | null
+          id?: number
+          is_favorited?: boolean | null
+          is_pinned?: boolean
+          prompt_text?: string
+          title?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      shared_notes: {
+        Row: {
+          allow_edit: boolean
+          created_at: string
+          id: string
+          note_id: number
+          owner_id: string
+        }
+        Insert: {
+          allow_edit?: boolean
           created_at?: string
+          id?: string
+          note_id: number
+          owner_id: string
+        }
+        Update: {
+          allow_edit?: boolean
+          created_at?: string
+          id?: string
+          note_id?: number
+          owner_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shared_notes_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      subscription_categories: {
+        Row: {
+          color: string | null
+          created_at: string | null
+          id: number
+          name: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string | null
+          id?: number
+          name: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string | null
+          id?: number
+          name?: string
+          user_id?: string
         }
         Relationships: []
       }
       subscriptions: {
         Row: {
-          id: number
-          user_id: string
-          name: string
           amount: number
           billing_cycle: string
           category_id: number | null
-          start_date: string
-          next_renewal_date: string
-          status: string
-          notes: string | null
+          created_at: string | null
+          end_date: string | null
+          id: number
           ledger_category_id: number | null
-          created_at: string
-          updated_at: string
+          ledger_entry_id: number | null
+          name: string
+          next_renewal_date: string
+          notes: string | null
+          start_date: string
+          status: string | null
+          updated_at: string | null
+          user_id: string
         }
         Insert: {
-          id?: number
-          user_id: string
-          name: string
           amount: number
           billing_cycle: string
           category_id?: number | null
-          start_date: string
-          next_renewal_date: string
-          status?: string
-          notes?: string | null
+          created_at?: string | null
+          end_date?: string | null
+          id?: number
           ledger_category_id?: number | null
-          created_at?: string
-          updated_at?: string
+          ledger_entry_id?: number | null
+          name: string
+          next_renewal_date: string
+          notes?: string | null
+          start_date: string
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
         }
         Update: {
-          id?: number
-          user_id?: string
-          name?: string
           amount?: number
           billing_cycle?: string
           category_id?: number | null
-          start_date?: string
-          next_renewal_date?: string
-          status?: string
-          notes?: string | null
+          created_at?: string | null
+          end_date?: string | null
+          id?: number
           ledger_category_id?: number | null
-          created_at?: string
-          updated_at?: string
+          ledger_entry_id?: number | null
+          name?: string
+          next_renewal_date?: string
+          notes?: string | null
+          start_date?: string
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "subscription_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subscriptions_ledger_category_id_fkey"
+            columns: ["ledger_category_id"]
+            isOneToOne: false
+            referencedRelation: "ledger_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subscriptions_ledger_entry_id_fkey"
+            columns: ["ledger_entry_id"]
+            isOneToOne: false
+            referencedRelation: "ledger_entries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tags: {
+        Row: {
+          color: string
+          created_at: string | null
+          id: number
+          name: string
+          usage_count: number | null
+          user_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string | null
+          id?: number
+          name: string
+          usage_count?: number | null
+          user_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string | null
+          id?: number
+          name?: string
+          usage_count?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      task_tags: {
+        Row: {
+          tag_id: number
+          task_id: number
+        }
+        Insert: {
+          tag_id: number
+          task_id: number
+        }
+        Update: {
+          tag_id?: number
+          task_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_tags_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          created_at: string | null
+          due_date: string | null
+          id: number
+          is_completed: boolean | null
+          is_pinned: boolean
+          task_text: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          due_date?: string | null
+          id?: number
+          is_completed?: boolean | null
+          is_pinned?: boolean
+          task_text: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          due_date?: string | null
+          id?: number
+          is_completed?: boolean | null
+          is_pinned?: boolean
+          task_text?: string
+          updated_at?: string | null
+          user_id?: string
         }
         Relationships: []
       }
       user_preferences: {
         Row: {
+          created_at: string | null
           id: string
-          user_id: string
           preference_key: string
           preference_value: Json
-          created_at: string
-          updated_at: string
+          updated_at: string | null
+          user_id: string
         }
         Insert: {
+          created_at?: string | null
           id?: string
-          user_id: string
           preference_key: string
           preference_value?: Json
-          created_at?: string
-          updated_at?: string
+          updated_at?: string | null
+          user_id: string
         }
         Update: {
+          created_at?: string | null
           id?: string
-          user_id?: string
           preference_key?: string
           preference_value?: Json
-          created_at?: string
-          updated_at?: string
+          updated_at?: string | null
+          user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "user_preferences_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          }
-        ]
+        Relationships: []
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      get_monthly_ledger_summary: {
-        Args: {
-          p_user_id: string
-          p_year: number
-          p_month: number
-        }
-        Returns: {
-          total_income: number
-          total_expense: number
-          net_balance: number
-        }[]
-      }
-      get_upcoming_renewals: {
-        Args: {
-          p_user_id: string
-          p_days?: number
-        }
-        Returns: {
-          id: number
-          name: string
-          amount: number
-          billing_cycle: string
-          next_renewal_date: string
-          days_until: number
-          status: string
-        }[]
-      }
+      cleanup_empty_tags: { Args: never; Returns: undefined }
       get_calendar_events: {
-        Args: {
-          p_user_id: string
-          p_start_date: string
-          p_end_date: string
-        }
+        Args: { p_end_date: string; p_start_date: string; p_user_id: string }
         Returns: {
+          color: string
+          data: Json
+          event_date: string
           event_id: string
           event_type: string
           title: string
-          event_date: string
-          color: string
-          data: Json
         }[]
       }
+      get_monthly_ledger_summary: {
+        Args: { p_month: number; p_user_id: string; p_year: number }
+        Returns: {
+          net_balance: number
+          total_expense: number
+          total_income: number
+        }[]
+      }
+      get_upcoming_renewals: {
+        Args: { p_days?: number; p_user_id: string }
+        Returns: {
+          amount: number
+          billing_cycle: string
+          days_until: number
+          id: number
+          name: string
+          next_renewal_date: string
+          status: string
+        }[]
+      }
+      normalize_tag_name: { Args: { tag_name: string }; Returns: string }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       [_ in never]: never
@@ -742,178 +896,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
-// ============================================
-// TAGS SYSTEM TYPES
-// ============================================
-
-export interface Tag {
-  id: number
-  user_id: string
-  name: string
-  color: string
-  usage_count: number
-  created_at: string
-}
-
-export interface NoteWithTags {
-  id: number
-  user_id: string
-  title: string | null
-  content: string | null
-  created_at: string
-  updated_at: string
-  is_pinned: boolean | null
-  background_color: string | null
-  tags?: Tag[]
-}
-
-export interface TaskWithTags {
-  id: number
-  user_id: string
-  task_text: string | null
-  is_completed: boolean | null
-  created_at: string
-  updated_at: string
-  is_pinned: boolean | null
-  due_date: string | null
-  tags?: Tag[]
-}
-
-export interface MediaWithTags {
-  id: number
-  user_id: string
-  title: string | null
-  type: string | null
-  status: string | null
-  rating: number | null
-  current_season: number | null
-  current_episode: number | null
-  current_chapter: number | null
-  created_at: string
-  updated_at: string
-  tags?: Tag[]
-}
-
-export interface PromptWithTags {
-  id: number
-  user_id: string
-  title: string | null
-  prompt_text: string | null
-  is_favorited: boolean | null
-  category: string | null
-  is_pinned: boolean | null
-  created_at: string
-  tags?: Tag[]
-}
-
-export interface CodeSnippetWithTags {
-  id: number
-  user_id: string
-  title: string
-  code: string
-  language: string
-  category: string | null
-  is_favorited: boolean | null
-  is_pinned: boolean | null
-  created_at: string
-  updated_at: string
-  tags?: Tag[]
-}
-
-// ============================================
-// MONEY LEDGER TYPES
-// ============================================
-
-// Note: TAG_COLORS is defined in @/lib/tags for single source of truth
-
-export interface LedgerCategory {
-  id: number
-  user_id: string
-  name: string
-  type: 'income' | 'expense'
-  color: string
-  description: string | null
-  created_at: string
-}
-
-export interface LedgerEntry {
-  id: number
-  user_id: string
-  category_id: number | null
-  amount: number
-  type: 'income' | 'expense'
-  description: string | null
-  transaction_date: string
-  is_recurring: boolean
-  recurring_interval: 'daily' | 'weekly' | 'monthly' | 'yearly' | null
-  notes: string | null
-  created_at: string
-  updated_at: string
-  category?: LedgerCategory
-}
-
-export interface LedgerSummary {
-  totalIncome: number
-  totalExpense: number
-  netBalance: number
-}
-
-export type RecurringInterval = 'daily' | 'weekly' | 'monthly' | 'yearly'
-
-// ============================================
-// SUBSCRIPTION TYPES
-// ============================================
-
-export interface SubscriptionCategory {
-  id: number
-  user_id: string
-  name: string
-  color: string
-  created_at: string
-}
-
-export interface Subscription {
-  id: number
-  user_id: string
-  name: string
-  amount: number
-  billing_cycle: 'monthly' | 'yearly'
-  category_id: number | null
-  start_date: string
-  end_date: string | null
-  next_renewal_date: string
-  status: 'active' | 'renew' | 'cancel' | 'cancelled'
-  notes: string | null
-  ledger_category_id: number | null
-  ledger_entry_id: number | null
-  created_at: string
-  updated_at: string
-  category?: SubscriptionCategory
-}
-
-export interface UpcomingRenewal {
-  id: number
-  name: string
-  amount: number
-  billing_cycle: string
-  next_renewal_date: string
-  days_until: number
-  status: string
-}
-
-export interface SubscriptionSummary {
-  monthlyTotal: number
-  yearlyTotal: number
-  activeCount: number
-  upcomingRenewals: number
-}
-
-export interface UserPreference {
-  id: string
-  user_id: string
-  preference_key: string
-  preference_value: unknown
-  created_at: string
-  updated_at: string
-}

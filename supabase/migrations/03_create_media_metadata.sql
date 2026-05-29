@@ -47,5 +47,4 @@ CREATE POLICY "Allow service role update" ON public.media_metadata
 
 -- ============================================
 -- Setup Complete!
--- Now copy the INSERT statements from media_migration.sql
 -- ============================================

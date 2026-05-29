@@ -97,7 +97,7 @@ export const MediaCard = ({
     
     setIsRefreshing(true);
     try {
-      const result = await refreshCoverImage(title, type, currentApi);
+      const result = await refreshCoverImage(title, type, currentApi, id);
       
       if (result) {
         // Update local state immediately (optimistic UI)
