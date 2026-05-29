@@ -178,9 +178,10 @@ const Dashboard = () => {
         console.error('Failed to fetch tags:', err);
       }
 
+      let renewalsResult: UpcomingRenewal[] = [];
       try {
-        const renewalsData = await getUpcomingRenewals(30);
-        setRenewals(renewalsData);
+        renewalsResult = await getUpcomingRenewals(30);
+        setRenewals(renewalsResult);
       } catch (err) {
         console.error('Failed to fetch renewals:', err);
       }
@@ -195,7 +196,7 @@ const Dashboard = () => {
       const events = generateCalendarEvents(
         tasksResult,
         birthdaysResult,
-        renewals,
+        renewalsResult,
         countdownResult
       );
       setCalendarEvents(events);
@@ -783,7 +784,7 @@ const Dashboard = () => {
               )}
               <h1 className="text-2xl font-bold font-heading text-foreground">
                 {(() => {
-                  const name = (user?.user_metadata as any)?.display_name as
+                  const name = (user?.user_metadata as Record<string, unknown>)?.display_name as
                     | string
                     | undefined;
                   if (!name) return 'Dashboard';

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   GripVertical,
   X,
@@ -54,6 +54,10 @@ export function WidgetManager({
 }: WidgetManagerProps) {
   const [localWidgets, setLocalWidgets] = useState<DashboardWidget[]>(widgets);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    setLocalWidgets(widgets);
+  }, [widgets]);
 
   const activeWidgets = localWidgets.filter((w) => w.visible);
   const availableWidgets = localWidgets.filter((w) => !w.visible);
