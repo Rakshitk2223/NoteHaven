@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, ChevronDown } from "lucide-react";
+import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -159,7 +159,7 @@ const MediaTracker = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [tabsManageOpen, setTabsManageOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
-  const [filterType, setFilterType] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [quickAddTitle, setQuickAddTitle] = useState('');
@@ -258,7 +258,7 @@ const MediaTracker = () => {
     isFetchingNextPage,
     refetch,
   } = useInfiniteQuery<{ items: MediaItem[]; count: number; page: number }>({
-    queryKey: ['mediaItems', filterType, filterStatus, searchTerm, sortOrder],
+    queryKey: ['mediaItems', filterStatus, searchTerm, sortOrder],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const page = (typeof pageParam === 'number' ? pageParam : 0);
@@ -274,7 +274,7 @@ const MediaTracker = () => {
       if (user) {
         query = query.eq('user_id', user.id);
       }
-      if (filterType.length > 0) query = query.in('type', filterType);
+      // Type filtering is handled by tabs/custom groups.
       if (filterStatus !== 'All') {
         // Map UI filter categories to actual database statuses
         if (filterStatus === 'Active') {
@@ -561,7 +561,7 @@ const MediaTracker = () => {
     interface QueryData {
       pages: QueryPage[];
     }
-    queryClient.setQueryData<QueryData>(['mediaItems', filterType, filterStatus, searchTerm, sortOrder], (old) => {
+    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortOrder], (old) => {
       if (!old) return old;
       return {
         ...old,
@@ -580,7 +580,7 @@ const MediaTracker = () => {
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
     } catch (e: unknown) {
       // Revert optimistic update on error
-      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterType, filterStatus, searchTerm, sortOrder] });
+      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortOrder] });
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Update failed', description: message, variant: 'destructive' });
     } finally {
@@ -600,7 +600,7 @@ const MediaTracker = () => {
     interface QueryData {
       pages: QueryPage[];
     }
-    queryClient.setQueryData<QueryData>(['mediaItems', filterType, filterStatus, searchTerm, sortOrder], (old) => {
+    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortOrder], (old) => {
       if (!old) return old;
       return {
         ...old,
@@ -619,7 +619,7 @@ const MediaTracker = () => {
       toast({ title: 'Status updated', description: `Changed to ${newStatus}` });
     } catch (e: unknown) {
       // Revert optimistic update on error
-      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterType, filterStatus, searchTerm, sortOrder] });
+      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortOrder] });
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Update failed', description: message, variant: 'destructive' });
     } finally {
@@ -1498,7 +1498,7 @@ const MediaTracker = () => {
             </SheetContent>
           </Sheet>
           {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-3 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button
               variant="ghost"
               size="sm"
@@ -1509,13 +1509,11 @@ const MediaTracker = () => {
             </Button>
             <h1 className="font-heading font-bold text-base sm:text-lg">Media Tracker</h1>
             <div className="flex items-center gap-1">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setQuickAddOpen(true)}
-                className="h-8 px-2"
-              >
+              <Button size="sm" variant="outline" onClick={() => setQuickAddOpen(true)} className="h-8 w-8 p-0">
                 <Plus className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setFiltersOpen(true)} className="h-8 w-8 p-0">
+                <Filter className="h-4 w-4" />
               </Button>
               <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 p-0 touch-manipulation">
                 <LayoutGrid className="h-4 w-4" />
@@ -1529,7 +1527,7 @@ const MediaTracker = () => {
 
 
           <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between">
               <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
                 Media Tracker
               </h1>
@@ -1543,28 +1541,39 @@ const MediaTracker = () => {
                     <ListIcon className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setEditingItem(null);
-                    resetForm();
-                    setDetailsMode('edit');
-                    setDetailsOpen(true);
-                  }}
-                >
-                  <Edit className="h-4 w-4 mr-2" />
-                  Add / Edit
-                </Button>
-              </div>
-            </div>
 
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm text-muted-foreground">Add media without leaving the list.</div>
-              <Button variant="outline" size="sm" onClick={() => setQuickAddOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Quick Add
-              </Button>
+                <Button variant="default" size="sm" onClick={() => setQuickAddOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add
+                </Button>
+
+                <Button variant="outline" size="sm" onClick={() => setFiltersOpen(true)}>
+                  <Filter className="h-4 w-4 mr-2" />
+                  Filters
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="px-2">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setTabsManageOpen(true)}>
+                      Manage Tabs
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+                      Import JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleExportJson}>
+                      Export JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setTxtExportDialogOpen(true)}>
+                      Export TXT
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
 
             <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
@@ -1647,6 +1656,117 @@ const MediaTracker = () => {
             </Dialog>
           </div>
 
+          {/* Export TXT dialog (kept, but moved out of the main toolbar) */}
+          <Dialog open={txtExportDialogOpen} onOpenChange={setTxtExportDialogOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Export to Text File</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <p className="text-sm text-muted-foreground">
+                  Select which types to include in the export:
+                </p>
+                <div className="space-y-3">
+                  {['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'].map(type => (
+                    <div key={type} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`export-${type}`}
+                        checked={txtExportSelectedTypes.includes(type)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setTxtExportSelectedTypes([...txtExportSelectedTypes, type]);
+                          } else {
+                            setTxtExportSelectedTypes(txtExportSelectedTypes.filter(t => t !== type));
+                          }
+                        }}
+                      />
+                      <label
+                        htmlFor={`export-${type}`}
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                      >
+                        {type}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setTxtExportSelectedTypes(['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'])}
+                  >
+                    Select All
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => setTxtExportSelectedTypes([])}
+                  >
+                    Clear All
+                  </Button>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setTxtExportDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleExportTxt} disabled={txtExportSelectedTypes.length === 0}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export {txtExportSelectedTypes.length > 0 && `(${txtExportSelectedTypes.length})`}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Filters sheet (mobile + desktop) */}
+          <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+            <SheetContent side="right" className="w-full sm:max-w-md">
+              <SheetHeader>
+                <SheetTitle>Filters</SheetTitle>
+                <SheetDescription>Refine what you see without clutter.</SheetDescription>
+              </SheetHeader>
+              <div className="mt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium">Needs Cover</div>
+                  <Button size="sm" variant={needsCoverOnly ? 'default' : 'outline'} onClick={() => setNeedsCoverOnly(v => !v)}>
+                    {needsCoverOnly ? 'On' : 'Off'}
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Status</SelectItem>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Planned">Planned</SelectItem>
+                      <SelectItem value="Completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Sort</Label>
+                  <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="asc">A → Z</SelectItem>
+                      <SelectItem value="desc">Z → A</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <SheetFooter className="mt-6">
+                <Button variant="outline" onClick={() => setFiltersOpen(false)}>Close</Button>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
+
           <div className="p-4 sm:p-6">
             <div className="mb-4 flex flex-col gap-3">
               <Tabs value={activeTypeTab} onValueChange={(v) => setActiveTypeTab(v as any)}>
@@ -1717,194 +1837,14 @@ const MediaTracker = () => {
               </DialogContent>
             </Dialog>
 
-            {/* Search & Filters Collapsible */}
-            <div className="mb-6 space-y-3">
-              <div className="flex items-center gap-2">
-                <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <Input
-                  placeholder="Search titles..."
-                  value={typedSearchTerm}
-                  onChange={handleSearchChange}
-                  className="flex-1"
-                />
-              </div>
-              
-              <div className="flex flex-wrap gap-2 sm:gap-3 items-start">
-                <span className="text-sm font-medium text-muted-foreground hidden sm:inline mt-2">Filters:</span>
-                
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2">
-                      <Filter className="h-4 w-4" />
-                      Type Filter {filterType.length > 0 && `(${filterType.length})`}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-48">
-                    <div className="p-2 space-y-2">
-                      {['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'].map(type => (
-                        <div key={type} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`filter-${type}`}
-                            checked={filterType.includes(type)}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setFilterType([...filterType, type]);
-                              } else {
-                                setFilterType(filterType.filter(t => t !== type));
-                              }
-                            }}
-                          />
-                          <label
-                            htmlFor={`filter-${type}`}
-                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                          >
-                            {type}
-                          </label>
-                        </div>
-                      ))}
-                      <p className="text-xs text-muted-foreground pt-1">
-                        Tabs control the main view; this filter narrows further.
-                      </p>
-                      {filterType.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="w-full mt-2"
-                          onClick={() => setFilterType([])}
-                        >
-                          Clear All
-                        </Button>
-                      )}
-                    </div>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="w-32 sm:w-36">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="All">All Status</SelectItem>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Planned">Planned</SelectItem>
-                    <SelectItem value="Completed">Completed</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
-                  <SelectTrigger className="w-28 sm:w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="asc">A → Z</SelectItem>
-                    <SelectItem value="desc">Z → A</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json"
-                  className="hidden"
-                  onChange={handleJsonImport}
-                  disabled={isImporting}
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={isImporting}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="ml-auto touch-manipulation"
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  {isImporting ? 'Importing...' : 'Import'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleExportJson}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  JSON
-                </Button>
-                <Dialog open={txtExportDialogOpen} onOpenChange={setTxtExportDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      TXT
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Export to Text File</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
-                      <p className="text-sm text-muted-foreground">
-                        Select which types to include in the export:
-                      </p>
-                      <div className="space-y-3">
-                        {['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'].map(type => (
-                          <div key={type} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={`export-${type}`}
-                              checked={txtExportSelectedTypes.includes(type)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setTxtExportSelectedTypes([...txtExportSelectedTypes, type]);
-                                } else {
-                                  setTxtExportSelectedTypes(txtExportSelectedTypes.filter(t => t !== type));
-                                }
-                              }}
-                            />
-                            <label
-                              htmlFor={`export-${type}`}
-                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                            >
-                              {type}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => setTxtExportSelectedTypes(['Manga', 'Manhwa', 'Manhua', 'Anime', 'Series', 'Movie', 'KDrama', 'JDrama'])}
-                        >
-                          Select All
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => setTxtExportSelectedTypes([])}
-                        >
-                          Clear All
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => setTxtExportDialogOpen(false)}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleExportTxt}
-                        disabled={txtExportSelectedTypes.length === 0}
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Export {txtExportSelectedTypes.length > 0 && `(${txtExportSelectedTypes.length})`}
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </div>
+            <div className="mb-4 flex items-center gap-2">
+              <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <Input
+                placeholder="Search titles..."
+                value={typedSearchTerm}
+                onChange={handleSearchChange}
+                className="flex-1"
+              />
             </div>
 
             {/* Custom Groups */}
@@ -1931,7 +1871,7 @@ const MediaTracker = () => {
             ) : finalItems.length === 0 ? (
               <div className="zen-card p-8 text-center">
                 <p className="text-muted-foreground mb-4">
-                  {filterType.length > 0 || filterStatus !== 'All' 
+                  {filterStatus !== 'All' 
                     ? 'No media found for the selected filters.' 
                     : 'You haven\'t added any media yet. Click \'Add Media\' to start tracking!'}
                 </p>

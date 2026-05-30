@@ -18,7 +18,9 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        return stored === 'true';
+        if (stored !== null) return stored === 'true';
+        // Default to collapsed on small screens.
+        return window.matchMedia?.('(max-width: 1023px)')?.matches ? true : false;
       } catch {
         // Ignore localStorage errors
       }
