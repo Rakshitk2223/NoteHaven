@@ -24,6 +24,8 @@ interface MediaCardProps {
   onDelete: () => void;
   onImageUpdate?: (newImageUrl: string, newApiSource: string) => void; // Callback when image is refreshed
   onVisibleChange?: (id: number, visible: boolean) => void;
+  selected?: boolean;
+  onToggleSelected?: (id: number) => void;
 }
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
@@ -60,6 +62,8 @@ export const MediaCard = ({
   onDelete,
   onImageUpdate,
   onVisibleChange,
+  selected,
+  onToggleSelected,
 }: MediaCardProps) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -163,7 +167,10 @@ export const MediaCard = ({
   return (
     <div
       ref={ref}
-      className="group relative"
+      className={cn(
+        "group relative",
+        selected && "ring-2 ring-primary rounded-lg"
+      )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -204,6 +211,17 @@ export const MediaCard = ({
             isHovered ? "opacity-100" : "opacity-0"
           )}
         >
+          {onToggleSelected && (
+            <Button
+              size="sm"
+              variant={selected ? "default" : "secondary"}
+              onClick={() => onToggleSelected(id)}
+              className="gap-1"
+              title="Select"
+            >
+              {selected ? 'Selected' : 'Select'}
+            </Button>
+          )}
           {/* Refresh Button */}
           <Button 
             size="sm" 

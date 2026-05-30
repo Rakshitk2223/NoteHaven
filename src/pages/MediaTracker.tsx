@@ -20,6 +20,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -43,6 +52,7 @@ import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from
 import { MediaCard } from "@/components/media/MediaCard";
 import { CustomGroupBuilder, type CustomGroup, itemBelongsToCustomGroup } from "@/components/media/CustomGroupBuilder";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
+import { refreshCoverImage } from "@/lib/media-refresh";
 
 interface MediaItem {
   id: number;
@@ -120,8 +130,20 @@ const MediaTracker = () => {
   });
   const [loading, setLoading] = useState(true); // retained for create/update flows
   const [error, setError] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsMode, setDetailsMode] = useState<'view' | 'edit'>('view');
+  const [activeTypeTab, setActiveTypeTab] = useState<'all' | 'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'Series' | 'Movie' | 'KDrama' | 'JDrama'>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerActiveTypeTab') : null;
+      if (stored && ['all','Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'].includes(stored)) {
+        return stored as any;
+      }
+    } catch {}
+    return 'all';
+  });
+  const [needsCoverOnly, setNeedsCoverOnly] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [filterType, setFilterType] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -266,6 +288,12 @@ const MediaTracker = () => {
     (data?.pages.flatMap(p => p.items.map(normalizeMediaItem)) ?? []),
     [data]
   );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mediaTrackerActiveTypeTab', activeTypeTab);
+    } catch {}
+  }, [activeTypeTab]);
 
   // Lazy loading: only fetch covers for visible items
   const visibleItemsRef = useRef<Set<number>>(new Set());
@@ -414,6 +442,16 @@ const MediaTracker = () => {
     });
   }, [mediaItems, selectedTags]);
 
+  const typeTabFilteredItems = useMemo(() => {
+    if (activeTypeTab === 'all') return filteredByTagsMediaItems;
+    return filteredByTagsMediaItems.filter(i => i.type === activeTypeTab);
+  }, [filteredByTagsMediaItems, activeTypeTab]);
+
+  const needsCoverFilteredItems = useMemo(() => {
+    if (!needsCoverOnly) return typeTabFilteredItems;
+    return typeTabFilteredItems.filter(i => !imageUrls.get(i.id));
+  }, [typeTabFilteredItems, needsCoverOnly, imageUrls]);
+
   // Category filtering using custom groups
   const categoryFilteredItems = useMemo(() => {
     if (activeGroupId === 'all') return filteredByTagsMediaItems;
@@ -426,6 +464,45 @@ const MediaTracker = () => {
     );
   }, [filteredByTagsMediaItems, activeGroupId, customGroups]);
 
+  const finalItems = useMemo(() => {
+    // Keep custom groups as the primary category filter, then apply tab + needs-cover filters.
+    // This preserves existing behavior while adding the new views.
+    const base = categoryFilteredItems;
+    const byTab = activeTypeTab === 'all' ? base : base.filter(i => i.type === activeTypeTab);
+    return needsCoverOnly ? byTab.filter(i => !imageUrls.get(i.id)) : byTab;
+  }, [categoryFilteredItems, activeTypeTab, needsCoverOnly, imageUrls]);
+
+  const selectedItems = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    const set = selectedIds;
+    return mediaItems.filter(i => set.has(i.id));
+  }, [mediaItems, selectedIds]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const toggleSelected = useCallback((id: number, next?: boolean) => {
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      const shouldSelect = typeof next === 'boolean' ? next : !n.has(id);
+      if (shouldSelect) n.add(id);
+      else n.delete(id);
+      return n;
+    });
+  }, []);
+
+  const refreshSelectedCovers = useCallback(async () => {
+    if (selectedItems.length === 0) return;
+    for (const item of selectedItems) {
+      const currentApi = imageApiSources.get(item.id);
+      const res = await refreshCoverImage(item.title, item.type, currentApi, item.id);
+      if (res) {
+        setImageUrls(prev => new Map([...prev, [item.id, res.coverImage]]));
+        setImageApiSources(prev => new Map([...prev, [item.id, res.apiSource]]));
+      }
+    }
+    toast({ title: 'Done', description: `Refreshed covers for ${selectedItems.length} items` });
+  }, [selectedItems, imageApiSources, toast]);
+
   // Calculate category counts - use database counts instead of loaded items
   const categoryCounts = useMemo(() => {
     // Use fetched group counts from database, fallback to 0 if not loaded yet
@@ -434,7 +511,7 @@ const MediaTracker = () => {
 
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
-    categoryFilteredItems.forEach(item => {
+    finalItems.forEach(item => {
       const key = getStatusCategory(item.status || 'Active');
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
@@ -446,7 +523,7 @@ const MediaTracker = () => {
       if (ia === -1) return 1; if (ib === -1) return -1; return ia - ib;
     });
     return { keys, groups };
-  }, [categoryFilteredItems]);
+  }, [finalItems]);
 
   const handleQuickUpdate = async (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => {
     const currentVal = item[field];
@@ -729,7 +806,7 @@ const MediaTracker = () => {
         await setMediaTags(newMedia.id, tagsToSave.map(t => t.id));
       }
 
-      setIsModalOpen(false);
+      setDetailsOpen(false);
       resetForm();
       setFormTags([]);
       fetchTags();
@@ -795,7 +872,7 @@ const MediaTracker = () => {
         await setMediaTags(editingItem.id, []);
       }
 
-      setIsModalOpen(false);
+      setDetailsOpen(false);
       setEditingItem(null);
       setEditingItemTags([]);
       resetForm();
@@ -841,7 +918,8 @@ const MediaTracker = () => {
       current_episode: item.current_episode?.toString() || "",
       current_chapter: item.current_chapter?.toString() || ""
     });
-    setIsModalOpen(true);
+    setDetailsMode('edit');
+    setDetailsOpen(true);
   };
 
   const resetForm = () => {
@@ -856,11 +934,23 @@ const MediaTracker = () => {
     });
   };
 
-  const handleModalClose = () => {
-    setIsModalOpen(false);
-    setEditingItem(null);
-    resetForm();
-  };
+
+  const openDetails = useCallback((item: MediaItem, mode: 'view' | 'edit' = 'view') => {
+    setEditingItem(item);
+    setDetailsMode(mode);
+    if (mode === 'edit') {
+      setFormData({
+        title: item.title,
+        type: item.type,
+        status: item.status,
+        rating: item.rating?.toString() || "",
+        current_season: item.current_season?.toString() || "",
+        current_episode: item.current_episode?.toString() || "",
+        current_chapter: item.current_chapter?.toString() || "",
+      });
+    }
+    setDetailsOpen(true);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1034,7 +1124,9 @@ const MediaTracker = () => {
                   imageUrl={imageUrls.get(item.id)}
                   apiSource={imageApiSources.get(item.id)}
                   isLoading={isLoadingImages && !imageUrls.has(item.id)}
-                  onEdit={() => handleEditMedia(item)}
+                  selected={selectedIds.has(item.id)}
+                  onToggleSelected={(id) => toggleSelected(id)}
+                  onEdit={() => openDetails(item, 'edit')}
                   onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
                   onVisibleChange={scheduleImageLoad}
                   onImageUpdate={(newImageUrl, newApiSource) => {
@@ -1142,7 +1234,7 @@ const MediaTracker = () => {
               </TableCell>
               <TableCell className="text-right">
                 <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="outline" onClick={() => handleEditMedia(item)}>
+                  <Button size="sm" variant="outline" onClick={() => openDetails(item, 'edit')}>
                     <Edit className="h-4 w-4 mr-1" /> Edit
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setDeleteConfirm({ open: true, id: item.id })} className="text-destructive hover:text-destructive">
@@ -1163,58 +1255,84 @@ const MediaTracker = () => {
         <AppSidebar />
         
         <div className="flex-1 lg:ml-0">
-          {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleSidebar}
-              className="touch-manipulation"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Media Tracker</h1>
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 p-0 touch-manipulation">
-                <LayoutGrid className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant={viewMode === 'list' ? 'default' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 p-0 touch-manipulation">
-                <ListIcon className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-
-
-          <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
-            <div className="flex items-center justify-between mb-4">
-              <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
-                Media Tracker
-              </h1>
-              <div className="flex items-center gap-2">
-                {/* View toggle */}
-                <div className="hidden sm:flex items-center">
-                  <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'outline'} onClick={() => setViewMode('grid')} className="mr-1">
-                    <LayoutGrid className="h-4 w-4" />
-                  </Button>
-                  <Button size="sm" variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')}>
-                    <ListIcon className="h-4 w-4" />
-                  </Button>
-                </div>
-                <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" size="sm">
+          <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
+            <SheetContent side="right" className="w-full sm:max-w-lg p-0">
+              <SheetHeader className="p-6 border-b border-border">
+                <SheetTitle className="flex items-center justify-between gap-3">
+                  <span className="truncate">
+                    {detailsMode === 'edit'
+                      ? (editingItem ? 'Edit Media' : 'Add Media')
+                      : (editingItem?.title || 'Media')}
+                  </span>
+                  {editingItem && detailsMode === 'view' && (
+                    <Button size="sm" variant="outline" onClick={() => openDetails(editingItem, 'edit')}>
                       <Edit className="h-4 w-4 mr-2" />
-                      Advanced
+                      Edit
                     </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[500px]">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {editingItem ? 'Edit Media' : 'Add New Media'}
-                    </DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleSubmit} className="space-y-4">
+                  )}
+                </SheetTitle>
+                <SheetDescription className="flex items-center gap-2">
+                  {editingItem ? (
+                    <>
+                      <Badge className={getTypeColor(editingItem.type as any)}>{editingItem.type}</Badge>
+                      <Badge className={getStatusColor(editingItem.status as any)}>{getStatusCategory(editingItem.status)}</Badge>
+                    </>
+                  ) : (
+                    <span>Manage your media item</span>
+                  )}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {detailsMode === 'view' && editingItem && (
+                  <div className="grid grid-cols-[120px_1fr] gap-4 items-start">
+                    <div className="relative aspect-[2/3] rounded-md overflow-hidden bg-muted">
+                      <img
+                        src={imageUrls.get(editingItem.id) || PLACEHOLDER_IMAGE}
+                        alt={editingItem.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="text-sm text-muted-foreground">Status</div>
+                        <div className="text-sm font-medium">{editingItem.status}</div>
+                        <div className="text-sm text-muted-foreground">Rating</div>
+                        <div className="text-sm font-medium">{editingItem.rating ? editingItem.rating.toFixed(1) : '-'}</div>
+                        <div className="text-sm text-muted-foreground">Progress</div>
+                        <div className="text-sm font-medium">
+                          {editingItem.current_episode
+                            ? `S${editingItem.current_season || 1} E${editingItem.current_episode}`
+                            : editingItem.current_chapter
+                            ? `Ch. ${editingItem.current_chapter}`
+                            : '-'}
+                        </div>
+                      </div>
+                      <div className="pt-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            const src = imageApiSources.get(editingItem.id);
+                            const res = await refreshCoverImage(editingItem.title, editingItem.type, src, editingItem.id);
+                            if (res) {
+                              setImageUrls(prev => new Map([...prev, [editingItem.id, res.coverImage]]));
+                              setImageApiSources(prev => new Map([...prev, [editingItem.id, res.apiSource]]));
+                              toast({ title: 'Cover updated', description: `Source: ${res.apiSource}` });
+                            } else {
+                              toast({ title: 'No cover found', description: 'Tried all sources', variant: 'destructive' });
+                            }
+                          }}
+                        >
+                          Refresh cover
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {detailsMode === 'edit' && (
+                  <form id="media-details-form" onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="title">Title</Label>
                       <Input
@@ -1225,7 +1343,7 @@ const MediaTracker = () => {
                         required
                       />
                     </div>
-                    
+
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="type">Type</Label>
@@ -1249,7 +1367,7 @@ const MediaTracker = () => {
                           </SelectContent>
                         </Select>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label htmlFor="status">Status</Label>
                         <Select
@@ -1339,22 +1457,82 @@ const MediaTracker = () => {
                         />
                       </div>
                     )}
-
-                    <div className="flex justify-end space-x-2 pt-4">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleModalClose}
-                      >
-                        Cancel
-                      </Button>
-                      <Button type="submit">
-                        {editingItem ? 'Update' : 'Create'}
-                      </Button>
-                    </div>
                   </form>
-                  </DialogContent>
-                </Dialog>
+                )}
+              </div>
+
+              <SheetFooter className="p-6 border-t border-border">
+                <div className="flex w-full justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => {
+                      setDetailsOpen(false);
+                      setDetailsMode('view');
+                    }}
+                  >
+                    Close
+                  </Button>
+                  {detailsMode === 'edit' && (
+                    <Button type="submit" form="media-details-form">
+                      {editingItem ? 'Update' : 'Create'}
+                    </Button>
+                  )}
+                </div>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleSidebar}
+              className="touch-manipulation"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Media Tracker</h1>
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 p-0 touch-manipulation">
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant={viewMode === 'list' ? 'default' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 p-0 touch-manipulation">
+                <ListIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+
+
+          <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
+            <div className="flex items-center justify-between mb-4">
+              <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
+                Media Tracker
+              </h1>
+              <div className="flex items-center gap-2">
+                {/* View toggle */}
+                <div className="hidden sm:flex items-center">
+                  <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'outline'} onClick={() => setViewMode('grid')} className="mr-1">
+                    <LayoutGrid className="h-4 w-4" />
+                  </Button>
+                  <Button size="sm" variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')}>
+                    <ListIcon className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingItem(null);
+                    resetForm();
+                    setDetailsMode('edit');
+                    setDetailsOpen(true);
+                  }}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Add / Edit
+                </Button>
               </div>
             </div>
 
@@ -1412,6 +1590,41 @@ const MediaTracker = () => {
           </div>
 
           <div className="p-4 sm:p-6">
+            <div className="mb-4 flex flex-col gap-3">
+              <Tabs value={activeTypeTab} onValueChange={(v) => setActiveTypeTab(v as any)}>
+                <TabsList className="w-full justify-start overflow-x-auto">
+                  <TabsTrigger value="all">All</TabsTrigger>
+                  <TabsTrigger value="Anime">Anime</TabsTrigger>
+                  <TabsTrigger value="Manga">Manga</TabsTrigger>
+                  <TabsTrigger value="Manhwa">Manhwa</TabsTrigger>
+                  <TabsTrigger value="Manhua">Manhua</TabsTrigger>
+                  <TabsTrigger value="Series">Series</TabsTrigger>
+                  <TabsTrigger value="Movie">Movie</TabsTrigger>
+                  <TabsTrigger value="KDrama">KDrama</TabsTrigger>
+                  <TabsTrigger value="JDrama">JDrama</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant={needsCoverOnly ? 'default' : 'outline'}
+                  onClick={() => setNeedsCoverOnly(v => !v)}
+                >
+                  Needs Cover
+                </Button>
+                {selectedIds.size > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">Selected: {selectedIds.size}</Badge>
+                    <Button size="sm" variant="default" onClick={refreshSelectedCovers}>
+                      Refresh Covers
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={clearSelection}>Clear</Button>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Search & Filters Collapsible */}
             <div className="mb-6 space-y-3">
               <div className="flex items-center gap-2">
@@ -1431,7 +1644,7 @@ const MediaTracker = () => {
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="gap-2">
                       <Filter className="h-4 w-4" />
-                      Type {filterType.length > 0 && `(${filterType.length})`}
+                      Type Filter {filterType.length > 0 && `(${filterType.length})`}
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-48">
@@ -1457,6 +1670,9 @@ const MediaTracker = () => {
                           </label>
                         </div>
                       ))}
+                      <p className="text-xs text-muted-foreground pt-1">
+                        Tabs control the main view; this filter narrows further.
+                      </p>
                       {filterType.length > 0 && (
                         <Button
                           variant="ghost"
@@ -1620,7 +1836,7 @@ const MediaTracker = () => {
                   </div>
                 ))}
               </div>
-            ) : categoryFilteredItems.length === 0 ? (
+            ) : finalItems.length === 0 ? (
               <div className="zen-card p-8 text-center">
                 <p className="text-muted-foreground mb-4">
                   {filterType.length > 0 || filterStatus !== 'All' 
@@ -1631,9 +1847,9 @@ const MediaTracker = () => {
             ) : (
               <div className="space-y-6">
                 {viewMode === 'grid' ? (
-                  <MediaGridView items={categoryFilteredItems} />
+                  <MediaGridView items={finalItems} />
                 ) : (
-                  <MediaListView items={categoryFilteredItems} />
+                  <MediaListView items={finalItems} />
                 )}
                 {/* Infinite scroll sentinel */}
                 <div ref={loadMoreRef} />
