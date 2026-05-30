@@ -142,8 +142,23 @@ const MediaTracker = () => {
     } catch {}
     return 'all';
   });
+  const [visibleTypeTabs, setVisibleTypeTabs] = useState<Array<'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'Series' | 'Movie' | 'KDrama' | 'JDrama'>>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerVisibleTypeTabs') : null;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          const allowed = new Set(['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama']);
+          return parsed.filter((t) => typeof t === 'string' && allowed.has(t)) as any;
+        }
+      }
+    } catch {}
+    return ['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'];
+  });
   const [needsCoverOnly, setNeedsCoverOnly] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [tabsManageOpen, setTabsManageOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [filterType, setFilterType] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -294,6 +309,12 @@ const MediaTracker = () => {
       localStorage.setItem('mediaTrackerActiveTypeTab', activeTypeTab);
     } catch {}
   }, [activeTypeTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mediaTrackerVisibleTypeTabs', JSON.stringify(visibleTypeTabs));
+    } catch {}
+  }, [visibleTypeTabs]);
 
   // Lazy loading: only fetch covers for visible items
   const visibleItemsRef = useRef<Set<number>>(new Set());
@@ -1142,6 +1163,85 @@ const MediaTracker = () => {
   );
 
   // List view component
+  const MediaListRow = ({ item }: { item: MediaItem }) => {
+    const { ref, inView } = useInView({ rootMargin: '300px' });
+    useEffect(() => {
+      scheduleImageLoad(item.id, inView);
+    }, [item.id, inView]);
+
+    const cover = imageUrls.get(item.id);
+
+    return (
+      <TableRow key={item.id} ref={ref as any}>
+        <TableCell id={`media-${item.id}`} className="font-medium">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted flex items-center justify-center">
+              {cover ? (
+                <img src={cover} alt={item.title} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-lg font-bold text-muted-foreground">
+                  {item.title.charAt(0).toUpperCase()}
+                </span>
+              )}
+            </div>
+            <button type="button" className="truncate text-left hover:underline" onClick={() => openDetails(item, 'view')}>
+              {item.title}
+            </button>
+          </div>
+        </TableCell>
+        <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
+        <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
+        <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
+        <TableCell>
+          <div className="flex items-center gap-2">
+            {readableTypes.includes(item.type) && item.current_chapter ? (
+              <>
+                <span className="min-w-[60px]">Ch. {item.current_chapter}</span>
+                <div className="flex gap-1">
+                  <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item, 'current_chapter', -1)}>
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                  <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item, 'current_chapter', 1)}>
+                    <PlusIcon className="h-3 w-3" />
+                  </Button>
+                </div>
+              </>
+            ) : watchableTypes.includes(item.type) && (item.current_season || item.current_episode) ? (
+              <>
+                <span className="min-w-[80px]">
+                  {item.current_season ? `S${item.current_season} • ` : ''}
+                  {item.current_episode ? `E${item.current_episode}` : ''}
+                </span>
+                {item.current_episode && (
+                  <div className="flex gap-1">
+                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item, 'current_episode', -1)}>
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                    <Button size="icon" variant="outline" className="h-6 w-6" disabled={updatingIds.has(item.id)} onClick={() => handleQuickUpdate(item, 'current_episode', 1)}>
+                      <PlusIcon className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <span>-</span>
+            )}
+          </div>
+        </TableCell>
+        <TableCell className="text-right">
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => openDetails(item, 'edit')}>
+              <Edit className="h-4 w-4 mr-1" /> Edit
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setDeleteConfirm({ open: true, id: item.id })} className="text-destructive hover:text-destructive">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  };
+
   const MediaListView = ({ items }: { items: MediaItem[] }) => (
     <div className="zen-card p-0 overflow-x-auto">
       <Table>
@@ -1157,92 +1257,7 @@ const MediaTracker = () => {
         </TableHeader>
         <TableBody>
           {items.map((item) => (
-            <TableRow key={item.id}>
-              <TableCell id={`media-${item.id}`} className="font-medium">
-                <div className="flex items-center gap-3">
-                  {/* Small Cover Image - Images are lazy-loaded in grid view */}
-                  <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted flex items-center justify-center">
-                    <span className="text-lg font-bold text-muted-foreground">
-                      {item.title.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <span className="truncate">{item.title}</span>
-                </div>
-              </TableCell>
-              <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
-              <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
-              <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  {readableTypes.includes(item.type) && item.current_chapter ? (
-                    <>
-                      <span className="min-w-[60px]">Ch. {item.current_chapter}</span>
-                      <div className="flex gap-1">
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-6 w-6"
-                          disabled={updatingIds.has(item.id)}
-                          onClick={() => handleQuickUpdate(item, 'current_chapter', -1)}
-                        >
-                          <Minus className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          className="h-6 w-6"
-                          disabled={updatingIds.has(item.id)}
-                          onClick={() => handleQuickUpdate(item, 'current_chapter', 1)}
-                        >
-                          <PlusIcon className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </>
-                  ) : watchableTypes.includes(item.type) && (item.current_season || item.current_episode) ? (
-                    <>
-                      <span className="min-w-[80px]">
-                        {item.current_season ? `S${item.current_season} • ` : ''}
-                        {item.current_episode ? `E${item.current_episode}` : ''}
-                      </span>
-                      {item.current_episode && (
-                        <div className="flex gap-1">
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            disabled={updatingIds.has(item.id)}
-                            onClick={() => handleQuickUpdate(item, 'current_episode', -1)}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="outline"
-                            className="h-6 w-6"
-                            disabled={updatingIds.has(item.id)}
-                            onClick={() => handleQuickUpdate(item, 'current_episode', 1)}
-                          >
-                            <PlusIcon className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <span>-</span>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="outline" onClick={() => openDetails(item, 'edit')}>
-                    <Edit className="h-4 w-4 mr-1" /> Edit
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setDeleteConfirm({ open: true, id: item.id })} className="text-destructive hover:text-destructive">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
+            <MediaListRow key={item.id} item={item} />
           ))}
         </TableBody>
       </Table>
@@ -1494,6 +1509,14 @@ const MediaTracker = () => {
             </Button>
             <h1 className="font-heading font-bold text-base sm:text-lg">Media Tracker</h1>
             <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setQuickAddOpen(true)}
+                className="h-8 px-2"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
               <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 p-0 touch-manipulation">
                 <LayoutGrid className="h-4 w-4" />
               </Button>
@@ -1536,57 +1559,92 @@ const MediaTracker = () => {
               </div>
             </div>
 
-            {/* Quick Add Bar */}
-            <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-              <div className="flex-1">
-                <Label className="text-sm text-muted-foreground mb-1">Quick Add</Label>
-                <Input
-                  placeholder="Enter title (e.g., One Piece, Breaking Bad)"
-                  value={quickAddTitle}
-                  onChange={(e) => setQuickAddTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.ctrlKey) handleQuickAdd();
-                  }}
-                />
-              </div>
-              <div className="w-full sm:w-40">
-                <Label className="text-sm text-muted-foreground mb-1">Type</Label>
-                <Select value={quickAddType} onValueChange={(value) => setQuickAddType(value as MediaItem['type'])}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Anime">Anime</SelectItem>
-                    <SelectItem value="Manga">Manga</SelectItem>
-                    <SelectItem value="Manhwa">Manhwa</SelectItem>
-                    <SelectItem value="Manhua">Manhua</SelectItem>
-                    <SelectItem value="Series">Series</SelectItem>
-                    <SelectItem value="Movie">Movie</SelectItem>
-                    <SelectItem value="KDrama">KDrama</SelectItem>
-                    <SelectItem value="JDrama">JDrama</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="w-full sm:w-32">
-                <Label className="text-sm text-muted-foreground mb-1">
-                  {readableTypes.includes(quickAddType) ? 'Chapter' : watchableTypes.includes(quickAddType) ? 'Episode' : 'Progress'}
-                </Label>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder={readableTypes.includes(quickAddType) ? 'Ch. #' : watchableTypes.includes(quickAddType) ? 'Ep. #' : '#'}
-                  value={quickAddProgress}
-                  onChange={(e) => setQuickAddProgress(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleQuickAdd();
-                  }}
-                />
-              </div>
-              <Button onClick={handleQuickAdd} className="h-10 w-full sm:w-auto touch-manipulation">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm text-muted-foreground">Add media without leaving the list.</div>
+              <Button variant="outline" size="sm" onClick={() => setQuickAddOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
-                Add
+                Quick Add
               </Button>
             </div>
+
+            <Dialog open={quickAddOpen} onOpenChange={setQuickAddOpen}>
+              <DialogContent className="sm:max-w-[520px]">
+                <DialogHeader>
+                  <DialogTitle>Quick Add</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="quick-title">Title</Label>
+                    <Input
+                      id="quick-title"
+                      placeholder="One Piece, Breaking Bad"
+                      value={quickAddTitle}
+                      onChange={(e) => setQuickAddTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                          handleQuickAdd();
+                          setQuickAddOpen(false);
+                        }
+                      }}
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Type</Label>
+                      <Select value={quickAddType} onValueChange={(value) => setQuickAddType(value as MediaItem['type'])}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Anime">Anime</SelectItem>
+                          <SelectItem value="Manga">Manga</SelectItem>
+                          <SelectItem value="Manhwa">Manhwa</SelectItem>
+                          <SelectItem value="Manhua">Manhua</SelectItem>
+                          <SelectItem value="Series">Series</SelectItem>
+                          <SelectItem value="Movie">Movie</SelectItem>
+                          <SelectItem value="KDrama">KDrama</SelectItem>
+                          <SelectItem value="JDrama">JDrama</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>
+                        {readableTypes.includes(quickAddType) ? 'Chapter' : watchableTypes.includes(quickAddType) ? 'Episode' : 'Progress'}
+                      </Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        placeholder={readableTypes.includes(quickAddType) ? 'Ch. #' : watchableTypes.includes(quickAddType) ? 'Ep. #' : '#'}
+                        value={quickAddProgress}
+                        onChange={(e) => setQuickAddProgress(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleQuickAdd();
+                            setQuickAddOpen(false);
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setQuickAddOpen(false)}>Cancel</Button>
+                  <Button
+                    onClick={() => {
+                      handleQuickAdd();
+                      setQuickAddOpen(false);
+                    }}
+                    disabled={!quickAddTitle.trim() || !quickAddType}
+                  >
+                    Add
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
 
           <div className="p-4 sm:p-6">
@@ -1594,23 +1652,22 @@ const MediaTracker = () => {
               <Tabs value={activeTypeTab} onValueChange={(v) => setActiveTypeTab(v as any)}>
                 <TabsList className="w-full justify-start overflow-x-auto">
                   <TabsTrigger value="all">All</TabsTrigger>
-                  <TabsTrigger value="Anime">Anime</TabsTrigger>
-                  <TabsTrigger value="Manga">Manga</TabsTrigger>
-                  <TabsTrigger value="Manhwa">Manhwa</TabsTrigger>
-                  <TabsTrigger value="Manhua">Manhua</TabsTrigger>
-                  <TabsTrigger value="Series">Series</TabsTrigger>
-                  <TabsTrigger value="Movie">Movie</TabsTrigger>
-                  <TabsTrigger value="KDrama">KDrama</TabsTrigger>
-                  <TabsTrigger value="JDrama">JDrama</TabsTrigger>
+                  {visibleTypeTabs.includes('Anime') && <TabsTrigger value="Anime">Anime</TabsTrigger>}
+                  {visibleTypeTabs.includes('Manga') && <TabsTrigger value="Manga">Manga</TabsTrigger>}
+                  {visibleTypeTabs.includes('Manhwa') && <TabsTrigger value="Manhwa">Manhwa</TabsTrigger>}
+                  {visibleTypeTabs.includes('Manhua') && <TabsTrigger value="Manhua">Manhua</TabsTrigger>}
+                  {visibleTypeTabs.includes('Series') && <TabsTrigger value="Series">Series</TabsTrigger>}
+                  {visibleTypeTabs.includes('Movie') && <TabsTrigger value="Movie">Movie</TabsTrigger>}
+                  {visibleTypeTabs.includes('KDrama') && <TabsTrigger value="KDrama">KDrama</TabsTrigger>}
+                  {visibleTypeTabs.includes('JDrama') && <TabsTrigger value="JDrama">JDrama</TabsTrigger>}
                 </TabsList>
               </Tabs>
 
               <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant={needsCoverOnly ? 'default' : 'outline'}
-                  onClick={() => setNeedsCoverOnly(v => !v)}
-                >
+                <Button size="sm" variant="outline" onClick={() => setTabsManageOpen(true)}>
+                  Manage Tabs
+                </Button>
+                <Button size="sm" variant={needsCoverOnly ? 'default' : 'outline'} onClick={() => setNeedsCoverOnly(v => !v)}>
                   Needs Cover
                 </Button>
                 {selectedIds.size > 0 && (
@@ -1624,6 +1681,41 @@ const MediaTracker = () => {
                 )}
               </div>
             </div>
+
+            <Dialog open={tabsManageOpen} onOpenChange={setTabsManageOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Manage Type Tabs</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  {(['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'] as const).map((t) => (
+                    <div key={t} className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={`tab-${t}`}
+                          checked={visibleTypeTabs.includes(t)}
+                          onCheckedChange={(checked) => {
+                            setVisibleTypeTabs((prev) => {
+                              const set = new Set(prev);
+                              if (checked) set.add(t);
+                              else set.delete(t);
+                              return Array.from(set);
+                            });
+                          }}
+                        />
+                        <Label htmlFor={`tab-${t}`}>{t}</Label>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-xs text-muted-foreground">
+                    Tabs are stored in localStorage. Removing a tab doesn’t delete your media.
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setTabsManageOpen(false)}>Close</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             {/* Search & Filters Collapsible */}
             <div className="mb-6 space-y-3">
