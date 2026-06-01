@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, Calendar, CreditCard, Trash2, Edit2, TrendingUp, Bell, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Plus, CreditCard, Trash2, Edit2, TrendingUp, Bell, CheckCircle, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 import AppSidebar from '@/components/AppSidebar';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { 
   fetchSubscriptions,
   createSubscription,
@@ -29,6 +30,7 @@ import { dateToYMD, parseYMD } from '@/lib/date-utils';
 
 const Subscriptions = () => {
   const { toast } = useToast();
+  const { toggle: toggleSidebar } = useSidebar();
   
   const [loading, setLoading] = useState(true);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -93,6 +95,15 @@ const Subscriptions = () => {
 
   const summary = useMemo(() => {
     return calculateSubscriptionSummary(subscriptions);
+  }, [subscriptions]);
+
+  // Count subscriptions (active/renew) renewing within the next 7 days
+  const renewsSoonCount = useMemo(() => {
+    return subscriptions.filter((sub) => {
+      if (sub.status !== 'active' && sub.status !== 'renew') return false;
+      const days = getDaysUntilRenewal(sub.next_renewal_date);
+      return days >= 0 && days <= 7;
+    }).length;
   }, [subscriptions]);
 
   const handleSubmit = async () => {
@@ -209,7 +220,17 @@ const Subscriptions = () => {
       <div className="flex">
         <AppSidebar />
         
-        <div className="flex-1 lg:ml-0 p-6">
+        <div className="flex-1 lg:ml-0">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Subscriptions</h1>
+            <div className="w-10" />
+          </div>
+
+          <div className="p-4 sm:p-6">
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -390,14 +411,14 @@ const Subscriptions = () => {
             
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Monthly</CardTitle>
-                <Calendar className="h-4 w-4 text-orange-500" />
+                <CardTitle className="text-sm font-medium">Renews Soon</CardTitle>
+                <Bell className="h-4 w-4 text-orange-500" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.monthlyTotal)}
+                  {loading ? <Skeleton className="h-8 w-12" /> : renewsSoonCount}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">All active subscriptions</p>
+                <p className="text-xs text-muted-foreground mt-1">Within the next 7 days</p>
               </CardContent>
             </Card>
           </div>
@@ -522,6 +543,7 @@ const Subscriptions = () => {
               )}
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
     </div>

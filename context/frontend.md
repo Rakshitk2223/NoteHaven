@@ -17,7 +17,7 @@
 | Server state | TanStack React Query v5 (used heavily only in MediaTracker; most pages use manual `useState` + `useEffect`) |
 | Routing | react-router-dom v6 |
 | Animation | framer-motion + hand-written CSS keyframes in `index.css` |
-| Rich text | Tiptap v2 (StarterKit + Underline + Gapcursor) for Notes |
+| Rich text | Tiptap v2 (StarterKit + Underline) for Notes |
 | Code editor | CodeMirror 6 for Code Snippets |
 | Forms/validation | react-hook-form + zod (libs present; most forms are manual `useState`) |
 | HTML sanitization | DOMPurify (`sanitizeHtml`, `sanitizePreview` in `lib/utils.ts`) |

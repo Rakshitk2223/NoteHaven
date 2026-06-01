@@ -379,10 +379,10 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
 // ============================================
 
 /**
- * Clean up empty tags (can be called periodically)
- * Note: This calls the database function via REST API
+ * Clean up empty tags (usage_count === 0) for the current user.
+ * Calls the `cleanup_empty_tags` Postgres function.
  */
 export async function cleanupEmptyTags(): Promise<void> {
-  // Use raw SQL via REST or implement client-side
-  // For now, this is a placeholder - empty tags auto-cleanup via trigger
+  const { error } = await supabase.rpc('cleanup_empty_tags');
+  if (error) throw error;
 }

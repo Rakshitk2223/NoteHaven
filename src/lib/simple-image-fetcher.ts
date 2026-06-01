@@ -3,6 +3,7 @@
 // Only uses external APIs for missing items
 
 import { supabase } from '@/integrations/supabase/client';
+import { devLog } from '@/lib/logger';
 
 // Supabase Edge Function URL (for fetching new images only)
 const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
@@ -31,7 +32,7 @@ function getCachedImages(): Map<number, string> | null {
     const cached = localStorage.getItem(getImageCacheKey());
     if (cached) {
       const data = JSON.parse(cached);
-      console.log('📦 Using localStorage cache:', Object.keys(data).length, 'images');
+      devLog('📦 Using localStorage cache:', Object.keys(data).length, 'images');
       return new Map(Object.entries(data).map(([k, v]) => [parseInt(k), v as string]));
     }
   } catch (e) {
@@ -59,7 +60,7 @@ function cacheImages(images: Map<number, string>, apiSources?: Map<number, strin
   try {
     const obj = Object.fromEntries(images);
     localStorage.setItem(getImageCacheKey(), JSON.stringify(obj));
-    console.log('💾 Saved to localStorage cache:', images.size, 'images');
+    devLog('💾 Saved to localStorage cache:', images.size, 'images');
     
     if (apiSources) {
       const sourceObj = Object.fromEntries(apiSources);
@@ -93,7 +94,7 @@ async function fetchFromMediaTracker(
         found.add(row.id);
       }
     });
-    console.log(`✅ media_tracker cover_image: ${images.size}/${items.length} found`);
+    devLog(`✅ media_tracker cover_image: ${images.size}/${items.length} found`);
   } catch (error) {
     console.error('media_tracker fetch error:', error);
   }
@@ -130,7 +131,7 @@ async function fetchFromMediaMetadata(
         sources.set(item.id, 'database');
       }
     });
-    console.log(`✅ media_metadata: ${images.size}/${items.length} found`);
+    devLog(`✅ media_metadata: ${images.size}/${items.length} found`);
   } catch (error) {
     console.error('media_metadata fetch error:', error);
   }
@@ -146,7 +147,7 @@ async function fetchMissingItemsFromAPI(
   
   if (missingItems.length === 0) return { images, sources };
   
-  console.log(`🌐 Fetching ${missingItems.length} missing items from APIs...`);
+  devLog(`🌐 Fetching ${missingItems.length} missing items from APIs...`);
   
   // Process in parallel with Promise.all
   const batchSize = 10; // Process 10 at a time to avoid overwhelming
@@ -193,7 +194,7 @@ async function fetchMissingItemsFromAPI(
     }
   }
   
-  console.log(`✅ Fetched ${images.size}/${missingItems.length} missing items from APIs`);
+  devLog(`✅ Fetched ${images.size}/${missingItems.length} missing items from APIs`);
   
   return { images, sources };
 }
@@ -206,7 +207,7 @@ export async function fetchImagesFromSupabase(
     return { found: 0, notFound: 0, fetchedFromAPI: 0, results: [] };
   }
 
-  console.log(`🚀 Loading ${items.length} cover images...`);
+  devLog(`🚀 Loading ${items.length} cover images...`);
   const startTime = performance.now();
 
   const results: ImageResult[] = [];
@@ -229,7 +230,7 @@ export async function fetchImagesFromSupabase(
         needsDbCheck.push(item);
       }
     });
-    console.log(`💾 Cache: ${cacheHits.size} hits, ${needsDbCheck.length} need DB`);
+    devLog(`💾 Cache: ${cacheHits.size} hits, ${needsDbCheck.length} need DB`);
   } else {
     needsDbCheck.push(...items);
   }
@@ -268,7 +269,7 @@ export async function fetchImagesFromSupabase(
 
   const totalTime = (performance.now() - startTime).toFixed(0);
   const found = results.filter(r => r.imageUrl).length;
-  console.log(`✅ Total: ${found}/${items.length} in ${totalTime}ms (cache: ${cacheHits.size}, tracker: ${trackerImages.size}, metadata: ${metaImages.size}, api: ${fetchedFromAPI})`);
+  devLog(`✅ Total: ${found}/${items.length} in ${totalTime}ms (cache: ${cacheHits.size}, tracker: ${trackerImages.size}, metadata: ${metaImages.size}, api: ${fetchedFromAPI})`);
 
   return { found, notFound: items.length - found, fetchedFromAPI, results };
 }

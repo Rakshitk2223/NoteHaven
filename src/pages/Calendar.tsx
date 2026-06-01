@@ -8,7 +8,9 @@ import { QuickAddDialog } from '@/components/calendar/QuickAddDialog';
 import { useCalendar } from '@/hooks/useCalendar';
 import type { CalendarView } from '@/types/calendar';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { Loader2, CalendarX } from 'lucide-react';
+import { useSidebar } from '@/contexts/SidebarContext';
+import { Button } from '@/components/ui/button';
+import { Loader2, CalendarX, Menu } from 'lucide-react';
 
 const Calendar = () => {
   const [view, setView] = useState<CalendarView>('month');
@@ -17,6 +19,7 @@ const Calendar = () => {
   const [quickAddDate, setQuickAddDate] = useState<Date | null>(null);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const isMobile = useIsMobile();
+  const { toggle: toggleSidebar } = useSidebar();
 
   const { events, loading, filters, setFilters, refetch } = useCalendar(currentDate, view);
 
@@ -46,7 +49,17 @@ const Calendar = () => {
       <div className="flex">
         <AppSidebar />
 
-        <div className="flex-1 p-4 lg:p-6">
+        <div className="flex-1">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Calendar</h1>
+            <div className="w-10" />
+          </div>
+
+          <div className="p-4 lg:p-6">
           <CalendarHeader
             currentDate={currentDate}
             view={view}
@@ -92,6 +105,7 @@ const Calendar = () => {
                 )}
               </>
             )}
+          </div>
           </div>
         </div>
       </div>

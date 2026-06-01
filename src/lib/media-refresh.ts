@@ -2,6 +2,7 @@
 // Allows users to cycle through different APIs to get better cover images
 
 import { supabase } from '@/integrations/supabase/client';
+import { devLog } from '@/lib/logger';
 
 const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
 
@@ -231,30 +232,30 @@ export async function refreshCoverImage(
   // Determine which API to try next
   const currentIndex = currentApiSource ? priority.indexOf(currentApiSource) : -1;
   
-  console.log(`🔄 Refreshing cover for "${title}" (${type})`);
-  console.log(`   Current API: ${currentApiSource || 'none'}`);
-  console.log(`   Priority list: ${priority.join(' → ')}`);
+  devLog(`🔄 Refreshing cover for "${title}" (${type})`);
+  devLog(`   Current API: ${currentApiSource || 'none'}`);
+  devLog(`   Priority list: ${priority.join(' → ')}`);
   
   // Try each API in order starting from the next one
   for (let i = 1; i <= priority.length; i++) {
     const apiIndex = (currentIndex + i) % priority.length;
     const apiToTry = priority[apiIndex];
     
-    console.log(`   Trying ${apiToTry}...`);
+    devLog(`   Trying ${apiToTry}...`);
     
     const result = await fetchFromApi(apiToTry, title, type);
     
     if (result) {
-      console.log(`✅ Success! Got cover from ${result.apiSource}`);
+      devLog(`✅ Success! Got cover from ${result.apiSource}`);
       await updateMediaTracker(title, type, result, mediaId);
       invalidateImageCache(mediaId);
       return result;
     }
     
-    console.log(`❌ ${apiToTry} failed`);
+    devLog(`❌ ${apiToTry} failed`);
   }
   
-  console.log(`❌ Tried all ${priority.length} APIs, none succeeded`);
+  devLog(`❌ Tried all ${priority.length} APIs, none succeeded`);
   return null;
 }
 
@@ -281,7 +282,7 @@ async function updateMediaTracker(
         if (trackerError) {
           console.error('Failed to update media_tracker:', trackerError);
         } else {
-          console.log('💾 Updated media_tracker.cover_image');
+          devLog('💾 Updated media_tracker.cover_image');
         }
       }
     }
@@ -299,7 +300,7 @@ async function updateMediaTracker(
     if (metaError) {
       console.error('Failed to update media_metadata:', metaError);
     } else {
-      console.log('💾 Updated media_metadata with new cover from', newData.apiSource);
+      devLog('💾 Updated media_metadata with new cover from', newData.apiSource);
     }
   } catch (error) {
     console.error('Database update error:', error);
@@ -328,7 +329,7 @@ function invalidateImageCache(mediaId?: number) {
       localStorage.setItem(sourceCacheKey, JSON.stringify(data));
     }
 
-    console.log(`🗑️ Invalidated image cache for item ${mediaId}`);
+    devLog(`🗑️ Invalidated image cache for item ${mediaId}`);
   } catch (error) {
     console.error('Cache invalidation error:', error);
   }

@@ -13,7 +13,7 @@ const FloatingShapes = () => {
       {[...Array(6)].map((_, i) => (
         <motion.div
           key={i}
-          className="absolute rounded-full mix-blend-multiply filter blur-xl opacity-30"
+          className="absolute rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-xl opacity-30 dark:opacity-40"
           style={{
             background: i % 2 === 0 
               ? 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.5) 100%)'

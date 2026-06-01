@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { supabase } from '@/integrations/supabase/client';
+import { devLog } from '@/lib/logger';
 
 // Supabase Edge Function URL
 const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
@@ -39,7 +40,7 @@ export interface SearchResponse {
 // Jikan API search
 const searchJikan = async (query: string, type: string): Promise<ExternalMedia[]> => {
   try {
-    console.log(`🔍 Searching Jikan for: ${query} (${type})`);
+    devLog(`🔍 Searching Jikan for: ${query} (${type})`);
     
     const jikanType = ['manga', 'manhwa', 'manhua'].includes(type.toLowerCase()) ? 'manga' : 'anime';
     
@@ -49,7 +50,7 @@ const searchJikan = async (query: string, type: string): Promise<ExternalMedia[]
     });
     
     const results = response.data.data || [];
-    console.log(`✅ Jikan found ${results.length} results for "${query}"`);
+    devLog(`✅ Jikan found ${results.length} results for "${query}"`);
     
     return results.map((item: any) => ({
       title: item.title || item.title_english || item.title_romaji || 'Unknown',
@@ -108,7 +109,7 @@ function mapSupabaseToExternalMedia(item: any): ExternalMedia {
 export const mediaApi = {
   async search(query: string, type?: string, limit: number = 10): Promise<ExternalMedia[]> {
     try {
-      console.log(`🔍 Searching Supabase Edge Function for: ${query} (${type || 'all'})`);
+      devLog(`🔍 Searching Supabase Edge Function for: ${query} (${type || 'all'})`);
       
       const url = new URL(EDGE_FUNCTION_URL);
       url.searchParams.set('q', query);
@@ -129,16 +130,16 @@ export const mediaApi = {
       const data: SearchResponse = await response.json();
       
       if (data.success && data.results && data.results.length > 0) {
-        console.log(`✅ Found ${data.results.length} results from ${data.source || 'unknown'}`);
+        devLog(`✅ Found ${data.results.length} results from ${data.source || 'unknown'}`);
         
         // Map Supabase results to ExternalMedia format
         return data.results.map(mapSupabaseToExternalMedia);
       }
       
-      console.log('⚠️ Edge function returned no results, trying Jikan...');
+      devLog('⚠️ Edge function returned no results, trying Jikan...');
     } catch (error) {
       console.error('❌ Edge function error:', error);
-      console.log('⚠️ Trying Jikan API as fallback...');
+      devLog('⚠️ Trying Jikan API as fallback...');
     }
     
     // Fallback to Jikan for anime/manga types

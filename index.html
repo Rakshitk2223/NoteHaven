@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NoteHaven - Your Personal Sanctuary</title>
     <meta name="description" content="Your personal sanctuary for notes, tasks, and AI prompts" />
     <meta name="author" content="NoteHaven" />
@@ -14,6 +14,18 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NoteHaven" />
     <meta name="theme-color" content="#4B5D7A" />
+
+    <!-- Apply saved light/dark mode before first paint to avoid a theme flash.
+         Full per-theme color variables are applied by the app on mount. -->
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem('theme') === 'dark') {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) { /* localStorage unavailable */ }
+      })();
+    </script>
     
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">

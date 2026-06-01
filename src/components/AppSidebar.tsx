@@ -2,7 +2,6 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
-  MessageSquare,
   Monitor,
   CheckSquare,
   FileText,
@@ -12,7 +11,6 @@ import {
   Cake,
   ChevronLeft,
   ChevronRight,
-  ExternalLink,
   Wallet,
   CreditCard,
   Calendar,
@@ -22,18 +20,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebar } from "@/contexts/SidebarContext";
-
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  "Dashboard": LayoutDashboard,
-  "Calendar": Calendar,
-  "Library": Library,
-  "Media": Monitor,
-  "Tasks": CheckSquare,
-  "Notes": FileText,
-  "Birthdays": Cake,
-  "Money Ledger": Wallet,
-  "Subscriptions": CreditCard,
-};
 
 interface NavItem {
   name: string;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2 } from 'lucide-react';
+import { Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -27,10 +27,12 @@ import {
 } from '@/lib/ledger';
 import { ensureLedgerCategoriesExist } from '@/lib/category-init';
 import { TagBadge } from '@/components/TagBadge';
+import { LedgerEntryForm } from '@/components/ledger/LedgerEntryForm';
 
 const MoneyLedger = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { toggle: toggleSidebar } = useSidebar();
   
   // State
   const [loading, setLoading] = useState(true);
@@ -254,7 +256,17 @@ const MoneyLedger = () => {
       <div className="flex">
         <AppSidebar />
         
-        <div className="flex-1 lg:ml-0 p-6">
+        <div className="flex-1 lg:ml-0">
+          {/* Mobile Header */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-heading font-bold text-base sm:text-lg">Money Ledger</h1>
+            <div className="w-10" />
+          </div>
+
+          <div className="p-4 sm:p-6">
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
@@ -282,98 +294,12 @@ const MoneyLedger = () => {
                   <DialogHeader>
                     <DialogTitle>Add New Entry</DialogTitle>
                   </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Type</label>
-                      <Select 
-                        value={newEntry.type} 
-                        onValueChange={(v: 'income' | 'expense') => setNewEntry({...newEntry, type: v})}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="income">Income</SelectItem>
-                          <SelectItem value="expense">Expense</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Amount</label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={newEntry.amount}
-                        onChange={(e) => setNewEntry({...newEntry, amount: e.target.value})}
-                      />
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium">Category</label>
-                        {categories.length === 0 && (
-                          <button 
-                            onClick={refreshCategories}
-                            className="text-xs text-blue-500 hover:underline"
-                          >
-                            Create categories
-                          </button>
-                        )}
-                      </div>
-                      <Select 
-                        value={newEntry.category_id} 
-                        onValueChange={(v) => setNewEntry({...newEntry, category_id: v})}
-                        disabled={categories.length === 0}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={categories.length === 0 ? "No categories available" : "Select category"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories
-                            .filter(c => c.type === newEntry.type)
-                            .map(category => (
-                              <SelectItem key={category.id} value={category.id.toString()}>
-                                {category.name}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                      {categories.length === 0 && (
-                        <p className="text-xs text-muted-foreground">
-                          Categories not loaded. Click "Create categories" above or refresh the page.
-                        </p>
-                      )}
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Date</label>
-                      <Input
-                        type="date"
-                        value={newEntry.transaction_date}
-                        onChange={(e) => setNewEntry({...newEntry, transaction_date: e.target.value})}
-                      />
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Description</label>
-                      <Input
-                        placeholder="What was this for?"
-                        value={newEntry.description}
-                        onChange={(e) => setNewEntry({...newEntry, description: e.target.value})}
-                      />
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Notes (optional)</label>
-                      <Input
-                        placeholder="Additional notes..."
-                        value={newEntry.notes}
-                        onChange={(e) => setNewEntry({...newEntry, notes: e.target.value})}
-                      />
-                    </div>
-                  </div>
+                  <LedgerEntryForm
+                    value={newEntry}
+                    onChange={setNewEntry}
+                    categories={categories}
+                    onCreateCategories={refreshCategories}
+                  />
                   <Button onClick={handleAddEntry} className="w-full">Add Entry</Button>
                 </DialogContent>
               </Dialog>
@@ -384,82 +310,11 @@ const MoneyLedger = () => {
                   <DialogHeader>
                     <DialogTitle>Edit Entry</DialogTitle>
                   </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Type</label>
-                      <Select 
-                        value={editFormData.type} 
-                        onValueChange={(v: 'income' | 'expense') => setEditFormData({...editFormData, type: v})}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="income">Income</SelectItem>
-                          <SelectItem value="expense">Expense</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Amount</label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={editFormData.amount}
-                        onChange={(e) => setEditFormData({...editFormData, amount: e.target.value})}
-                      />
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Category</label>
-                      <Select 
-                        value={editFormData.category_id} 
-                        onValueChange={(v) => setEditFormData({...editFormData, category_id: v})}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories
-                            .filter(c => c.type === editFormData.type)
-                            .map(category => (
-                              <SelectItem key={category.id} value={category.id.toString()}>
-                                {category.name}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Date</label>
-                      <Input
-                        type="date"
-                        value={editFormData.transaction_date}
-                        onChange={(e) => setEditFormData({...editFormData, transaction_date: e.target.value})}
-                      />
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Description</label>
-                      <Input
-                        placeholder="What was this for?"
-                        value={editFormData.description}
-                        onChange={(e) => setEditFormData({...editFormData, description: e.target.value})}
-                      />
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <label className="text-sm font-medium">Notes (optional)</label>
-                      <Input
-                        placeholder="Additional notes..."
-                        value={editFormData.notes}
-                        onChange={(e) => setEditFormData({...editFormData, notes: e.target.value})}
-                      />
-                    </div>
-                  </div>
+                  <LedgerEntryForm
+                    value={editFormData}
+                    onChange={setEditFormData}
+                    categories={categories}
+                  />
                   <Button onClick={handleUpdateEntry} className="w-full">Update Entry</Button>
                 </DialogContent>
               </Dialog>
@@ -644,6 +499,7 @@ const MoneyLedger = () => {
               )}
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { sanitizePreview } from '@/lib/utils';
 
 interface SharedMeta {
   note_id: number;
@@ -47,10 +48,10 @@ const SharedNote = () => {
           .single();
         if (noteErr || !noteData) throw noteErr || new Error('Note not found');
         setNote(noteData as NoteRow);
-        // populate DOM
+        // populate DOM (sanitize untrusted stored HTML before injecting)
         requestAnimationFrame(() => {
-          if (titleRef.current) titleRef.current.innerHTML = noteData.title || '';
-          if (contentRef.current) contentRef.current.innerHTML = noteData.content || '';
+          if (titleRef.current) titleRef.current.textContent = noteData.title || '';
+          if (contentRef.current) contentRef.current.innerHTML = sanitizePreview(noteData.content || '');
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Unable to load shared note';
@@ -72,15 +73,15 @@ const SharedNote = () => {
         // Update DOM if different from local (avoid overwriting while typing)
         // Only update if element is not focused AND content actually differs
         if (titleRef.current && document.activeElement !== titleRef.current) {
-          const currentTitle = titleRef.current.innerHTML || '';
+          const currentTitle = titleRef.current.textContent || '';
           const newTitle = newRow.title || '';
           if (currentTitle !== newTitle) {
-            titleRef.current.innerHTML = newTitle;
+            titleRef.current.textContent = newTitle;
           }
         }
         if (contentRef.current && document.activeElement !== contentRef.current) {
           const currentContent = contentRef.current.innerHTML || '';
-          const newContent = newRow.content || '';
+          const newContent = sanitizePreview(newRow.content || '');
           if (currentContent !== newContent) {
             contentRef.current.innerHTML = newContent;
           }
@@ -111,13 +112,13 @@ const SharedNote = () => {
 
   const handleTitleInput = () => {
     if (!note) return;
-    const html = titleRef.current?.innerHTML || '';
-    setNote(prev => prev ? { ...prev, title: html } : prev);
-    scheduleSave('title', html);
+    const text = titleRef.current?.textContent || '';
+    setNote(prev => prev ? { ...prev, title: text } : prev);
+    scheduleSave('title', text);
   };
   const handleContentInput = () => {
     if (!note) return;
-    const html = contentRef.current?.innerHTML || '';
+    const html = sanitizePreview(contentRef.current?.innerHTML || '');
     setNote(prev => prev ? { ...prev, content: html } : prev);
     scheduleSave('content', html);
   };

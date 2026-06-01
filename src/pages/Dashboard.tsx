@@ -418,8 +418,8 @@ const Dashboard = () => {
       .from('ledger_entries')
       .select('amount, type')
       .eq('user_id', user.id)
-      .gte('date', startOfMonth.toISOString().split('T')[0])
-      .lte('date', endOfMonth.toISOString().split('T')[0]);
+      .gte('transaction_date', startOfMonth.toISOString().split('T')[0])
+      .lte('transaction_date', endOfMonth.toISOString().split('T')[0]);
 
     if (error) throw error;
 
@@ -427,10 +427,11 @@ const Dashboard = () => {
     let expenses = 0;
 
     (data || []).forEach((entry) => {
+      const amount = Number(entry.amount) || 0;
       if (entry.type === 'income') {
-        income += entry.amount;
+        income += amount;
       } else {
-        expenses += entry.amount;
+        expenses += amount;
       }
     });
 
@@ -798,7 +799,7 @@ const Dashboard = () => {
               </h1>
             </div>
             <div className="flex items-center gap-4">
-              <div className="flex items-center gap-3 hidden md:flex">
+              <div className="hidden md:flex items-center gap-3">
                 <CircularProgress value={completionRate} size={44} strokeWidth={5} />
                 <div className="flex flex-col">
                   <span className="text-sm font-semibold text-foreground">{completionRate}%</span>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useLocation } from "react-router-dom";
 import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered, Search, X, Undo, Redo } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,6 @@ import { useEditor, EditorContent } from '@tiptap/react';
 
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
-import Gapcursor from '@tiptap/extension-gapcursor';
 // Markdown conversion utilities removed with HTML-only pivot
 
 interface Note {
@@ -49,7 +49,7 @@ const Notes = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isMobileView, setIsMobileView] = useState(false);
+  const isMobileView = useIsMobile();
   const [showNoteList, setShowNoteList] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   
@@ -65,7 +65,9 @@ const Notes = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [currentNoteTags, setCurrentNoteTags] = useState<Tag[]>([]);
-  const [notesPerPage] = useState(50); // Pagination: load 50 notes at a time
+  // Client-side pagination: all notes are fetched once, then rendered 50 at a
+  // time to cap the DOM size (it does NOT limit the initial DB fetch).
+  const [notesPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
   const { toast } = useToast();
   // Track local edit state to prevent remote overwrites
@@ -186,17 +188,6 @@ const Notes = () => {
   const titleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const contentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check if we're on mobile
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobileView(window.innerWidth < 768);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
   // Fetch notes on component mount
   useEffect(() => {
     fetchNotes();
@@ -235,7 +226,6 @@ const Notes = () => {
     extensions: [
       StarterKit.configure({ heading: false, codeBlock: false }),
       Underline,
-      Gapcursor,
     ],
     editable: true,
     content: '',
