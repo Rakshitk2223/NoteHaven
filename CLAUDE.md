@@ -14,7 +14,9 @@ Features: Notes (rich text, auto-save, sharing), Tasks, AI Prompt library, Code 
 
 ## Tech stack (quick reference)
 
-- React 18, TypeScript 5.8, Vite 5, bun
+- React 18, TypeScript 5.8, Vite 5
+- Package manager: **npm** (standardized; lockfile is `package-lock.json`)
+- Node 18+ (LTS recommended; pinned in `.nvmrc`)
 - Tailwind CSS 3 + shadcn/ui (Radix) + lucide-react icons
 - react-router-dom v6, TanStack React Query v5 (mainly MediaTracker)
 - Tiptap (Notes rich text), CodeMirror 6 (snippets)
@@ -28,14 +30,19 @@ Path alias: `@/` → `src/`.
 
 ## Commands
 
+This project standardizes on **npm**. Do not use bun/yarn/pnpm (they create conflicting lockfiles; only `package-lock.json` is committed).
+
 ```bash
-bun install
-bun run dev        # dev server (host "::", port 8080)
-bun run build      # production build  ← run after changes to verify
-bun run build:dev  # dev-mode build
-bun run lint       # eslint
-bun run preview    # preview build
+npm install
+npm run dev          # dev server (host "::", port 8080)
+npm run build        # production build  ← run after changes to verify
+npm run build:dev    # dev-mode build
+npm run lint         # eslint
+npm run preview      # preview build
+npm run backfill:covers   # one-off: backfill media cover images (needs SUPABASE_SERVICE_ROLE_KEY)
 ```
+
+If you use nvm/fnm, run `nvm use` to match `.nvmrc`. Node 18+ / npm 9+ is enforced via `package.json` "engines" + `.npmrc` (`engine-strict=true`).
 
 There is **no test setup** in this repo. Do not assume a test runner exists; if adding tests, set one up explicitly and mention it.
 
@@ -103,7 +110,7 @@ These are documented more fully in the audit / context files. Be aware when touc
 ## When making changes
 
 - Read the file (and its `lib/*` data module) before editing; match existing patterns and the design-token styling.
-- After edits, run `bun run build` (and `bun run lint`) to verify — there are no automated tests.
+- After edits, run `npm run build` (and `npm run lint`) to verify — there are no automated tests.
 - Keep RLS in mind: every user table is scoped by `user_id = auth.uid()`. Client queries should filter by the authenticated user where the existing code does.
 - Don't introduce a second Supabase client instance (auth/session relies on the single shared one).
 - Be cautious with anything touching auth, RLS expectations, the edge function, or service-role usage — flag risky/destructive changes before applying.

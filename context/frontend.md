@@ -24,7 +24,7 @@
 | Dates | date-fns + custom IST-safe helpers in `lib/date-utils.ts` |
 | PWA | vite-plugin-pwa (autoUpdate, Workbox runtime caching) |
 | Charts | recharts (only via `ui/chart.tsx`; not actively used by features) |
-| Package manager | bun (`bun.lockb`) |
+| Package manager | npm (`package-lock.json`) — standardized across all devices |
 
 Path alias: `@/` → `src/`.
 
@@ -269,12 +269,12 @@ The UI talks to Supabase almost entirely through these modules (and inline `supa
 ## 12. Build / Run
 
 ```bash
-bun install
-bun run dev        # Vite dev server (configured host "::", port 8080)
-bun run build      # production build
-bun run build:dev  # development-mode build
-bun run lint       # eslint
-bun run preview     # preview built app
+npm install
+npm run dev        # Vite dev server (configured host "::", port 8080)
+npm run build      # production build
+npm run build:dev  # development-mode build
+npm run lint       # eslint
+npm run preview    # preview built app
 ```
 
 Required env (Vite, `VITE_` prefixed are public/client): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SUPABASE_PROJECT_ID`. Optional: `TMDB_API_KEY`, `OMDB_API_KEY` (note these are read in client code via `import.meta.env` in `media-refresh.ts` but are not `VITE_`-prefixed, so they're effectively undefined at runtime — see audit).

@@ -41,3 +41,10 @@ api/dist
 
 # Supabase local temp files
 /supabase/.temp/
+
+# Foreign package-manager lockfiles — this project standardizes on npm.
+# Only package-lock.json should be committed.
+bun.lockb
+bun.lock
+yarn.lock
+pnpm-lock.yaml

@@ -32,7 +32,8 @@ Frontend → Supabase Edge Function → Supabase DB (everything)
 
 ## Prerequisites
 
-- Node.js 18+ or Bun
+- Node.js 18+ (LTS recommended; see `.nvmrc`)
+- npm 9+ (ships with Node) — this project standardizes on **npm**
 - Supabase account
 - (Optional) TMDB API key for movie/series covers
 
@@ -43,8 +44,10 @@ Frontend → Supabase Edge Function → Supabase DB (everything)
 ```bash
 git clone <repository-url>
 cd NoteHaven
-bun install
+npm install
 ```
+
+> This project standardizes on **npm** (the lockfile is `package-lock.json`). Don't use `bun`, `yarn`, or `pnpm` — mixing package managers creates conflicting lockfiles. If you use nvm/fnm, run `nvm use` to match the Node version in `.nvmrc`.
 
 ### 2. Environment Setup
 
@@ -97,7 +100,7 @@ Or deploy manually via Supabase Dashboard:
 ### 5. Start Development
 
 ```bash
-bun run dev
+npm run dev
 ```
 
 The app will be available at http://localhost:5173
@@ -105,7 +108,7 @@ The app will be available at http://localhost:5173
 ## Production Build
 
 ```bash
-bun run build
+npm run build
 ```
 
 ## Project Structure
@@ -210,8 +213,8 @@ Primary cost is Supabase usage. External API keys are optional.
 ## Contributing
 
 PRs welcome. Before submitting:
-1. Run `bun run lint` to check code style
-2. Run `bun run build` to verify build succeeds
+1. Run `npm run lint` to check code style
+2. Run `npm run build` to verify build succeeds
 3. Test your changes locally
 
 ## License
