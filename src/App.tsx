@@ -12,7 +12,6 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import SignUp from "./pages/SignUp";
 import Dashboard from "./pages/Dashboard";
-import Prompts from "./pages/Prompts";
 import Library from "./pages/Library";
 import MediaTracker from "./pages/MediaTracker";
 import Tasks from "./pages/Tasks";
