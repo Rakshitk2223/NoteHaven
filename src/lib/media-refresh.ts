@@ -8,14 +8,14 @@ const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/med
 
 // API priority order based on media type
 const API_PRIORITY: Record<string, string[]> = {
-  'anime': ['anilist', 'jikan', 'tmdb'],
-  'manga': ['anilist', 'jikan', 'kitsu', 'tmdb'],
-  'manhwa': ['mangaupdates', 'anilist', 'jikan', 'kitsu', 'tmdb'],
-  'manhua': ['mangaupdates', 'anilist', 'jikan', 'kitsu', 'tmdb'],
-  'movie': ['tmdb', 'omdb'],
-  'series': ['tmdb', 'omdb'],
-  'kdrama': ['tmdb', 'tvmaze'],
-  'jdrama': ['tmdb', 'tvmaze'],
+  'anime': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'manga': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'manhwa': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'manhua': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'movie': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'series': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'kdrama': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'jdrama': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
 };
 
 interface RefreshResult {
@@ -30,14 +30,18 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
   
   try {
     switch (api) {
-      case 'mangaupdates':
-        return await fetchFromMangaUpdates(title, normalizedType);
       case 'anilist':
         return await fetchFromAniList(title, normalizedType);
-      case 'jikan':
-        return await fetchFromJikan(title, normalizedType);
       case 'kitsu':
         return await fetchFromKitsu(title, normalizedType);
+      case 'jikan':
+        return await fetchFromJikan(title, normalizedType);
+      case 'mangadex':
+        return await fetchFromMangaDex(title, normalizedType);
+      case 'mangaupdates':
+        return await fetchFromMangaUpdates(title, normalizedType);
+      case 'tvmaze':
+        return await fetchFromTVmaze(title, normalizedType);
       case 'tmdb':
         return await fetchFromTMDB(title, normalizedType);
       case 'omdb':
@@ -171,6 +175,57 @@ async function fetchFromKitsu(title: string, type: string): Promise<RefreshResul
   }
 }
 
+// MangaDex API
+async function fetchFromMangaDex(title: string, type: string): Promise<RefreshResult | null> {
+  try {
+    const response = await fetch(
+      `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=1&includes[]=cover_art`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data.result !== 'ok' || !data.data?.[0]) return null;
+
+    const manga = data.data[0];
+    const coverRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+    const coverFileName = coverRel?.attributes?.fileName;
+    if (!coverFileName) return null;
+
+    return {
+      coverImage: `https://uploads.mangadex.org/covers/${manga.id}/${coverFileName}.512.jpg`,
+      apiSource: 'mangadex',
+    };
+  } catch (error) {
+    console.error('MangaDex error:', error);
+    return null;
+  }
+}
+
+// TVmaze API
+async function fetchFromTVmaze(title: string, type: string): Promise<RefreshResult | null> {
+  try {
+    const response = await fetch(
+      `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (!data?.[0]?.show?.image?.original) return null;
+
+    return {
+      coverImage: data[0].show.image.original,
+      apiSource: 'tvmaze',
+    };
+  } catch (error) {
+    console.error('TVmaze error:', error);
+    return null;
+  }
+}
+
 // TMDB API
 async function fetchFromTMDB(title: string, type: string): Promise<RefreshResult | null> {
   const tmdbType = type === 'movie' ? 'movie' : 'tv';
@@ -232,30 +287,30 @@ export async function refreshCoverImage(
   // Determine which API to try next
   const currentIndex = currentApiSource ? priority.indexOf(currentApiSource) : -1;
   
-  devLog(`🔄 Refreshing cover for "${title}" (${type})`);
-  devLog(`   Current API: ${currentApiSource || 'none'}`);
-  devLog(`   Priority list: ${priority.join(' → ')}`);
+  devLog(`[COVER] Refreshing "${title}" (type: ${type})`);
+  devLog(`[COVER] Current source: ${currentApiSource || 'none'}`);
+  devLog(`[COVER] Fallback chain: ${priority.join(' > ')}`);
   
   // Try each API in order starting from the next one
   for (let i = 1; i <= priority.length; i++) {
     const apiIndex = (currentIndex + i) % priority.length;
     const apiToTry = priority[apiIndex];
     
-    devLog(`   Trying ${apiToTry}...`);
+    devLog(`[COVER] [${i}/${priority.length}] Trying ${apiToTry}...`);
     
     const result = await fetchFromApi(apiToTry, title, type);
     
     if (result) {
-      devLog(`✅ Success! Got cover from ${result.apiSource}`);
+      devLog(`[COVER] [${i}/${priority.length}] ${apiToTry} SUCCESS - got cover from ${result.apiSource}`);
       await updateMediaTracker(title, type, result, mediaId);
       invalidateImageCache(mediaId);
       return result;
     }
     
-    devLog(`❌ ${apiToTry} failed`);
+    devLog(`[COVER] [${i}/${priority.length}] ${apiToTry} failed, trying next...`);
   }
   
-  devLog(`❌ Tried all ${priority.length} APIs, none succeeded`);
+  devLog(`[COVER] All ${priority.length} APIs failed for "${title}"`);
   return null;
 }
 

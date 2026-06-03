@@ -62,6 +62,92 @@ async function searchMangaUpdates(query: string): Promise<any[]> {
   }
 }
 
+// MangaDex API for manga/manhwa/manhua covers
+async function searchMangaDex(query: string): Promise<any[]> {
+  try {
+    const response = await fetch(
+      `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=5&includes[]=cover_art`
+    );
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (data.result !== 'ok' || !Array.isArray(data.data)) return [];
+
+    return data.data.map((manga: any) => {
+      const coverRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+      const coverFileName = coverRel?.attributes?.fileName;
+      const mangaId = manga.id;
+      const coverImage = coverFileName
+        ? `https://uploads.mangadex.org/covers/${mangaId}/${coverFileName}.512.jpg`
+        : '';
+
+      const title = manga.attributes?.title?.en
+        || manga.attributes?.title?.['ja-ro']
+        || manga.attributes?.title?.ja
+        || query;
+
+      return {
+        title,
+        type: 'manga',
+        cover_image: coverImage,
+        banner_image: null,
+        description: (manga.attributes?.description?.en || '').substring(0, 500),
+        rating: 0,
+        status: mapStatus(manga.attributes?.status),
+        episodes: null,
+        chapters: null,
+        anilist_id: null,
+        tmdb_id: null,
+        mal_id: null,
+      };
+    }).filter((x: any) => x.cover_image);
+  } catch (error) {
+    console.error('MangaDex error:', error);
+    return [];
+  }
+}
+
+// TVmaze API for TV shows (K-drama, J-drama, series)
+async function searchTVmaze(query: string): Promise<any[]> {
+  try {
+    const response = await fetch(
+      `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`
+    );
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.slice(0, 5).map((item: any) => {
+      const show = item.show;
+      const language = show.language || '';
+      let determinedType = 'series';
+      if (language === 'Korean') determinedType = 'kdrama';
+      else if (language === 'Japanese') determinedType = 'jdrama';
+
+      return {
+        title: show.name || query,
+        type: determinedType,
+        cover_image: show.image?.original || show.image?.medium || '',
+        banner_image: null,
+        description: (show.summary || '').replace(/<[^>]*>/g, '').substring(0, 500),
+        rating: show.rating?.average || 0,
+        status: mapTMDBStatus(show.status),
+        episodes: show._links?.previousepisode ? null : null,
+        chapters: null,
+        anilist_id: null,
+        tmdb_id: show.externals?.thetvdb || null,
+        mal_id: null,
+      };
+    }).filter((x: any) => x.cover_image);
+  } catch (error) {
+    console.error('TVmaze error:', error);
+    return [];
+  }
+}
+
 // AniList GraphQL API - FIXED: Uses Page instead of Media for fast search
 async function searchAniList(query: string, type: string): Promise<any[]> {
   try {
@@ -291,22 +377,30 @@ async function handleBatchSearch(req: Request, supabase: any): Promise<Response>
     const normalizedType = item.type.toLowerCase();
     let apis: Promise<any[]>[] = [];
 
-    if (normalizedType === 'anime' || normalizedType === 'manga') {
+    if (normalizedType === 'anime') {
       apis = [
-        withTimeout(searchAniList(item.title, normalizedType), 3000, 'AniList'),
-        withTimeout(searchJikan(item.title, normalizedType), 3000, 'Jikan'),
+        withTimeout(searchAniList(item.title, 'anime'), 3000, 'AniList'),
+        withTimeout(searchJikan(item.title, 'anime'), 3000, 'Jikan'),
+        withTimeout(searchTMDB(item.title, 'tv', tmdbKey || ''), 3000, 'TMDB'),
       ];
-
-      if (normalizedType === 'manga') {
-        apis.unshift(withTimeout(searchMangaUpdates(item.title), 4000, 'MangaUpdates'));
-      }
-    } else if (['movie', 'series', 'kdrama', 'jdrama'].includes(normalizedType)) {
-      apis = [withTimeout(searchTMDB(item.title, normalizedType, tmdbKey || ''), 3000, 'TMDB')];
+    } else if (normalizedType === 'manga') {
+      apis = [
+        withTimeout(searchAniList(item.title, 'manga'), 3000, 'AniList'),
+        withTimeout(searchJikan(item.title, 'manga'), 3000, 'Jikan'),
+        withTimeout(searchMangaDex(item.title), 3000, 'MangaDex'),
+        withTimeout(searchMangaUpdates(item.title), 4000, 'MangaUpdates'),
+      ];
     } else if (normalizedType === 'manhwa' || normalizedType === 'manhua') {
       apis = [
-        withTimeout(searchMangaUpdates(item.title), 4000, 'MangaUpdates'),
-        withTimeout(searchJikan(item.title, 'manga'), 3000, 'Jikan'),
         withTimeout(searchAniList(item.title, 'manga'), 3000, 'AniList'),
+        withTimeout(searchJikan(item.title, 'manga'), 3000, 'Jikan'),
+        withTimeout(searchMangaDex(item.title), 3000, 'MangaDex'),
+        withTimeout(searchMangaUpdates(item.title), 4000, 'MangaUpdates'),
+      ];
+    } else if (['movie', 'series', 'kdrama', 'jdrama'].includes(normalizedType)) {
+      apis = [
+        withTimeout(searchTMDB(item.title, normalizedType, tmdbKey || ''), 3000, 'TMDB'),
+        withTimeout(searchTVmaze(item.title), 3000, 'TVmaze'),
       ];
     } else {
       apis = [
@@ -414,31 +508,32 @@ Deno.serve(async (req) => {
     // Run all applicable APIs in parallel with 3-second timeout
     let apiPromises: Promise<any[]>[] = [];
     
-    if (normalizedType === 'anime' || normalizedType === 'manga' || !type) {
-      // For anime/manga or no type: search AniList + Jikan (+ MangaUpdates for manga)
-      const searchType = normalizedType || 'anime';
+    if (normalizedType === 'anime' || !type) {
       apiPromises = [
-        withTimeout(searchAniList(query, searchType), 3000, 'AniList'),
-        withTimeout(searchJikan(query, searchType), 3000, 'Jikan'),
+        withTimeout(searchAniList(query, 'anime'), 3000, 'AniList'),
+        withTimeout(searchJikan(query, 'anime'), 3000, 'Jikan'),
+        withTimeout(searchTMDB(query, 'tv', tmdbKey || ''), 3000, 'TMDB'),
       ];
-
-      if (searchType === 'manga') {
-        apiPromises.push(withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'));
-      }
-    } else if (['movie', 'series', 'kdrama', 'jdrama'].includes(normalizedType || '')) {
-      // For movies/series: search TMDB
+    } else if (normalizedType === 'manga') {
       apiPromises = [
-        withTimeout(searchTMDB(query, normalizedType, tmdbKey || ''), 3000, 'TMDB'),
+        withTimeout(searchAniList(query, 'manga'), 3000, 'AniList'),
+        withTimeout(searchJikan(query, 'manga'), 3000, 'Jikan'),
+        withTimeout(searchMangaDex(query), 3000, 'MangaDex'),
+        withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'),
       ];
     } else if (['manhwa', 'manhua'].includes(normalizedType || '')) {
-      // For manhwa/manhua: MangaUpdates first, then broader manga sources
       apiPromises = [
-        withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'),
-        withTimeout(searchJikan(query, 'manga'), 3000, 'Jikan'),
         withTimeout(searchAniList(query, 'manga'), 3000, 'AniList'),
+        withTimeout(searchJikan(query, 'manga'), 3000, 'Jikan'),
+        withTimeout(searchMangaDex(query), 3000, 'MangaDex'),
+        withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'),
+      ];
+    } else if (['movie', 'series', 'kdrama', 'jdrama'].includes(normalizedType || '')) {
+      apiPromises = [
+        withTimeout(searchTMDB(query, normalizedType, tmdbKey || ''), 3000, 'TMDB'),
+        withTimeout(searchTVmaze(query), 3000, 'TVmaze'),
       ];
     } else {
-      // Fallback: try all APIs
       apiPromises = [
         withTimeout(searchAniList(query, 'anime'), 3000, 'AniList'),
         withTimeout(searchTMDB(query, 'tv', tmdbKey || ''), 3000, 'TMDB'),
@@ -455,7 +550,8 @@ Deno.serve(async (req) => {
     apiResults.forEach((result, index) => {
       if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
         allResults = [...allResults, ...result.value];
-        sources.push(['AniList', 'Jikan', 'TMDB'][index] || 'API');
+        const apiNames = ['AniList', 'Jikan', 'MangaDex', 'MangaUpdates', 'TVmaze', 'TMDB'];
+        sources.push(apiNames[index] || 'API');
       }
     });
 
