@@ -28,8 +28,23 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const BATCH_SIZE = 5;
 const DELAY_MS = 1000;
 
-// Same fallback order as media-refresh.ts for ALL media types
-const FALLBACK_ORDER = ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'];
+// Fallback order per media type - matches media-refresh.ts client-side order
+// MangaDex/MangaUpdates included here since backfill runs server-side (no CORS)
+// AniList/Kitsu/Jikan excluded for live-action: they return wrong fuzzy anime matches
+const FALLBACK_BY_TYPE: Record<string, string[]> = {
+  'anime':   ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'manga':   ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'manhwa':  ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'manhua':  ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'movie':   ['tvmaze', 'tmdb', 'omdb'],
+  'series':  ['tvmaze', 'tmdb', 'omdb'],
+  'kdrama':  ['tvmaze', 'tmdb', 'omdb'],
+  'jdrama':  ['tvmaze', 'tmdb', 'omdb'],
+};
+
+function getFallbackOrder(type: string): string[] {
+  return FALLBACK_BY_TYPE[type.toLowerCase()] || FALLBACK_BY_TYPE['anime'];
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -160,7 +175,8 @@ async function fetchOMDB(title: string): Promise<string | null> {
 // ---- Fallback chain: try each API in order until one returns a cover ----
 
 async function fetchCoverWithFallback(title: string, type: string): Promise<{ cover: string; source: string } | null> {
-  for (const api of FALLBACK_ORDER) {
+  const fallbackOrder = getFallbackOrder(type);
+  for (const api of fallbackOrder) {
     let cover: string | null = null;
 
     switch (api) {
@@ -185,7 +201,7 @@ async function fetchCoverWithFallback(title: string, type: string): Promise<{ co
 
 async function backfill() {
   console.log('Starting cover image backfill...');
-  console.log(`Fallback order: ${FALLBACK_ORDER.join(' > ')}`);
+  console.log('Fallback order varies by media type (see FALLBACK_BY_TYPE)');
   const { data: items, error } = await supabase
     .from('media_tracker').select('id, title, type, cover_image');
   if (error) { console.error('Query failed:', error.message); process.exit(1); }
@@ -222,7 +238,7 @@ async function backfill() {
       }
     } else {
       failed++;
-      console.log(`  [MISS] ${item.title} (${item.type}) - all ${FALLBACK_ORDER.length} APIs failed`);
+      console.log(`  [MISS] ${item.title} (${item.type}) - all APIs in fallback chain failed`);
     }
 
     if (i < missing.length - 1) await sleep(DELAY_MS);
