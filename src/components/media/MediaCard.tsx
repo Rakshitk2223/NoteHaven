@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useInView } from 'react-intersection-observer';
-import { Star, Edit2, Trash2, RefreshCw } from 'lucide-react';
+import { Star, Edit2, Trash2, RefreshCw, MoreVertical, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { refreshCoverImage } from '@/lib/media-refresh';
 import { useToast } from '@/components/ui/use-toast';
@@ -20,8 +27,11 @@ interface MediaCardProps {
   imageUrl?: string | null;
   apiSource?: string; // Track which API provided the current image
   isLoading?: boolean;
+  isUpdating?: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onOpen?: () => void; // open details (view) when clicking the card
+  onProgressChange?: (field: 'current_episode' | 'current_chapter', amount: number) => void;
   onImageUpdate?: (newImageUrl: string, newApiSource: string) => void; // Callback when image is refreshed
   onVisibleChange?: (id: number, visible: boolean) => void;
   selected?: boolean;
@@ -30,21 +40,17 @@ interface MediaCardProps {
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
 
-const STATUS_COLORS: Record<string, string> = {
+// Status is shown as a small colored dot + label (less noisy than a filled badge).
+const STATUS_DOT: Record<string, string> = {
   'Watching': 'bg-green-500',
   'Reading': 'bg-blue-500',
   'Completed': 'bg-purple-500',
-  'Plan to Watch': 'bg-gray-500',
-  'Plan to Read': 'bg-gray-500',
+  'Plan to Watch': 'bg-amber-500',
+  'Plan to Read': 'bg-amber-500',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  'Watching': 'Watching',
-  'Reading': 'Reading',
-  'Completed': 'Completed',
-  'Plan to Watch': 'Plan to Watch',
-  'Plan to Read': 'Plan to Read',
-};
+const READABLE = ['Manga', 'Manhwa', 'Manhua'];
+const WATCHABLE = ['Series', 'Anime', 'KDrama', 'JDrama'];
 
 export const MediaCard = ({
   id,
@@ -58,8 +64,11 @@ export const MediaCard = ({
   imageUrl,
   apiSource,
   isLoading = false,
+  isUpdating = false,
   onEdit,
   onDelete,
+  onOpen,
+  onProgressChange,
   onImageUpdate,
   onVisibleChange,
   selected,
@@ -70,16 +79,8 @@ export const MediaCard = ({
   const [currentImage, setCurrentImage] = useState(imageUrl);
   const [currentApi, setCurrentApi] = useState(apiSource);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  // Touch devices have no hover; keep actions visible so they remain reachable.
-  const [isTouch, setIsTouch] = useState(false);
   const { toast } = useToast();
   const { ref, inView } = useInView({ rootMargin: '200px' });
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.matchMedia) {
-      setIsTouch(window.matchMedia('(hover: none)').matches);
-    }
-  }, []);
 
   // Sync apiSource prop with currentApi state when it changes
   useEffect(() => {
@@ -102,10 +103,18 @@ export const MediaCard = ({
     onVisibleChange?.(id, inView);
   }, [id, inView, onVisibleChange]);
 
-  const progressText = current_episode 
-    ? `S${current_season || 1} E${current_episode}`
-    : current_chapter 
-    ? `Ch. ${current_chapter}`
+  const isReadable = READABLE.includes(type);
+  const isWatchable = WATCHABLE.includes(type);
+  const progressField: 'current_episode' | 'current_chapter' | null = isReadable
+    ? 'current_chapter'
+    : isWatchable
+    ? 'current_episode'
+    : null;
+  const progressValue = isReadable ? current_chapter : isWatchable ? current_episode : undefined;
+  const progressLabel = isReadable
+    ? `Ch. ${current_chapter ?? 0}`
+    : isWatchable
+    ? `S${current_season || 1} · E${current_episode ?? 0}`
     : '';
 
   const typeColors: Record<string, string> = {
@@ -119,25 +128,22 @@ export const MediaCard = ({
     'JDrama': 'bg-cyan-500',
   };
 
+  const hasCover = Boolean(currentImage) && !error;
   const displayImageUrl = currentImage || PLACEHOLDER_IMAGE;
 
   const handleRefresh = async () => {
     if (isRefreshing) return;
-    
+
     setIsRefreshing(true);
     try {
       const result = await refreshCoverImage(title, type, currentApi, id);
-      
+
       if (result) {
-        // Update local state immediately (optimistic UI)
         setCurrentImage(result.coverImage);
         setCurrentApi(result.apiSource);
         setIsLoaded(true);
         setError(false);
-        
-        // Notify parent component
         onImageUpdate?.(result.coverImage, result.apiSource);
-        
         toast({
           title: 'Cover updated',
           description: `Found better cover from ${result.apiSource}`,
@@ -164,10 +170,7 @@ export const MediaCard = ({
   if (isLoading) {
     return (
       <div className="group relative">
-        <div className={cn(
-          "relative overflow-hidden rounded-lg bg-muted aspect-[2/3]",
-          "shadow-md"
-        )}>
+        <div className={cn('relative overflow-hidden rounded-lg bg-muted aspect-[2/3]', 'shadow-md')}>
           <Skeleton className="w-full h-full" />
           <div className="absolute top-2 left-2 z-10">
             <Skeleton className="h-5 w-16 rounded" />
@@ -185,141 +188,168 @@ export const MediaCard = ({
     <div
       ref={ref}
       className={cn(
-        "group relative",
-        selected && "ring-2 ring-primary rounded-lg"
+        'group relative rounded-lg transition-shadow',
+        selected && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
       )}
     >
       {/* Cover Image Container */}
       <div
         className={cn(
-          "relative overflow-hidden rounded-lg bg-muted aspect-[2/3]",
-          "shadow-md group-hover:shadow-xl transition-shadow duration-300"
+          'relative overflow-hidden rounded-lg bg-muted aspect-[2/3] cursor-pointer',
+          'shadow-sm group-hover:shadow-lg transition-shadow duration-300'
         )}
+        onClick={() => onOpen?.()}
       >
-        {/* Loading Skeleton or Actual Image */}
-        {!isLoaded && !error && (
+        {/* Loading Skeleton */}
+        {!isLoaded && !error && hasCover && (
           <div className="absolute inset-0 flex items-center justify-center bg-muted z-10">
             <Skeleton className="w-full h-full" />
           </div>
         )}
-        
-        <img
-          src={error ? PLACEHOLDER_IMAGE : displayImageUrl}
-          alt={title}
-          onLoad={() => setIsLoaded(true)}
-          onError={() => {
-            setError(true);
-            setIsLoaded(true);
-          }}
-          className={cn(
-            "w-full h-full object-cover transition-all duration-300",
-            isLoaded ? "opacity-100" : "opacity-0",
-            "group-hover:scale-105"
-          )}
-        />
-        
-        {/* Hover Overlay with Refresh/Edit/Delete.
-            Visible on hover (mouse), on focus-within (keyboard), and always on touch devices. */}
-        <div
-          className={cn(
-            "absolute inset-0 bg-black/60 flex items-center justify-center gap-2",
-            "transition-opacity duration-200",
-            "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
-            isTouch && "opacity-100"
-          )}
-        >
-          {onToggleSelected && (
-            <Button
-              size="sm"
-              variant={selected ? "default" : "secondary"}
-              onClick={() => onToggleSelected(id)}
-              className="gap-1"
-              title={selected ? 'Deselect' : 'Select'}
-              aria-label={selected ? `Deselect ${title}` : `Select ${title}`}
-            >
-              {selected ? 'Selected' : 'Select'}
-            </Button>
-          )}
-          {/* Refresh Button */}
-          <Button 
-            size="sm" 
-            variant="secondary" 
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className="gap-1"
-            title="Refresh cover image"
-            aria-label={`Refresh cover image for ${title}`}
+
+        {hasCover ? (
+          <img
+            src={displayImageUrl}
+            alt={title}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onLoad={() => setIsLoaded(true)}
+            onError={() => {
+              setError(true);
+              setIsLoaded(true);
+            }}
+            className={cn(
+              'w-full h-full object-cover transition-all duration-300',
+              isLoaded ? 'opacity-100' : 'opacity-0',
+              'group-hover:scale-105'
+            )}
+          />
+        ) : (
+          // Letter fallback — far nicer than a wall of identical placeholder posters.
+          <div
+            className={cn(
+              'w-full h-full flex items-center justify-center',
+              'bg-gradient-to-br from-muted to-muted-foreground/20'
+            )}
           >
-            <RefreshCw className={cn("h-3 w-3", isRefreshing && "animate-spin")} />
-          </Button>
-          
-          <Button 
-            size="sm" 
-            variant="secondary" 
-            onClick={onEdit}
-            className="gap-1"
-            title="Edit"
-            aria-label={`Edit ${title}`}
-          >
-            <Edit2 className="h-3 w-3" />
-            Edit
-          </Button>
-          
-          <Button 
-            size="sm" 
-            variant="destructive" 
-            onClick={onDelete}
-            title="Delete"
-            aria-label={`Delete ${title}`}
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        </div>
-        
-        {/* Type Badge */}
+            <span className="text-4xl font-bold text-muted-foreground/70 select-none">
+              {title.charAt(0).toUpperCase()}
+            </span>
+          </div>
+        )}
+
+        {/* Subtle gradient for legibility of bottom content / hover affordances */}
+        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+        {/* Type Badge (top-left) — the single primary badge on the poster */}
         <Badge
-          className={cn(
-            "absolute top-2 left-2 text-white text-xs z-10",
-            typeColors[type] || 'bg-gray-500'
-          )}
+          className={cn('absolute top-2 left-2 text-white text-xs z-10 border-0', typeColors[type] || 'bg-gray-500')}
         >
           {type}
         </Badge>
-        
-        {/* Rating Badge */}
-        {rating && rating > 0 && (
-          <div className="absolute top-2 right-2 z-10 bg-black/70 text-white px-2 py-1 rounded flex items-center gap-1">
-            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-            <span className="text-sm font-medium">{rating}</span>
+
+        {/* Selection checkbox (top-right): visible on hover, focus, or when selected */}
+        {onToggleSelected && (
+          <div
+            className={cn(
+              'absolute top-2 right-2 z-20 transition-opacity',
+              selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-background/80 backdrop-blur-sm rounded p-0.5">
+              <Checkbox
+                checked={!!selected}
+                onCheckedChange={() => onToggleSelected(id)}
+                aria-label={selected ? `Deselect ${title}` : `Select ${title}`}
+              />
+            </div>
           </div>
         )}
-        
-        {/* Status Badge */}
-        <Badge
-          variant="secondary"
-          className={cn(
-            "absolute bottom-2 left-2 text-white text-xs",
-            STATUS_COLORS[status] || 'bg-gray-500'
-          )}
+
+        {/* Kebab menu (bottom-right): Edit / Refresh cover / Delete */}
+        <div
+          className="absolute bottom-2 right-2 z-20 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+          onClick={(e) => e.stopPropagation()}
         >
-          {STATUS_LABELS[status] || status}
-        </Badge>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon"
+                variant="secondary"
+                className="h-7 w-7 shadow"
+                aria-label={`Actions for ${title}`}
+                title="Actions"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem onClick={onEdit}>
+                <Edit2 className="h-4 w-4 mr-2" /> Edit
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleRefresh} disabled={isRefreshing}>
+                <RefreshCw className={cn('h-4 w-4 mr-2', isRefreshing && 'animate-spin')} />
+                {isRefreshing ? 'Refreshing…' : 'Refresh cover'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">
+                <Trash2 className="h-4 w-4 mr-2" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Rating (bottom-left) */}
+        {rating && rating > 0 && (
+          <div className="absolute bottom-2 left-2 z-10 bg-black/70 text-white px-1.5 py-0.5 rounded flex items-center gap-1">
+            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+            <span className="text-xs font-medium">{rating}</span>
+          </div>
+        )}
       </div>
-      
-      {/* Title and Progress */}
-      <div className="mt-3 space-y-1">
-        <h3 
-          className="font-medium text-sm truncate" 
-          title={title}
-        >
+
+      {/* Title, status, and inline progress */}
+      <div className="mt-2 space-y-1.5">
+        <h3 className="font-medium text-sm leading-tight truncate" title={title}>
           {title}
         </h3>
-        
-        {progressText && (
-          <p className="text-xs text-muted-foreground">
-            {progressText}
-          </p>
-        )}
+
+        <div className="flex items-center justify-between gap-2">
+          {/* Status as a dot + label (low-noise) */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className={cn('h-2 w-2 rounded-full flex-shrink-0', STATUS_DOT[status] || 'bg-gray-400')} />
+            <span className="text-xs text-muted-foreground truncate">{status}</span>
+          </div>
+
+          {/* Inline progress steppers — the core "I watched one more" action */}
+          {progressField && onProgressChange && (
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-6 w-6"
+                disabled={isUpdating || (progressValue ?? 0) <= 0}
+                onClick={() => onProgressChange(progressField, -1)}
+                aria-label={isReadable ? 'Decrease chapter' : 'Decrease episode'}
+              >
+                <Minus className="h-3 w-3" />
+              </Button>
+              <span className="text-xs tabular-nums min-w-[44px] text-center" title={progressLabel}>
+                {progressLabel}
+              </span>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-6 w-6"
+                disabled={isUpdating}
+                onClick={() => onProgressChange(progressField, 1)}
+                aria-label={isReadable ? 'Increase chapter' : 'Increase episode'}
+              >
+                <Plus className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

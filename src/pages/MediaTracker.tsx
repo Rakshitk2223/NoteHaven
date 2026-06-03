@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Star, Filter, Upload, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,15 +27,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import AppSidebar from "@/components/AppSidebar";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -50,7 +52,7 @@ import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
-import { CustomGroupBuilder, type CustomGroup, itemBelongsToCustomGroup } from "@/components/media/CustomGroupBuilder";
+import { CustomGroupBuilder, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/CustomGroupBuilder";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { refreshCoverImage } from "@/lib/media-refresh";
 
@@ -194,7 +196,7 @@ const MediaListRow = ({
         <div className="flex items-center gap-3">
           <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted flex items-center justify-center">
             {cover ? (
-              <img src={cover} alt={item.title} className="w-full h-full object-cover" />
+              <img src={cover} alt={item.title} loading="lazy" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
             ) : (
               <span className="text-lg font-bold text-muted-foreground">
                 {item.title.charAt(0).toUpperCase()}
@@ -278,13 +280,13 @@ const MediaTracker = () => {
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsMode, setDetailsMode] = useState<'view' | 'edit'>('view');
-  const [activeTypeTab, setActiveTypeTab] = useState<'all' | 'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'Series' | 'Movie' | 'KDrama' | 'JDrama'>(() => {
+  const [activeCategory, setActiveCategory] = useState<ActiveCategory>(() => {
     try {
-      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerActiveTypeTab') : null;
-      if (stored && ['all','Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'].includes(stored)) {
-        return stored as any;
-      }
-    } catch {}
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerActiveCategory') : null;
+      if (stored) return stored;
+    } catch {
+      // Ignore localStorage errors and use default
+    }
     return 'all';
   });
   const [visibleTypeTabs, setVisibleTypeTabs] = useState<Array<'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'Series' | 'Movie' | 'KDrama' | 'JDrama'>>(() => {
@@ -306,6 +308,15 @@ const MediaTracker = () => {
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [sortBy, setSortBy] = useState<'title' | 'rating' | 'updated_at' | 'created_at'>(() => {
+    try {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerSortBy') : null;
+      if (stored === 'title' || stored === 'rating' || stored === 'updated_at' || stored === 'created_at') return stored;
+    } catch {
+      // ignore
+    }
+    return 'title';
+  });
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [quickAddTitle, setQuickAddTitle] = useState('');
   const [quickAddType, setQuickAddType] = useState<MediaItem['type']>('');
@@ -328,6 +339,7 @@ const MediaTracker = () => {
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
   const [isRefreshingCovers, setIsRefreshingCovers] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [txtExportDialogOpen, setTxtExportDialogOpen] = useState(false);
   const [txtExportSelectedTypes, setTxtExportSelectedTypes] = useState<string[]>([]);
 
@@ -346,15 +358,6 @@ const MediaTracker = () => {
       return [];
     }
   });
-  const [activeGroupId, setActiveGroupId] = useState<string | 'all'>(() => {
-    try {
-      const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerActiveGroupId') : null;
-      if (stored) return stored;
-    } catch {
-      // Ignore localStorage errors and use default
-    }
-    return 'all';
-  });
 
   // Image loading state - direct Supabase fetch
   const [imageUrls, setImageUrls] = useState<Map<number, string | null>>(new Map());
@@ -371,16 +374,16 @@ const MediaTracker = () => {
     }
   }, [customGroups]);
 
-  // Persist the selected custom group so it survives reloads.
+  // Persist the selected category so it survives reloads.
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
-        localStorage.setItem('mediaTrackerActiveGroupId', activeGroupId);
+        localStorage.setItem('mediaTrackerActiveCategory', activeCategory);
       }
     } catch {
       // Ignore localStorage errors
     }
-  }, [activeGroupId]);
+  }, [activeCategory]);
 
   // Save view mode changes
   useEffect(() => {
@@ -390,6 +393,15 @@ const MediaTracker = () => {
       // Ignore localStorage errors
     }
   }, [viewMode]);
+
+  // Persist sort preference.
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') localStorage.setItem('mediaTrackerSortBy', sortBy);
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [sortBy]);
 
   // Type sets for conditional progress logic (alias module-scope constants)
   const readableTypes = READABLE_TYPES;
@@ -406,7 +418,7 @@ const MediaTracker = () => {
     isFetchingNextPage,
     refetch,
   } = useInfiniteQuery<{ items: MediaItem[]; count: number; page: number }>({
-    queryKey: ['mediaItems', filterStatus, searchTerm, sortOrder],
+    queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const page = (typeof pageParam === 'number' ? pageParam : 0);
@@ -414,10 +426,14 @@ const MediaTracker = () => {
       const to = from + pageSize - 1;
       let query = supabase
         .from('media_tracker')
-        .select('*, media_tags(tags(*))', { count: 'exact' })
-        .order('title', { ascending: sortOrder === 'asc' })
-        .order('updated_at', { ascending: false })
-        .range(from, to);
+        .select('*, media_tags(tags(*))', { count: 'exact' });
+      // Dynamic primary sort. Nulls last keeps unrated/undated items from dominating.
+      query = query.order(sortBy, { ascending: sortOrder === 'asc', nullsFirst: false });
+      // Stable secondary sort.
+      if (sortBy !== 'title') {
+        query = query.order('title', { ascending: true });
+      }
+      query = query.range(from, to);
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         query = query.eq('user_id', user.id);
@@ -463,12 +479,6 @@ const MediaTracker = () => {
     (data?.pages.flatMap(p => p.items.map(normalizeMediaItem)) ?? []),
     [data]
   );
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('mediaTrackerActiveTypeTab', activeTypeTab);
-    } catch {}
-  }, [activeTypeTab]);
 
   useEffect(() => {
     try {
@@ -557,6 +567,10 @@ const MediaTracker = () => {
       });
 
       const groupCounts: Record<string, number> = { all: data.length };
+      // Per-type counts so the unified category row can show counts on type pills.
+      for (const [t, c] of Object.entries(typeCounts)) {
+        groupCounts[`type:${t}`] = c;
+      }
       for (const group of customGroups) {
         let count = 0;
         for (const t of group.types) {
@@ -623,47 +637,57 @@ const MediaTracker = () => {
     });
   }, [mediaItems, selectedTags]);
 
-  // Category filtering using custom groups
+  // Single-axis category filtering: 'all', a single type ('type:X'), or a custom group id.
   const categoryFilteredItems = useMemo(() => {
-    if (activeGroupId === 'all') return filteredByTagsMediaItems;
-    
-    const activeGroup = customGroups.find(g => g.id === activeGroupId);
+    if (activeCategory === 'all') return filteredByTagsMediaItems;
+
+    if (isTypeCategory(activeCategory)) {
+      const t = typeOf(activeCategory);
+      return filteredByTagsMediaItems.filter((item) => item.type === t);
+    }
+
+    const activeGroup = customGroups.find((g) => g.id === activeCategory);
     if (!activeGroup) return filteredByTagsMediaItems;
-    
-    return filteredByTagsMediaItems.filter(item => 
-      itemBelongsToCustomGroup(item.type, activeGroup)
-    );
-  }, [filteredByTagsMediaItems, activeGroupId, customGroups]);
+
+    return filteredByTagsMediaItems.filter((item) => itemBelongsToCustomGroup(item.type, activeGroup));
+  }, [filteredByTagsMediaItems, activeCategory, customGroups]);
 
   const finalItems = useMemo(() => {
-    // Keep custom groups as the primary category filter, then apply tab + needs-cover filters.
     const base = categoryFilteredItems;
-    const byTab = activeTypeTab === 'all' ? base : base.filter(i => i.type === activeTypeTab);
-    if (!needsCoverOnly) return byTab;
+    if (!needsCoverOnly) return base;
     // "Needs cover" = no persisted cover_image AND no resolved cover from the lazy loader.
     // Using the persisted column keeps the filter stable regardless of scroll position.
-    return byTab.filter(i => !i.cover_image && !imageUrls.get(i.id));
-  }, [categoryFilteredItems, activeTypeTab, needsCoverOnly, imageUrls]);
+    return base.filter((i) => !i.cover_image && !imageUrls.get(i.id));
+  }, [categoryFilteredItems, needsCoverOnly, imageUrls]);
 
   // Whether any filter that can hide existing items is active.
   const hasActiveFilters = useMemo(() => (
     filterStatus !== 'All' ||
     searchTerm.trim() !== '' ||
-    activeTypeTab !== 'all' ||
-    activeGroupId !== 'all' ||
+    activeCategory !== 'all' ||
     needsCoverOnly ||
     selectedTags.length > 0
-  ), [filterStatus, searchTerm, activeTypeTab, activeGroupId, needsCoverOnly, selectedTags]);
+  ), [filterStatus, searchTerm, activeCategory, needsCoverOnly, selectedTags]);
 
   const resetAllFilters = useCallback(() => {
     setFilterStatus('All');
     setSearchTerm('');
     setTypedSearchTerm('');
-    setActiveTypeTab('all');
-    setActiveGroupId('all');
+    setActiveCategory('all');
     setNeedsCoverOnly(false);
     setSelectedTags([]);
   }, []);
+
+  // Count of distinct active filter facets (for the Filters button badge).
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (filterStatus !== 'All') n += 1;
+    if (searchTerm.trim() !== '') n += 1;
+    if (activeCategory !== 'all') n += 1;
+    if (needsCoverOnly) n += 1;
+    n += selectedTags.length;
+    return n;
+  }, [filterStatus, searchTerm, activeCategory, needsCoverOnly, selectedTags]);
 
   const selectedItems = useMemo(() => {
     if (selectedIds.size === 0) return [];
@@ -703,6 +727,45 @@ const MediaTracker = () => {
     }
   }, [selectedItems, imageApiSources, toast, isRefreshingCovers]);
 
+  // Select every item currently visible (after filters).
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(new Set(finalItems.map((i) => i.id)));
+  }, [finalItems]);
+
+  // Bulk set status for all selected items.
+  const bulkSetStatus = useCallback(async (newStatus: string) => {
+    if (selectedItems.length === 0) return;
+    const ids = selectedItems.map((i) => i.id);
+    try {
+      const { error } = await supabase.from('media_tracker').update({ status: newStatus }).in('id', ids);
+      if (error) throw error;
+      toast({ title: 'Status updated', description: `${ids.length} items set to ${newStatus}` });
+      clearSelection();
+      refetch();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Update failed', description: message, variant: 'destructive' });
+    }
+  }, [selectedItems, toast, clearSelection, refetch]);
+
+  // Bulk delete all selected items (after confirmation).
+  const bulkDelete = useCallback(async () => {
+    if (selectedItems.length === 0) return;
+    const ids = selectedItems.map((i) => i.id);
+    try {
+      const { error } = await supabase.from('media_tracker').delete().in('id', ids);
+      if (error) throw error;
+      toast({ title: 'Deleted', description: `${ids.length} items removed` });
+      clearSelection();
+      refetch();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Delete failed', description: message, variant: 'destructive' });
+    } finally {
+      setBulkDeleteOpen(false);
+    }
+  }, [selectedItems, toast, clearSelection, refetch]);
+
   // Calculate category counts - use database counts instead of loaded items
   const categoryCounts = useMemo(() => {
     // Use fetched group counts from database, fallback to 0 if not loaded yet
@@ -740,7 +803,7 @@ const MediaTracker = () => {
     interface QueryData {
       pages: QueryPage[];
     }
-    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortOrder], (old) => {
+    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortBy, sortOrder], (old) => {
       if (!old) return old;
       return {
         ...old,
@@ -759,7 +822,7 @@ const MediaTracker = () => {
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
     } catch (e: unknown) {
       // Revert optimistic update on error
-      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortOrder] });
+      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Update failed', description: message, variant: 'destructive' });
     } finally {
@@ -779,7 +842,7 @@ const MediaTracker = () => {
     interface QueryData {
       pages: QueryPage[];
     }
-    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortOrder], (old) => {
+    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortBy, sortOrder], (old) => {
       if (!old) return old;
       return {
         ...old,
@@ -798,7 +861,7 @@ const MediaTracker = () => {
       toast({ title: 'Status updated', description: `Changed to ${newStatus}` });
     } catch (e: unknown) {
       // Revert optimistic update on error
-      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortOrder] });
+      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Update failed', description: message, variant: 'destructive' });
     } finally {
@@ -1336,6 +1399,7 @@ const MediaTracker = () => {
                       <img
                         src={imageUrls.get(editingItem.id) || PLACEHOLDER_IMAGE}
                         alt={editingItem.title}
+                        referrerPolicy="no-referrer"
                         className="w-full h-full object-cover"
                       />
                     </div>
@@ -1559,17 +1623,19 @@ const MediaTracker = () => {
             </Button>
             <h1 className="font-heading font-bold text-base sm:text-lg">Media Tracker</h1>
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="outline" onClick={() => setQuickAddOpen(true)} className="h-8 w-8 p-0" aria-label="Add media" title="Add">
+              <Button size="sm" variant="default" onClick={() => setQuickAddOpen(true)} className="h-8 w-8 p-0" aria-label="Add media" title="Add">
                 <Plus className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setFiltersOpen(true)} className="h-8 w-8 p-0" aria-label="Open filters" title="Filters">
+              <Button size="sm" variant={hasActiveFilters ? 'default' : 'outline'} onClick={() => setFiltersOpen(true)} className="relative h-8 w-8 p-0" aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'} title="Filters">
                 <Filter className="h-4 w-4" />
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+                    {activeFilterCount}
+                  </span>
+                )}
               </Button>
-              <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 p-0 touch-manipulation" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
-                <LayoutGrid className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant={viewMode === 'list' ? 'default' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 p-0 touch-manipulation" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
-                <ListIcon className="h-4 w-4" />
+              <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-8 w-8 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
+                {viewMode === 'grid' ? <ListIcon className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
               </Button>
             </div>
           </div>
@@ -1601,12 +1667,14 @@ const MediaTracker = () => {
                   variant={hasActiveFilters ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setFiltersOpen(true)}
-                  aria-label={hasActiveFilters ? 'Filters (active)' : 'Open filters'}
+                  aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'}
                 >
                   <Filter className="h-4 w-4 mr-2" />
                   Filters
-                  {hasActiveFilters && (
-                    <span className="ml-2 h-2 w-2 rounded-full bg-primary-foreground" aria-hidden="true" />
+                  {activeFilterCount > 0 && (
+                    <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary-foreground/20 text-[11px] font-medium">
+                      {activeFilterCount}
+                    </span>
                   )}
                 </Button>
 
@@ -1635,6 +1703,7 @@ const MediaTracker = () => {
               <DialogContent className="sm:max-w-[520px]">
                 <DialogHeader>
                   <DialogTitle>Quick Add</DialogTitle>
+                  <DialogDescription>Add a title fast. Use “More options” for rating, season, and tags.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -1744,6 +1813,7 @@ const MediaTracker = () => {
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
                 <DialogTitle>Export to Text File</DialogTitle>
+                <DialogDescription>Choose which media types to include in the exported text file.</DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <p className="text-sm text-muted-foreground">
@@ -1805,12 +1875,12 @@ const MediaTracker = () => {
 
           {/* Filters sheet (mobile + desktop) */}
           <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
-            <SheetContent side="right" className="w-full sm:max-w-md">
+            <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
               <SheetHeader>
-                <SheetTitle>Filters</SheetTitle>
-                <SheetDescription>Refine what you see without clutter.</SheetDescription>
+                <SheetTitle>Filters &amp; sort</SheetTitle>
+                <SheetDescription>Refine and reorder your library.</SheetDescription>
               </SheetHeader>
-              <div className="mt-6 space-y-4">
+              <div className="mt-6 space-y-5">
                 <div className="space-y-2">
                   <Label>Status</Label>
                   <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -1818,114 +1888,76 @@ const MediaTracker = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="All">All Status</SelectItem>
-                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="All">All statuses</SelectItem>
+                      <SelectItem value="Active">Active (Watching / Reading)</SelectItem>
                       <SelectItem value="Planned">Planned</SelectItem>
                       <SelectItem value="Completed">Completed</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                <Separator />
+
                 <div className="space-y-2">
-                  <Label>Sort</Label>
-                  <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="asc">A → Z</SelectItem>
-                      <SelectItem value="desc">Z → A</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {availableTags.length > 0 && (
-                  <div className="space-y-2">
-                    <Label>Tags</Label>
-                    <TagFilter
-                      availableTags={availableTags}
-                      selectedTags={selectedTags}
-                      onChange={setSelectedTags}
-                    />
+                  <Label>Sort by</Label>
+                  <div className="flex gap-2">
+                    <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="title">Title</SelectItem>
+                        <SelectItem value="rating">Rating</SelectItem>
+                        <SelectItem value="updated_at">Recently updated</SelectItem>
+                        <SelectItem value="created_at">Date added</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
+                      <SelectTrigger className="w-[130px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="asc">{sortBy === 'title' ? 'A → Z' : 'Ascending'}</SelectItem>
+                        <SelectItem value="desc">{sortBy === 'title' ? 'Z → A' : 'Descending'}</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <Label className="block">Needs cover</Label>
+                    <p className="text-xs text-muted-foreground">Only show items without artwork.</p>
+                  </div>
+                  <Switch checked={needsCoverOnly} onCheckedChange={setNeedsCoverOnly} aria-label="Toggle needs cover filter" />
+                </div>
+
+                {availableTags.length > 0 && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2">
+                      <Label>Tags</Label>
+                      <TagFilter
+                        availableTags={availableTags}
+                        selectedTags={selectedTags}
+                        onChange={setSelectedTags}
+                      />
+                    </div>
+                  </>
                 )}
               </div>
               <SheetFooter className="mt-6">
-                <Button variant="outline" onClick={resetAllFilters}>Reset</Button>
-                <Button variant="outline" onClick={() => setFiltersOpen(false)}>Close</Button>
+                <Button variant="outline" onClick={resetAllFilters} disabled={!hasActiveFilters}>Reset filters</Button>
+                <Button onClick={() => setFiltersOpen(false)}>Done</Button>
               </SheetFooter>
             </SheetContent>
           </Sheet>
 
           <div className="p-4 sm:p-6">
-            <div className="mb-4 flex flex-col gap-3">
-              <Tabs value={activeTypeTab} onValueChange={(v) => setActiveTypeTab(v as any)}>
-                <TabsList className="w-full justify-start overflow-x-auto">
-                  <TabsTrigger value="all">All</TabsTrigger>
-                  {visibleTypeTabs.includes('Anime') && <TabsTrigger value="Anime">Anime</TabsTrigger>}
-                  {visibleTypeTabs.includes('Manga') && <TabsTrigger value="Manga">Manga</TabsTrigger>}
-                  {visibleTypeTabs.includes('Manhwa') && <TabsTrigger value="Manhwa">Manhwa</TabsTrigger>}
-                  {visibleTypeTabs.includes('Manhua') && <TabsTrigger value="Manhua">Manhua</TabsTrigger>}
-                  {visibleTypeTabs.includes('Series') && <TabsTrigger value="Series">Series</TabsTrigger>}
-                  {visibleTypeTabs.includes('Movie') && <TabsTrigger value="Movie">Movie</TabsTrigger>}
-                  {visibleTypeTabs.includes('KDrama') && <TabsTrigger value="KDrama">KDrama</TabsTrigger>}
-                  {visibleTypeTabs.includes('JDrama') && <TabsTrigger value="JDrama">JDrama</TabsTrigger>}
-                </TabsList>
-              </Tabs>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="outline" onClick={() => setTabsManageOpen(true)}>
-                  Manage Tabs
-                </Button>
-                <Button size="sm" variant={needsCoverOnly ? 'default' : 'outline'} onClick={() => setNeedsCoverOnly(v => !v)}>
-                  Needs Cover
-                </Button>
-                {selectedIds.size > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">Selected: {selectedIds.size}</Badge>
-                    <Button size="sm" variant="default" onClick={refreshSelectedCovers} disabled={isRefreshingCovers}>
-                      {isRefreshingCovers ? 'Refreshing…' : 'Refresh Covers'}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={clearSelection}>Clear</Button>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <Dialog open={tabsManageOpen} onOpenChange={setTabsManageOpen}>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Manage Type Tabs</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-3">
-                  {(['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'] as const).map((t) => (
-                    <div key={t} className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={`tab-${t}`}
-                          checked={visibleTypeTabs.includes(t)}
-                          onCheckedChange={(checked) => {
-                            setVisibleTypeTabs((prev) => {
-                              const set = new Set(prev);
-                              if (checked) set.add(t);
-                              else set.delete(t);
-                              return Array.from(set);
-                            });
-                          }}
-                        />
-                        <Label htmlFor={`tab-${t}`}>{t}</Label>
-                      </div>
-                    </div>
-                  ))}
-                  <p className="text-xs text-muted-foreground">
-                    Tabs are stored in localStorage. Removing a tab doesn’t delete your media.
-                  </p>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setTabsManageOpen(false)}>Close</Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <div className="mb-4 flex items-center gap-2">
+            {/* Search */}
+            <div className="mb-3 flex items-center gap-2">
               <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <div className="relative flex-1">
                 <Input
@@ -1953,16 +1985,162 @@ const MediaTracker = () => {
               </div>
             </div>
 
-            {/* Custom Groups */}
-            <div className="mb-6">
+            {/* Unified category bar (All / type pills / custom groups) */}
+            <div className="mb-3">
               <CustomGroupBuilder
                 groups={customGroups}
                 onGroupsChange={setCustomGroups}
-                activeGroupId={activeGroupId}
-                onActiveGroupChange={setActiveGroupId}
+                activeCategory={activeCategory}
+                onActiveCategoryChange={setActiveCategory}
                 itemCounts={categoryCounts}
+                typePills={visibleTypeTabs}
+                onManageTypes={() => setTabsManageOpen(true)}
               />
             </div>
+
+            {/* Active filter chips — show what's narrowing the view, each removable */}
+            {hasActiveFilters && (
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">Filters:</span>
+                {searchTerm.trim() !== '' && (
+                  <Badge variant="secondary" className="gap-1 pr-1">
+                    Search: “{searchTerm.trim()}”
+                    <button
+                      type="button"
+                      onClick={() => { setTypedSearchTerm(''); setSearchTerm(''); }}
+                      className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                      aria-label="Clear search filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                )}
+                {activeCategory !== 'all' && (
+                  <Badge variant="secondary" className="gap-1 pr-1">
+                    {isTypeCategory(activeCategory)
+                      ? typeOf(activeCategory)
+                      : (customGroups.find(g => g.id === activeCategory)?.name ?? 'Category')}
+                    <button
+                      type="button"
+                      onClick={() => setActiveCategory('all')}
+                      className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                      aria-label="Clear category filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                )}
+                {filterStatus !== 'All' && (
+                  <Badge variant="secondary" className="gap-1 pr-1">
+                    {filterStatus}
+                    <button
+                      type="button"
+                      onClick={() => setFilterStatus('All')}
+                      className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                      aria-label="Clear status filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                )}
+                {needsCoverOnly && (
+                  <Badge variant="secondary" className="gap-1 pr-1">
+                    Needs cover
+                    <button
+                      type="button"
+                      onClick={() => setNeedsCoverOnly(false)}
+                      className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                      aria-label="Clear needs-cover filter"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                )}
+                {selectedTags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTags((prev) => prev.filter((t) => t !== tag))}
+                      className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                      aria-label={`Clear ${tag} tag filter`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={resetAllFilters}>
+                  Clear all
+                </Button>
+              </div>
+            )}
+
+            {/* Selection toolbar — appears only in selection mode */}
+            {selectedIds.size > 0 && (
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-2">
+                <Badge variant="secondary">{selectedIds.size} selected</Badge>
+                <Button size="sm" variant="outline" onClick={selectAllVisible}>
+                  Select all ({finalItems.length})
+                </Button>
+                <Separator orientation="vertical" className="h-6" />
+                <Select onValueChange={(v) => bulkSetStatus(v)}>
+                  <SelectTrigger className="h-8 w-[150px]">
+                    <SelectValue placeholder="Set status…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Watching">Watching</SelectItem>
+                    <SelectItem value="Reading">Reading</SelectItem>
+                    <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
+                    <SelectItem value="Plan to Read">Plan to Read</SelectItem>
+                    <SelectItem value="Completed">Completed</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button size="sm" variant="outline" onClick={refreshSelectedCovers} disabled={isRefreshingCovers}>
+                  <RefreshCw className={isRefreshingCovers ? 'h-4 w-4 mr-1 animate-spin' : 'h-4 w-4 mr-1'} />
+                  {isRefreshingCovers ? 'Refreshing…' : 'Refresh covers'}
+                </Button>
+                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={() => setBulkDeleteOpen(true)}>
+                  <Trash2 className="h-4 w-4 mr-1" /> Delete
+                </Button>
+                <Button size="sm" variant="ghost" onClick={clearSelection}>Cancel</Button>
+              </div>
+            )}
+
+            <Dialog open={tabsManageOpen} onOpenChange={setTabsManageOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Manage Type Pills</DialogTitle>
+                  <DialogDescription>Choose which type shortcuts appear in the category bar.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  {(['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'] as const).map((t) => (
+                    <div key={t} className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={`tab-${t}`}
+                          checked={visibleTypeTabs.includes(t)}
+                          onCheckedChange={(checked) => {
+                            setVisibleTypeTabs((prev) => {
+                              const set = new Set(prev);
+                              if (checked) set.add(t);
+                              else set.delete(t);
+                              return Array.from(set);
+                            });
+                          }}
+                        />
+                        <Label htmlFor={`tab-${t}`}>{t}</Label>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-xs text-muted-foreground">
+                    Choose which type shortcuts appear in the category bar. This doesn’t delete any media.
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setTabsManageOpen(false)}>Close</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             {loading ? (
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
@@ -2017,9 +2195,12 @@ const MediaTracker = () => {
                               imageUrl={imageUrls.get(item.id)}
                               apiSource={imageApiSources.get(item.id)}
                               isLoading={loading && !imageUrls.has(item.id)}
+                              isUpdating={updatingIds.has(item.id)}
                               selected={selectedIds.has(item.id)}
                               onToggleSelected={(id) => toggleSelected(id)}
                               onEdit={() => openDetails(item, 'edit')}
+                              onOpen={() => openDetails(item, 'view')}
+                              onProgressChange={(field, amount) => handleQuickUpdate(item, field, amount)}
                               onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
                               onVisibleChange={scheduleImageLoad}
                               onImageUpdate={(newImageUrl, newApiSource) => {
@@ -2079,6 +2260,14 @@ const MediaTracker = () => {
         onConfirm={handleDeleteMedia}
         title="Delete Media Item"
         description="Are you sure you want to delete this media item? This action cannot be undone."
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        onConfirm={bulkDelete}
+        title={`Delete ${selectedIds.size} item${selectedIds.size === 1 ? '' : 's'}`}
+        description="Are you sure you want to delete the selected media items? This action cannot be undone."
       />
     </div>
   );
