@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Star, Edit2, Trash2, RefreshCw, MoreVertical, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { refreshCoverImage } from '@/lib/media-refresh';
 import { useToast } from '@/components/ui/use-toast';
+import { typeBadgeSoft, STATUS_DOT, fallbackStyle } from './media-style';
 
 interface MediaCardProps {
   id: number;
@@ -28,6 +29,8 @@ interface MediaCardProps {
   apiSource?: string; // Track which API provided the current image
   isLoading?: boolean;
   isUpdating?: boolean;
+  /** Hide the status dot+label (e.g. when the grid is already grouped by status). */
+  showStatus?: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onOpen?: () => void; // open details (view) when clicking the card
@@ -39,15 +42,6 @@ interface MediaCardProps {
 }
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
-
-// Status is shown as a small colored dot + label (less noisy than a filled badge).
-const STATUS_DOT: Record<string, string> = {
-  'Watching': 'bg-green-500',
-  'Reading': 'bg-blue-500',
-  'Completed': 'bg-purple-500',
-  'Plan to Watch': 'bg-amber-500',
-  'Plan to Read': 'bg-amber-500',
-};
 
 const READABLE = ['Manga', 'Manhwa', 'Manhua'];
 const WATCHABLE = ['Series', 'Anime', 'KDrama', 'JDrama'];
@@ -65,6 +59,7 @@ export const MediaCard = ({
   apiSource,
   isLoading = false,
   isUpdating = false,
+  showStatus = true,
   onEdit,
   onDelete,
   onOpen,
@@ -79,24 +74,28 @@ export const MediaCard = ({
   const [currentImage, setCurrentImage] = useState(imageUrl);
   const [currentApi, setCurrentApi] = useState(apiSource);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const isRefreshingRef = useRef(false);
   const { toast } = useToast();
   const { ref, inView } = useInView({ rootMargin: '200px' });
 
-  // Sync apiSource prop with currentApi state when it changes
+  // Sync apiSource prop into local state when the prop changes.
+  // Functional updater avoids reading currentApi, so it isn't a dependency.
   useEffect(() => {
-    if (apiSource && apiSource !== currentApi) {
-      setCurrentApi(apiSource);
+    if (apiSource) {
+      setCurrentApi((prev) => (apiSource !== prev ? apiSource : prev));
     }
   }, [apiSource]);
 
   // Sync imageUrl prop into local state so lazily-loaded covers appear after mount.
-  // Skip while refreshing so we don't clobber an optimistic update.
+  // Skipped while a manual refresh is in flight (ref) so we don't clobber the optimistic
+  // update; functional updater keeps currentImage out of the dependency list.
   useEffect(() => {
-    if (isRefreshing) return;
-    if (imageUrl !== undefined && imageUrl !== currentImage) {
-      setCurrentImage(imageUrl);
+    if (imageUrl === undefined || isRefreshingRef.current) return;
+    setCurrentImage((prev) => {
+      if (imageUrl === prev) return prev;
       setError(false);
-    }
+      return imageUrl;
+    });
   }, [imageUrl]);
 
   useEffect(() => {
@@ -130,11 +129,13 @@ export const MediaCard = ({
 
   const hasCover = Boolean(currentImage) && !error;
   const displayImageUrl = currentImage || PLACEHOLDER_IMAGE;
+  const fb = fallbackStyle(title);
 
   const handleRefresh = async () => {
     if (isRefreshing) return;
 
     setIsRefreshing(true);
+    isRefreshingRef.current = true;
     try {
       const result = await refreshCoverImage(title, type, currentApi, id);
 
@@ -164,6 +165,7 @@ export const MediaCard = ({
       });
     } finally {
       setIsRefreshing(false);
+      isRefreshingRef.current = false;
     }
   };
 
@@ -196,7 +198,7 @@ export const MediaCard = ({
       <div
         className={cn(
           'relative overflow-hidden rounded-lg bg-muted aspect-[2/3] cursor-pointer',
-          'shadow-sm group-hover:shadow-lg transition-shadow duration-300'
+          'shadow-sm transition-all duration-300 group-hover:shadow-xl group-hover:-translate-y-0.5'
         )}
         onClick={() => onOpen?.()}
       >
@@ -225,14 +227,9 @@ export const MediaCard = ({
             )}
           />
         ) : (
-          // Letter fallback — far nicer than a wall of identical placeholder posters.
-          <div
-            className={cn(
-              'w-full h-full flex items-center justify-center',
-              'bg-gradient-to-br from-muted to-muted-foreground/20'
-            )}
-          >
-            <span className="text-4xl font-bold text-muted-foreground/70 select-none">
+          // Letter fallback with a deterministic color so missing covers look intentional.
+          <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', fb.gradient)}>
+            <span className={cn('text-5xl font-bold select-none', fb.text)}>
               {title.charAt(0).toUpperCase()}
             </span>
           </div>
@@ -241,9 +238,12 @@ export const MediaCard = ({
         {/* Subtle gradient for legibility of bottom content / hover affordances */}
         <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
-        {/* Type Badge (top-left) — the single primary badge on the poster */}
+        {/* Type Badge (top-left) — soft tinted style so artwork stays the hero */}
         <Badge
-          className={cn('absolute top-2 left-2 text-white text-xs z-10 border-0', typeColors[type] || 'bg-gray-500')}
+          className={cn(
+            'absolute top-2 left-2 text-[11px] font-medium z-10 border-0 backdrop-blur-sm',
+            typeBadgeSoft(type)
+          )}
         >
           {type}
         </Badge>
@@ -314,12 +314,14 @@ export const MediaCard = ({
           {title}
         </h3>
 
-        <div className="flex items-center justify-between gap-2">
-          {/* Status as a dot + label (low-noise) */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className={cn('h-2 w-2 rounded-full flex-shrink-0', STATUS_DOT[status] || 'bg-gray-400')} />
-            <span className="text-xs text-muted-foreground truncate">{status}</span>
-          </div>
+        <div className={cn('flex items-center gap-2', showStatus ? 'justify-between' : 'justify-end')}>
+          {/* Status as a dot + label (low-noise); hidden when the grid groups by status */}
+          {showStatus && (
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className={cn('h-2 w-2 rounded-full flex-shrink-0', STATUS_DOT[status] || 'bg-gray-400')} />
+              <span className="text-xs text-muted-foreground truncate">{status}</span>
+            </div>
+          )}
 
           {/* Inline progress steppers — the core "I watched one more" action */}
           {progressField && onProgressChange && (

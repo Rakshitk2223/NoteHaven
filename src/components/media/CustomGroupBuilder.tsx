@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/lib/utils';
+import { type CustomGroup, type ActiveCategory, TYPE_PREFIX } from './media-style';
 
 // Available media types for custom groups
 const AVAILABLE_TYPES = [
@@ -26,19 +27,6 @@ const AVAILABLE_TYPES = [
   'KDrama',
   'JDrama',
 ] as const;
-
-export interface CustomGroup {
-  id: string;
-  name: string;
-  types: string[];
-}
-
-// A single category selection: 'all', a single type ('type:Anime'), or a custom group id.
-export type ActiveCategory = string;
-
-export const TYPE_PREFIX = 'type:';
-export const isTypeCategory = (cat: string) => cat.startsWith(TYPE_PREFIX);
-export const typeOf = (cat: string) => cat.slice(TYPE_PREFIX.length);
 
 interface CustomGroupBuilderProps {
   groups: CustomGroup[];
@@ -131,9 +119,9 @@ export const CustomGroupBuilder = ({
   };
 
   const renderCount = (key: string, active: boolean) =>
-    itemCounts[key] > 0 ? (
+    active && itemCounts[key] > 0 ? (
       <span
-        className={cn('text-xs px-2 py-0.5 rounded-full', active ? 'bg-primary-foreground/20' : 'bg-muted')}
+        className="text-xs px-2 py-0.5 rounded-full bg-primary-foreground/20"
         title={COUNT_TOOLTIP}
       >
         {itemCounts[key]}
@@ -170,6 +158,9 @@ export const CustomGroupBuilder = ({
           </button>
         );
       })}
+
+      {/* Divider between type shortcuts and user-defined groups */}
+      {groups.length > 0 && <div className="h-6 w-px bg-border flex-shrink-0" aria-hidden="true" />}
 
       {/* Custom Groups */}
       {groups.map((group) => {
@@ -316,8 +307,3 @@ export const CustomGroupBuilder = ({
     </div>
   );
 };
-
-// Helper function to check if item belongs to a custom group
-export function itemBelongsToCustomGroup(itemType: string, group: CustomGroup): boolean {
-  return group.types.includes(itemType);
-}

@@ -38,6 +38,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import AppSidebar from "@/components/AppSidebar";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -52,7 +53,8 @@ import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
-import { CustomGroupBuilder, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/CustomGroupBuilder";
+import { typeBadgeSoft, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/media-style";
+import { CustomGroupBuilder } from "@/components/media/CustomGroupBuilder";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { refreshCoverImage } from "@/lib/media-refresh";
 
@@ -151,18 +153,11 @@ const getStatusColor = (status: string) => {
   }
 };
 
-const getTypeColor = (type: MediaItem['type']) => {
-  switch (type) {
-    case 'Movie': return 'bg-purple-100 text-purple-800';
-    case 'Series': return 'bg-indigo-100 text-indigo-800';
-    case 'Anime': return 'bg-pink-100 text-pink-800';
-    case 'Manga': return 'bg-orange-100 text-orange-800';
-    case 'Manhwa': return 'bg-teal-100 text-teal-800';
-    case 'Manhua': return 'bg-lime-100 text-lime-800';
-    case 'KDrama': return 'bg-rose-100 text-rose-800';
-    case 'JDrama': return 'bg-amber-100 text-amber-800';
-    default: return 'bg-gray-100 text-gray-800';
-  }
+// Status-category dot colors for sticky grid section headers.
+const SECTION_DOT: Record<string, string> = {
+  Active: 'bg-green-500',
+  Planned: 'bg-amber-500',
+  Completed: 'bg-purple-500',
 };
 
 // Module-scope list row so it isn't redefined (and remounted) on every parent render.
@@ -191,7 +186,7 @@ const MediaListRow = ({
   }, [item.id, inView, onScheduleLoad]);
 
   return (
-    <TableRow ref={ref as any}>
+    <TableRow ref={ref as React.Ref<HTMLTableRowElement>}>
       <TableCell id={`media-${item.id}`} className="font-medium">
         <div className="flex items-center gap-3">
           <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted flex items-center justify-center">
@@ -208,7 +203,7 @@ const MediaListRow = ({
           </button>
         </div>
       </TableCell>
-      <TableCell><Badge className={getTypeColor(item.type)}>{item.type}</Badge></TableCell>
+      <TableCell><Badge className={cn('border-0', typeBadgeSoft(item.type))}>{item.type}</Badge></TableCell>
       <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
       <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
       <TableCell>
@@ -296,10 +291,12 @@ const MediaTracker = () => {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
           const allowed = new Set(['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama']);
-          return parsed.filter((t) => typeof t === 'string' && allowed.has(t)) as any;
+          return parsed.filter((t) => typeof t === 'string' && allowed.has(t)) as Array<'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'Series' | 'Movie' | 'KDrama' | 'JDrama'>;
         }
       }
-    } catch {}
+    } catch {
+      // Ignore localStorage/JSON errors and use defaults
+    }
     return ['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'];
   });
   const [needsCoverOnly, setNeedsCoverOnly] = useState(false);
@@ -483,7 +480,9 @@ const MediaTracker = () => {
   useEffect(() => {
     try {
       localStorage.setItem('mediaTrackerVisibleTypeTabs', JSON.stringify(visibleTypeTabs));
-    } catch {}
+    } catch {
+      // Ignore localStorage errors
+    }
   }, [visibleTypeTabs]);
 
   // Lazy loading: only fetch covers for visible items
@@ -540,7 +539,7 @@ const MediaTracker = () => {
       setImageUrls(prev => new Map([...prev, ...newUrlMap]));
       setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
     }).catch(err => console.error('Initial load error:', err));
-  }, [mediaItems]);
+  }, [mediaItems, imageUrls.size]);
 
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
@@ -552,21 +551,29 @@ const MediaTracker = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return { all: 0 };
 
-      // Single query with GROUP BY for all types
+      // Single query for type + status aggregates
       const { data, error } = await supabase
         .from('media_tracker')
-        .select('type')
+        .select('type, status')
         .eq('user_id', user.id);
 
       if (error || !data) return { all: 0 };
 
       // Count by type
       const typeCounts: Record<string, number> = {};
+      const statusCounts: Record<string, number> = {};
       data.forEach((row) => {
         typeCounts[row.type] = (typeCounts[row.type] || 0) + 1;
+        if (row.status) statusCounts[row.status] = (statusCounts[row.status] || 0) + 1;
       });
 
       const groupCounts: Record<string, number> = { all: data.length };
+      // Aggregate status counts for the overview strip.
+      const inProgress = (statusCounts['Watching'] || 0) + (statusCounts['Reading'] || 0);
+      const planned = (statusCounts['Plan to Watch'] || 0) + (statusCounts['Plan to Read'] || 0);
+      groupCounts['stat:inProgress'] = inProgress;
+      groupCounts['stat:planned'] = planned;
+      groupCounts['stat:completed'] = statusCounts['Completed'] || 0;
       // Per-type counts so the unified category row can show counts on type pills.
       for (const [t, c] of Object.entries(typeCounts)) {
         groupCounts[`type:${t}`] = c;
@@ -595,7 +602,7 @@ const MediaTracker = () => {
   // Keep legacy loading/error wiring for skeleton and banners
   useEffect(() => {
     setLoading(isLoading);
-    setError(queryError ? (queryError as any).message || 'Failed to fetch media items' : null);
+    setError(queryError ? (queryError instanceof Error ? queryError.message : 'Failed to fetch media items') : null);
   }, [isLoading, queryError]);
 
   // Fetch user tags
@@ -1383,8 +1390,8 @@ const MediaTracker = () => {
                 <SheetDescription className="flex items-center gap-2">
                   {editingItem ? (
                     <>
-                      <Badge className={getTypeColor(editingItem.type as any)}>{editingItem.type}</Badge>
-                      <Badge className={getStatusColor(editingItem.status as any)}>{editingItem.status}</Badge>
+                      <Badge className={cn('border-0', typeBadgeSoft(editingItem.type))}>{editingItem.type}</Badge>
+                      <Badge className={getStatusColor(editingItem.status)}>{editingItem.status}</Badge>
                     </>
                   ) : (
                     <span>Manage your media item</span>
@@ -1956,6 +1963,36 @@ const MediaTracker = () => {
           </Sheet>
 
           <div className="p-4 sm:p-6">
+            {/* Overview strip — at-a-glance totals; cards filter by status when clicked */}
+            <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+              {([
+                { key: 'all', label: 'Total', value: categoryCounts['all'] ?? 0, status: 'All', dot: 'bg-foreground/40' },
+                { key: 'inProgress', label: 'In progress', value: categoryCounts['stat:inProgress'] ?? 0, status: 'Active', dot: 'bg-green-500' },
+                { key: 'planned', label: 'Planned', value: categoryCounts['stat:planned'] ?? 0, status: 'Planned', dot: 'bg-amber-500' },
+                { key: 'completed', label: 'Completed', value: categoryCounts['stat:completed'] ?? 0, status: 'Completed', dot: 'bg-purple-500' },
+              ] as const).map((stat) => {
+                const active = filterStatus === stat.status;
+                return (
+                  <button
+                    key={stat.key}
+                    type="button"
+                    onClick={() => setFilterStatus(stat.status)}
+                    aria-pressed={active}
+                    className={cn(
+                      'rounded-lg border p-3 text-left transition-colors',
+                      active ? 'border-primary bg-primary/5' : 'border-border bg-card hover:bg-muted/50'
+                    )}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn('h-2 w-2 rounded-full', stat.dot)} aria-hidden="true" />
+                      <span className="text-xs text-muted-foreground">{stat.label}</span>
+                    </div>
+                    <div className="mt-1 text-2xl font-semibold tabular-nums leading-none">{stat.value}</div>
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Search */}
             <div className="mb-3 flex items-center gap-2">
               <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -2176,10 +2213,11 @@ const MediaTracker = () => {
                   <div className="space-y-10">
                     {groupedByStatus.keys.map((statusKey) => (
                       <div key={statusKey}>
-                        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                          <Badge className={getStatusColor(statusKey as MediaItem['status'])}>{statusKey}</Badge>
+                        <div className="sticky top-0 z-10 -mx-1 mb-4 flex items-center gap-2 bg-background/85 backdrop-blur px-1 py-2">
+                          <span className={cn('h-2.5 w-2.5 rounded-full', SECTION_DOT[statusKey] || 'bg-gray-400')} aria-hidden="true" />
+                          <h2 className="text-base font-semibold">{statusKey}</h2>
                           <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>
-                        </h2>
+                        </div>
                         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                           {groupedByStatus.groups[statusKey].map((item) => (
                             <MediaCard
@@ -2196,6 +2234,7 @@ const MediaTracker = () => {
                               apiSource={imageApiSources.get(item.id)}
                               isLoading={loading && !imageUrls.has(item.id)}
                               isUpdating={updatingIds.has(item.id)}
+                              showStatus={false}
                               selected={selectedIds.has(item.id)}
                               onToggleSelected={(id) => toggleSelected(id)}
                               onEdit={() => openDetails(item, 'edit')}
