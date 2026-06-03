@@ -7,15 +7,18 @@ import { devLog } from '@/lib/logger';
 const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
 
 // API priority order based on media type
+// NOTE: MangaDex and MangaUpdates are excluded here because they lack CORS headers
+// and fail from the browser. They work in the edge function (server-side) instead.
+// Client-side refresh only uses APIs that support CORS.
 const API_PRIORITY: Record<string, string[]> = {
-  'anime': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
-  'manga': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
-  'manhwa': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
-  'manhua': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
-  'movie': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
-  'series': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
-  'kdrama': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
-  'jdrama': ['anilist', 'kitsu', 'jikan', 'mangadex', 'mangaupdates', 'tvmaze', 'tmdb', 'omdb'],
+  'anime': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
+  'manga': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
+  'manhwa': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
+  'manhua': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
+  'movie': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
+  'series': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
+  'kdrama': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
+  'jdrama': ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
 };
 
 interface RefreshResult {
