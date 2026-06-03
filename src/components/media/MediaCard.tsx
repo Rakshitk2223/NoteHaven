@@ -65,14 +65,21 @@ export const MediaCard = ({
   selected,
   onToggleSelected,
 }: MediaCardProps) => {
-  const [isHovered, setIsHovered] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [error, setError] = useState(false);
   const [currentImage, setCurrentImage] = useState(imageUrl);
   const [currentApi, setCurrentApi] = useState(apiSource);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Touch devices have no hover; keep actions visible so they remain reachable.
+  const [isTouch, setIsTouch] = useState(false);
   const { toast } = useToast();
   const { ref, inView } = useInView({ rootMargin: '200px' });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      setIsTouch(window.matchMedia('(hover: none)').matches);
+    }
+  }, []);
 
   // Sync apiSource prop with currentApi state when it changes
   useEffect(() => {
@@ -80,6 +87,16 @@ export const MediaCard = ({
       setCurrentApi(apiSource);
     }
   }, [apiSource]);
+
+  // Sync imageUrl prop into local state so lazily-loaded covers appear after mount.
+  // Skip while refreshing so we don't clobber an optimistic update.
+  useEffect(() => {
+    if (isRefreshing) return;
+    if (imageUrl !== undefined && imageUrl !== currentImage) {
+      setCurrentImage(imageUrl);
+      setError(false);
+    }
+  }, [imageUrl]);
 
   useEffect(() => {
     onVisibleChange?.(id, inView);
@@ -171,8 +188,6 @@ export const MediaCard = ({
         "group relative",
         selected && "ring-2 ring-primary rounded-lg"
       )}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
       {/* Cover Image Container */}
       <div
@@ -203,12 +218,14 @@ export const MediaCard = ({
           )}
         />
         
-        {/* Hover Overlay with Refresh/Edit/Delete */}
+        {/* Hover Overlay with Refresh/Edit/Delete.
+            Visible on hover (mouse), on focus-within (keyboard), and always on touch devices. */}
         <div
           className={cn(
             "absolute inset-0 bg-black/60 flex items-center justify-center gap-2",
             "transition-opacity duration-200",
-            isHovered ? "opacity-100" : "opacity-0"
+            "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+            isTouch && "opacity-100"
           )}
         >
           {onToggleSelected && (
@@ -217,7 +234,8 @@ export const MediaCard = ({
               variant={selected ? "default" : "secondary"}
               onClick={() => onToggleSelected(id)}
               className="gap-1"
-              title="Select"
+              title={selected ? 'Deselect' : 'Select'}
+              aria-label={selected ? `Deselect ${title}` : `Select ${title}`}
             >
               {selected ? 'Selected' : 'Select'}
             </Button>
@@ -230,9 +248,9 @@ export const MediaCard = ({
             disabled={isRefreshing}
             className="gap-1"
             title="Refresh cover image"
+            aria-label={`Refresh cover image for ${title}`}
           >
             <RefreshCw className={cn("h-3 w-3", isRefreshing && "animate-spin")} />
-            {isRefreshing ? '...' : ''}
           </Button>
           
           <Button 
@@ -240,6 +258,8 @@ export const MediaCard = ({
             variant="secondary" 
             onClick={onEdit}
             className="gap-1"
+            title="Edit"
+            aria-label={`Edit ${title}`}
           >
             <Edit2 className="h-3 w-3" />
             Edit
@@ -249,6 +269,8 @@ export const MediaCard = ({
             size="sm" 
             variant="destructive" 
             onClick={onDelete}
+            title="Delete"
+            aria-label={`Delete ${title}`}
           >
             <Trash2 className="h-3 w-3" />
           </Button>
@@ -268,7 +290,7 @@ export const MediaCard = ({
         {rating && rating > 0 && (
           <div className="absolute top-2 right-2 z-10 bg-black/70 text-white px-2 py-1 rounded flex items-center gap-1">
             <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-            <span className="text-sm font-medium">{rating.toFixed(1)}</span>
+            <span className="text-sm font-medium">{rating}</span>
           </div>
         )}
         

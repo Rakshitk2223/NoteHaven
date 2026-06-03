@@ -11,6 +11,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/lib/utils';
 
 // Available media types for custom groups
@@ -50,6 +51,7 @@ export const CustomGroupBuilder = ({
   const [editingGroup, setEditingGroup] = useState<CustomGroup | null>(null);
   const [groupName, setGroupName] = useState('');
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<CustomGroup | null>(null);
 
   const maxGroups = 4;
   const canAddMore = groups.length < maxGroups;
@@ -74,6 +76,12 @@ export const CustomGroupBuilder = ({
     if (activeGroupId === groupId) {
       onActiveGroupChange('all');
     }
+  };
+
+  const confirmDeleteGroup = () => {
+    if (!deleteTarget) return;
+    handleDeleteGroup(deleteTarget.id);
+    setDeleteTarget(null);
   };
 
   const handleSaveGroup = () => {
@@ -126,10 +134,13 @@ export const CustomGroupBuilder = ({
       >
         <span>All</span>
         {itemCounts['all'] > 0 && (
-          <span className={cn(
-            "text-xs px-2 py-0.5 rounded-full",
-            activeGroupId === 'all' ? "bg-primary-foreground/20" : "bg-muted"
-          )}>
+          <span
+            className={cn(
+              "text-xs px-2 py-0.5 rounded-full",
+              activeGroupId === 'all' ? "bg-primary-foreground/20" : "bg-muted"
+            )}
+            title="Total items of this group's types (not affected by status/search filters)"
+          >
             {itemCounts['all']}
           </span>
         )}
@@ -150,10 +161,13 @@ export const CustomGroupBuilder = ({
           >
             <span>{group.name}</span>
             {itemCounts[group.id] > 0 && (
-              <span className={cn(
-                "text-xs px-2 py-0.5 rounded-full",
-                activeGroupId === group.id ? "bg-primary-foreground/20" : "bg-muted"
-              )}>
+              <span
+                className={cn(
+                  "text-xs px-2 py-0.5 rounded-full",
+                  activeGroupId === group.id ? "bg-primary-foreground/20" : "bg-muted"
+                )}
+                title="Total items of this group's types (not affected by status/search filters)"
+              >
                 {itemCounts[group.id]}
               </span>
             )}
@@ -167,15 +181,19 @@ export const CustomGroupBuilder = ({
                 handleEditGroup(group);
               }}
               className="w-5 h-5 rounded-full bg-secondary flex items-center justify-center hover:bg-primary hover:text-primary-foreground"
+              aria-label={`Edit group ${group.name}`}
+              title={`Edit group ${group.name}`}
             >
               <Settings2 className="w-3 h-3" />
             </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleDeleteGroup(group.id);
+                setDeleteTarget(group);
               }}
               className="w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:bg-destructive/90"
+              aria-label={`Delete group ${group.name}`}
+              title={`Delete group ${group.name}`}
             >
               <X className="w-3 h-3" />
             </button>
@@ -195,6 +213,7 @@ export const CustomGroupBuilder = ({
                 "bg-background text-muted-foreground border-dashed border-border",
                 "hover:border-primary hover:text-primary"
               )}
+              aria-label="Add custom group"
             >
               <Plus className="h-4 w-4" />
               <span>Add Group</span>
@@ -267,6 +286,14 @@ export const CustomGroupBuilder = ({
           </DialogContent>
         </Dialog>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        onConfirm={confirmDeleteGroup}
+        title="Delete Group"
+        description={deleteTarget ? `Delete the group "${deleteTarget.name}"? This only removes the group, not your media items.` : ''}
+      />
     </div>
   );
 };
