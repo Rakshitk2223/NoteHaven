@@ -212,10 +212,10 @@ const MediaListRow = ({
             <>
               <span className="min-w-[60px]">Ch. {item.current_chapter}</span>
               <div className="flex gap-1">
-                <Button size="icon" variant="outline" className="h-6 w-6" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_chapter', -1)} aria-label="Decrease chapter">
+                <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_chapter', -1)} aria-label="Decrease chapter">
                   <Minus className="h-3 w-3" />
                 </Button>
-                <Button size="icon" variant="outline" className="h-6 w-6" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_chapter', 1)} aria-label="Increase chapter">
+                <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_chapter', 1)} aria-label="Increase chapter">
                   <PlusIcon className="h-3 w-3" />
                 </Button>
               </div>
@@ -228,10 +228,10 @@ const MediaListRow = ({
               </span>
               {item.current_episode && (
                 <div className="flex gap-1">
-                  <Button size="icon" variant="outline" className="h-6 w-6" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_episode', -1)} aria-label="Decrease episode">
+                  <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_episode', -1)} aria-label="Decrease episode">
                     <Minus className="h-3 w-3" />
                   </Button>
-                  <Button size="icon" variant="outline" className="h-6 w-6" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_episode', 1)} aria-label="Increase episode">
+                  <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_episode', 1)} aria-label="Increase episode">
                     <PlusIcon className="h-3 w-3" />
                   </Button>
                 </div>
@@ -1370,7 +1370,7 @@ const MediaTracker = () => {
       <div className="flex">
         <AppSidebar />
         
-        <div className="flex-1 lg:ml-0">
+        <div className="flex-1 lg:ml-0 min-w-0">
           <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
             <SheetContent side="right" className="w-full sm:max-w-lg p-0">
               <SheetHeader className="p-6 border-b border-border">
@@ -2190,7 +2190,7 @@ const MediaTracker = () => {
                 ))}
               </div>
             ) : finalItems.length === 0 ? (
-              <div className="zen-card p-8 text-center">
+              <div className="zen-card p-4 sm:p-8 text-center">
                 <p className="text-muted-foreground mb-4">
                   {hasActiveFilters
                     ? 'No media found for the selected filters.'

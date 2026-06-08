@@ -1,10 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2, Menu } from 'lucide-react';
+import { Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2, Menu, ArrowLeftRight, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
@@ -28,6 +31,9 @@ import {
 import { ensureLedgerCategoriesExist } from '@/lib/category-init';
 import { TagBadge } from '@/components/TagBadge';
 import { LedgerEntryForm } from '@/components/ledger/LedgerEntryForm';
+import { LedgerCharts } from '@/components/ledger/LedgerCharts';
+import { BucketsSection } from '@/components/ledger/BucketsSection';
+import { ensureBucketsExist, fetchBuckets, type LedgerBucket } from '@/lib/buckets';
 
 const MoneyLedger = () => {
   const navigate = useNavigate();
@@ -38,6 +44,7 @@ const MoneyLedger = () => {
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [categories, setCategories] = useState<LedgerCategory[]>([]);
+  const [buckets, setBuckets] = useState<LedgerBucket[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
@@ -47,20 +54,24 @@ const MoneyLedger = () => {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
   const [newEntry, setNewEntry] = useState({
-    type: 'expense' as 'income' | 'expense',
+    type: 'expense' as 'income' | 'expense' | 'transfer',
     amount: '',
     category_id: '',
     description: '',
     transaction_date: new Date().toISOString().split('T')[0],
-    notes: ''
+    notes: '',
+    bucket_id: '',
+    from_bucket_id: ''
   });
   const [editFormData, setEditFormData] = useState({
-    type: 'expense' as 'income' | 'expense',
+    type: 'expense' as 'income' | 'expense' | 'transfer',
     amount: '',
     category_id: '',
     description: '',
     transaction_date: '',
-    notes: ''
+    notes: '',
+    bucket_id: '',
+    from_bucket_id: ''
   });
 
   // Load data
@@ -72,14 +83,16 @@ const MoneyLedger = () => {
     try {
       setLoading(true);
       
-      // Fetch entries and ensure categories exist
-      const [entriesData, categoriesData] = await Promise.all([
+      // Fetch entries and ensure categories + buckets exist
+      const [entriesData, categoriesData, bucketsData] = await Promise.all([
         fetchLedgerEntries(),
-        ensureLedgerCategoriesExist()
+        ensureLedgerCategoriesExist(),
+        ensureBucketsExist()
       ]);
-      
+
       setEntries(entriesData);
       setCategories(categoriesData);
+      setBuckets(bucketsData);
     } catch (error) {
       console.error('Error loading ledger data:', error);
       toast({
@@ -89,6 +102,15 @@ const MoneyLedger = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Reload buckets after add/edit/delete in BucketsSection
+  const reloadBuckets = async () => {
+    try {
+      setBuckets(await fetchBuckets());
+    } catch (error) {
+      console.error('Error reloading buckets:', error);
     }
   };
 
@@ -127,24 +149,32 @@ const MoneyLedger = () => {
   // Handle add entry
   const handleAddEntry = async () => {
     try {
-      if (!newEntry.amount || !newEntry.category_id) {
-        toast({
-          title: 'Missing fields',
-          description: 'Please enter amount and select a category',
-          variant: 'destructive'
-        });
+      const isTransfer = newEntry.type === 'transfer';
+      if (!newEntry.amount) {
+        toast({ title: 'Missing fields', description: 'Please enter an amount', variant: 'destructive' });
+        return;
+      }
+      if (isTransfer) {
+        if (!newEntry.from_bucket_id || !newEntry.bucket_id || newEntry.from_bucket_id === newEntry.bucket_id) {
+          toast({ title: 'Invalid transfer', description: 'Pick two different buckets', variant: 'destructive' });
+          return;
+        }
+      } else if (!newEntry.category_id) {
+        toast({ title: 'Missing fields', description: 'Please select a category', variant: 'destructive' });
         return;
       }
 
       await createLedgerEntry({
         type: newEntry.type,
         amount: parseFloat(newEntry.amount),
-        category_id: parseInt(newEntry.category_id),
+        category_id: isTransfer || !newEntry.category_id ? null : parseInt(newEntry.category_id),
         description: newEntry.description,
         transaction_date: newEntry.transaction_date,
         is_recurring: false,
         recurring_interval: null,
-        notes: newEntry.notes
+        notes: newEntry.notes,
+        bucket_id: newEntry.bucket_id ? parseInt(newEntry.bucket_id) : null,
+        from_bucket_id: isTransfer && newEntry.from_bucket_id ? parseInt(newEntry.from_bucket_id) : null
       });
 
       toast({ title: 'Entry added successfully' });
@@ -155,7 +185,9 @@ const MoneyLedger = () => {
         category_id: '',
         description: '',
         transaction_date: new Date().toISOString().split('T')[0],
-        notes: ''
+        notes: '',
+        bucket_id: '',
+        from_bucket_id: ''
       });
       loadData();
     } catch (error) {
@@ -188,12 +220,14 @@ const MoneyLedger = () => {
   const handleEdit = (entry: LedgerEntry) => {
     setEditingEntry(entry);
     setEditFormData({
-      type: entry.type,
+      type: entry.type as 'income' | 'expense' | 'transfer',
       amount: entry.amount.toString(),
       category_id: entry.category_id?.toString() || '',
       description: entry.description || '',
       transaction_date: entry.transaction_date,
-      notes: entry.notes || ''
+      notes: entry.notes || '',
+      bucket_id: entry.bucket_id?.toString() || '',
+      from_bucket_id: entry.from_bucket_id?.toString() || ''
     });
     setIsEditDialogOpen(true);
   };
@@ -202,22 +236,30 @@ const MoneyLedger = () => {
     if (!editingEntry) return;
 
     try {
-      if (!editFormData.amount || !editFormData.category_id) {
-        toast({
-          title: 'Missing fields',
-          description: 'Please enter amount and select a category',
-          variant: 'destructive'
-        });
+      const isTransfer = editFormData.type === 'transfer';
+      if (!editFormData.amount) {
+        toast({ title: 'Missing fields', description: 'Please enter an amount', variant: 'destructive' });
+        return;
+      }
+      if (isTransfer) {
+        if (!editFormData.from_bucket_id || !editFormData.bucket_id || editFormData.from_bucket_id === editFormData.bucket_id) {
+          toast({ title: 'Invalid transfer', description: 'Pick two different buckets', variant: 'destructive' });
+          return;
+        }
+      } else if (!editFormData.category_id) {
+        toast({ title: 'Missing fields', description: 'Please select a category', variant: 'destructive' });
         return;
       }
 
       await updateLedgerEntry(editingEntry.id, {
         type: editFormData.type,
         amount: parseFloat(editFormData.amount),
-        category_id: parseInt(editFormData.category_id),
+        category_id: isTransfer || !editFormData.category_id ? null : parseInt(editFormData.category_id),
         description: editFormData.description,
         transaction_date: editFormData.transaction_date,
-        notes: editFormData.notes
+        notes: editFormData.notes,
+        bucket_id: editFormData.bucket_id ? parseInt(editFormData.bucket_id) : null,
+        from_bucket_id: isTransfer && editFormData.from_bucket_id ? parseInt(editFormData.from_bucket_id) : null
       });
 
       toast({ title: 'Entry updated successfully' });
@@ -251,12 +293,15 @@ const MoneyLedger = () => {
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
+  const bucketsById = useMemo(() => new Map(buckets.map((b) => [b.id, b])), [buckets]);
+  const bucketName = (id: number | null | undefined) => (id != null ? bucketsById.get(id)?.name : undefined);
+
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
         <AppSidebar />
         
-        <div className="flex-1 lg:ml-0">
+        <div className="flex-1 lg:ml-0 min-w-0">
           {/* Mobile Header */}
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
@@ -275,14 +320,19 @@ const MoneyLedger = () => {
             </div>
             
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={handleExportCSV}>
-                <Download className="h-4 w-4 mr-2" />
-                CSV
-              </Button>
-              <Button variant="outline" onClick={handleExportJSON}>
-                <Download className="h-4 w-4 mr-2" />
-                JSON
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <Download className="h-4 w-4 mr-2" />
+                    Export
+                    <ChevronDown className="h-4 w-4 ml-1 opacity-70" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleExportCSV}>Export as CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleExportJSON}>Export as JSON</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                 <DialogTrigger asChild>
                   <Button>
@@ -298,6 +348,7 @@ const MoneyLedger = () => {
                     value={newEntry}
                     onChange={setNewEntry}
                     categories={categories}
+                    buckets={buckets}
                     onCreateCategories={refreshCategories}
                   />
                   <Button onClick={handleAddEntry} className="w-full">Add Entry</Button>
@@ -314,6 +365,7 @@ const MoneyLedger = () => {
                     value={editFormData}
                     onChange={setEditFormData}
                     categories={categories}
+                    buckets={buckets}
                   />
                   <Button onClick={handleUpdateEntry} className="w-full">Update Entry</Button>
                 </DialogContent>
@@ -359,6 +411,16 @@ const MoneyLedger = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* Buckets — where money is allocated (envelope budgeting) */}
+          {!loading && (
+            <BucketsSection entries={entries} buckets={buckets} onChanged={reloadBuckets} />
+          )}
+
+          {/* Charts — spend-by-category + monthly income/expense trend */}
+          {!loading && entries.length > 0 && (
+            <LedgerCharts entries={entries} year={selectedYear} month={selectedMonth} />
+          )}
 
           {/* Show loading state while categories are being initialized */}
           {!loading && categories.length === 0 && (
@@ -453,8 +515,13 @@ const MoneyLedger = () => {
                         <tr key={entry.id} className="border-b hover:bg-muted/50">
                           <td className="py-3 px-4">{formatDateDDMMYYYY(entry.transaction_date)}</td>
                           <td className="py-3 px-4">
-                            {entry.category && (
-                              <TagBadge 
+                            {entry.type === 'transfer' ? (
+                              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                <ArrowLeftRight className="h-3 w-3" />
+                                {bucketName(entry.from_bucket_id) || '?'} → {bucketName(entry.bucket_id) || '?'}
+                              </span>
+                            ) : entry.category ? (
+                              <TagBadge
                                 tag={{
                                   id: entry.category.id,
                                   user_id: entry.category.user_id,
@@ -462,16 +529,23 @@ const MoneyLedger = () => {
                                   color: entry.category.color,
                                   usage_count: 0,
                                   created_at: entry.category.created_at
-                                }} 
-                                size="sm" 
+                                }}
+                                size="sm"
                               />
+                            ) : null}
+                          </td>
+                          <td className="py-3 px-4">
+                            {entry.description || '-'}
+                            {entry.type !== 'transfer' && bucketName(entry.bucket_id) && (
+                              <span className="ml-2 text-xs text-muted-foreground">· {bucketName(entry.bucket_id)}</span>
                             )}
                           </td>
-                          <td className="py-3 px-4">{entry.description || '-'}</td>
                           <td className={`py-3 px-4 text-right font-medium ${
-                            entry.type === 'income' ? 'text-green-600' : 'text-red-600'
+                            entry.type === 'income' ? 'text-green-600'
+                            : entry.type === 'transfer' ? 'text-muted-foreground'
+                            : 'text-red-600'
                           }`}>
-                            {entry.type === 'income' ? '+' : '-'}{formatCurrency(Number(entry.amount))}
+                            {entry.type === 'income' ? '+' : entry.type === 'transfer' ? '' : '-'}{formatCurrency(Number(entry.amount))}
                           </td>
                           <td className="py-3 px-4 text-right">
                             <Button

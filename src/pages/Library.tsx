@@ -75,7 +75,7 @@ const Library = () => {
       <div className="flex">
         <AppSidebar />
 
-        <div className="flex-1 lg:ml-0">
+        <div className="flex-1 lg:ml-0 min-w-0">
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
               <Menu className="h-5 w-5" />
@@ -537,13 +537,13 @@ const PromptsTab = () => {
           ))}
         </div>
       ) : prompts.length === 0 ? (
-        <div className="zen-card p-8 text-center">
+        <div className="zen-card p-4 sm:p-8 text-center">
           <p className="text-muted-foreground mb-4">
             You haven't created any prompts yet. Click 'Add Prompt' to start!
           </p>
         </div>
       ) : filteredPrompts.length === 0 ? (
-        <div className="zen-card p-8 text-center">
+        <div className="zen-card p-4 sm:p-8 text-center">
           <p className="text-muted-foreground mb-4">
             No prompts match your filters.
           </p>

@@ -42,13 +42,12 @@ QueryClientProvider
      └ SidebarProvider        (src/contexts/SidebarContext.tsx)
         └ TooltipProvider
            ├ Toaster          (shadcn toast)
-           ├ Sonner           (sonner toast)
            └ BrowserRouter → AppInner (Routes)
 ```
 
 `AppInner` also applies the saved theme on mount (reads `localStorage.theme` for light/dark and `app-theme` for the color theme, then calls `applyTheme`).
 
-> Note: there are **two toast systems mounted at once** — shadcn `Toaster` (`use-toast`) and `Sonner`. Only `use-toast` is actually used by feature code.
+> Note: only the shadcn `Toaster` (`use-toast`) is mounted; the previously-mounted Sonner toaster has been removed.
 
 ---
 
@@ -79,7 +78,7 @@ All app routes are wrapped in `<ProtectedRoute>` except auth/public ones.
 
 `ProtectedRoute` shows a pulse skeleton while `useAuth().loading`, then redirects to `/login` if no user.
 
-`src/pages/Prompts.tsx` exists and is imported in `App.tsx` but **is not reachable** (both `/prompts` and `/library` render `Library`). It's effectively dead code superseded by the Library page's Prompts tab.
+`/prompts` is a working alias that renders `Library` (same as `/library`); the old dead `src/pages/Prompts.tsx` has been removed.
 
 ---
 
@@ -103,7 +102,6 @@ All app routes are wrapped in `<ProtectedRoute>` except auth/public ones.
 - Main items: Dashboard, Calendar, Library, Media, Tasks, Notes, Birthdays, Money Ledger, Subscriptions. Bottom: Settings + Logout.
 - Collapsed items show a hover tooltip implemented with `group-hover` utility classes (not the Radix Tooltip).
 
-> `iconMap` constant is declared in AppSidebar but never read (each nav item carries its own `icon`). Dead code.
 
 ### Page header pattern
 Most pages render their own mobile header (`lg:hidden` sticky bar with a hamburger `Menu` button calling `toggleSidebar`) plus a desktop header. **Exceptions** — `MoneyLedger`, `Subscriptions`, and `Calendar` have no mobile hamburger header, so on mobile (sidebar collapsed) there's no in-page way to open the sidebar. See the audit for impact.
@@ -166,7 +164,7 @@ Most pages render their own mobile header (`lg:hidden` sticky bar with a hamburg
 - ⚠️ No mobile hamburger header (no sidebar access on mobile). The two Dialogs are both always mounted in the header area.
 
 ### Subscriptions (`pages/Subscriptions.tsx`)
-- Summary cards (monthly cost, yearly cost, active count, **and a 4th "Total Monthly" card that duplicates monthly cost**). List with status dots, renewal countdown, edit/delete.
+- Summary cards: Monthly Cost, Yearly Cost, Active count, Renews Soon. List with status dots, renewal countdown, edit/delete.
 - A DB trigger auto-creates a linked `ledger_entries` row (per `lib/subscriptions.ts` comments). Categories auto-seeded.
 - ⚠️ No mobile hamburger header.
 
@@ -177,7 +175,7 @@ Most pages render their own mobile header (`lg:hidden` sticky bar with a hamburg
 
 ### Birthdays (`pages/Birthdays.tsx`)
 - Sections: Upcoming (next 5), Recent (past 3), All (sorted by month/day). Cards show age + days-until with a pulse on the actual day.
-- Add/Edit modal uses 3 cascading Selects (year → month → day). Search by name. Delete via `ConfirmDialog`. **The entire add/edit Dialog is duplicated** in the mobile and desktop headers.
+- Add/Edit modal uses 3 cascading Selects (year → month → day). Search by name. Delete via `ConfirmDialog`. A single shared add/edit `<Dialog>` is opened by both the mobile and desktop header buttons (`openAddModal`).
 
 ### Settings (`pages/Settings.tsx`)
 - Appearance (color theme Select + light/dark Switch), Sidebar order (drag-and-drop, collapsible section), Profile (display name → user metadata), Security (password update), Data Management (JSON export of prompts/notes/tasks/media), External Links (hard-coded WeebsList link).
@@ -202,8 +200,6 @@ Most pages render their own mobile header (`lg:hidden` sticky bar with a hamburg
 | `CompactTagSelector` | Inline tag add/create dropdown (used by Notes/Tasks/Library forms) |
 | `TagFilter` | Dropdown multi-select tag filter (AND semantics) |
 | `TagCloud` | Usage-weighted tag cloud (used by Dashboard TagsWidget) |
-| `TagInput` | Fuller tag input w/ keyboard nav + autocomplete — **not imported anywhere** (dead) |
-| `QuickTagButtons` | Top-5 tag quick toggles — **not imported anywhere** (dead) |
 | `dashboard/WidgetManager` | Customize dashboard modal |
 | `dashboard/WidgetWrapper` | Widget chrome (title, size menu, loading skeleton) — note Dashboard renders widgets directly and does not use this wrapper's editing UI |
 | `dashboard/CircularProgress` | Task-completion ring |
@@ -213,8 +209,8 @@ Most pages render their own mobile header (`lg:hidden` sticky bar with a hamburg
 | `calendar/*` | Calendar views, header, modals, filters |
 | `ui/*` | shadcn primitives (~50) |
 
-### Three overlapping tag-selection components
-`TagInput`, `CompactTagSelector`, and `QuickTagButtons` solve very similar problems. Only `CompactTagSelector` (+ `TagFilter`, `TagCloud`) is wired into pages. `TagInput` and `QuickTagButtons` are unused.
+### Tag-selection components
+`CompactTagSelector` (inline add/create, used in forms) plus `TagFilter` and `TagCloud` are the wired-in tag components. (The earlier unused `TagInput` and `QuickTagButtons` have been removed.)
 
 ---
 

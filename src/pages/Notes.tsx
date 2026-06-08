@@ -855,7 +855,7 @@ const Notes = () => {
       <div className="flex h-full">
         <AppSidebar />
         
-        <div className="flex-1 lg:ml-0 h-full overflow-hidden">
+        <div className="flex-1 lg:ml-0 min-w-0 h-full overflow-hidden">
           {/* Mobile Header */}
           {isMobileView && (
             <div className="sticky top-0 z-30 flex items-center justify-between p-3 sm:p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

@@ -295,6 +295,131 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
   }
 }
 
+// Wikidata + Wikimedia Commons — fully keyless poster fallback for live-action.
+// Good for Bollywood / regional / obscure films TMDB sometimes misses.
+// Resolves an entity via wbsearchentities, then reads its image (P18) from Commons.
+async function searchWikidata(query: string, type: string): Promise<any[]> {
+  try {
+    const searchRes = await fetch(
+      `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=5&type=item&origin=*`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+    if (!searchRes.ok) return [];
+
+    const searchData = await searchRes.json();
+    const candidates: any[] = Array.isArray(searchData?.search) ? searchData.search : [];
+    if (candidates.length === 0) return [];
+
+    // Walk top candidates until one has a P18 image claim.
+    for (const candidate of candidates.slice(0, 3)) {
+      const claimsRes = await fetch(
+        `https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${candidate.id}&property=P18&format=json&origin=*`,
+        { headers: { 'Accept': 'application/json' } }
+      );
+      if (!claimsRes.ok) continue;
+
+      const claimsData = await claimsRes.json();
+      const fileName: string | undefined = claimsData?.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+      if (!fileName) continue;
+
+      // Commons Special:FilePath resolves a filename to the actual image (scaled to width).
+      const coverImage = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(fileName)}?width=500`;
+      const mapped = type === 'movie' ? 'movie' : (type || 'series');
+
+      return [{
+        title: candidate.label || query,
+        type: mapped,
+        cover_image: coverImage,
+        banner_image: null,
+        description: (candidate.description || '').substring(0, 500),
+        rating: 0,
+        status: 'completed',
+        episodes: null,
+        chapters: null,
+        anilist_id: null,
+        tmdb_id: null,
+        mal_id: null,
+      }];
+    }
+    return [];
+  } catch (error) {
+    console.error('Wikidata error:', error);
+    return [];
+  }
+}
+
+// Fanart.tv — high-quality posters; useful when TMDB is unreachable (e.g. blocked by some ISPs).
+// Requires a free personal key (FANART_API_KEY). Fanart is keyed by TMDB id, so we resolve the
+// id via TMDB first. No key (or no TMDB key to resolve the id) → no-op fallback.
+async function searchFanart(query: string, type: string, tmdbKey: string, fanartKey: string): Promise<any[]> {
+  try {
+    if (!fanartKey || !tmdbKey) return [];
+
+    // Step 1: resolve a TMDB id for the title.
+    const isMovie = type === 'movie';
+    const tmdbSearchType = isMovie ? 'movie' : 'tv';
+    const tmdbRes = await fetch(
+      `https://api.themoviedb.org/3/search/${tmdbSearchType}?api_key=${tmdbKey}&query=${encodeURIComponent(query)}&page=1`
+    );
+    if (!tmdbRes.ok) return [];
+    const tmdbData = await tmdbRes.json();
+    const tmdbId = tmdbData?.results?.[0]?.id;
+    if (!tmdbId) return [];
+
+    // Step 2: fetch artwork from Fanart.tv by TMDB id.
+    const fanartEndpoint = isMovie ? 'movies' : 'tv';
+    const fanartRes = await fetch(
+      `https://webservice.fanart.tv/v3/${fanartEndpoint}/${tmdbId}?api_key=${fanartKey}`
+    );
+    if (!fanartRes.ok) return [];
+    const fanartData = await fanartRes.json();
+
+    // Prefer a poster; fall back to thumb/banner artwork.
+    const poster =
+      fanartData?.movieposter?.[0]?.url ||
+      fanartData?.tvposter?.[0]?.url ||
+      fanartData?.moviethumb?.[0]?.url ||
+      fanartData?.tvthumb?.[0]?.url ||
+      '';
+    if (!poster) return [];
+
+    return [{
+      title: query,
+      type: isMovie ? 'movie' : (type || 'series'),
+      cover_image: poster,
+      banner_image: null,
+      description: '',
+      rating: 0,
+      status: 'completed',
+      episodes: null,
+      chapters: null,
+      anilist_id: null,
+      tmdb_id: tmdbId,
+      mal_id: null,
+    }];
+  } catch (error) {
+    console.error('Fanart error:', error);
+    return [];
+  }
+}
+
+// Dispatch to a single named API source (used by the client's cover-refresh cycling).
+// Lets the browser reach key-protected APIs (TMDB/Fanart) and CORS-less ones server-side.
+function searchBySource(source: string, query: string, type: string, tmdbKey: string, fanartKey: string): Promise<any[]> {
+  const t = (type || '').toLowerCase();
+  switch (source) {
+    case 'anilist':      return searchAniList(query, t === 'anime' ? 'anime' : 'manga');
+    case 'jikan':        return searchJikan(query, t === 'anime' ? 'anime' : 'manga');
+    case 'mangadex':     return searchMangaDex(query);
+    case 'mangaupdates': return searchMangaUpdates(query);
+    case 'tvmaze':       return searchTVmaze(query);
+    case 'tmdb':         return searchTMDB(query, t === 'movie' ? 'movie' : 'tv', tmdbKey);
+    case 'wikidata':     return searchWikidata(query, t);
+    case 'fanart':       return searchFanart(query, t, tmdbKey, fanartKey);
+    default:             return Promise.resolve([]);
+  }
+}
+
 // Helper functions
 function mapStatus(status: string): string {
   const statusMap: Record<string, string> = {
@@ -401,6 +526,7 @@ async function handleBatchSearch(req: Request, supabase: any): Promise<Response>
       apis = [
         withTimeout(searchTMDB(item.title, normalizedType, tmdbKey || ''), 3000, 'TMDB'),
         withTimeout(searchTVmaze(item.title), 3000, 'TVmaze'),
+        withTimeout(searchWikidata(item.title, normalizedType), 4000, 'Wikidata'),
       ];
     } else {
       apis = [
@@ -457,6 +583,8 @@ Deno.serve(async (req) => {
     const query = searchParams.get('q');
     const type = searchParams.get('type');
     const limit = parseInt(searchParams.get('limit') || '10');
+    const source = searchParams.get('source');
+    const refresh = ['1', 'true'].includes((searchParams.get('refresh') || '').toLowerCase());
 
     // Batch endpoint: POST with { items: [...] }
     if (req.method === 'POST' && !query) {
@@ -470,32 +598,65 @@ Deno.serve(async (req) => {
       );
     }
 
-    // FIXED: Single database query with optional type filter
-    const dbQuery = supabase
-      .from('media_metadata')
-      .select('*')
-      .ilike('title', `%${query}%`)
-      .limit(limit);
+    // Single-source refresh: skip the DB cache and hit one named API directly.
+    // Used by the client cover-refresh cycling for key-protected APIs (TMDB/Fanart).
+    if (source) {
+      const tmdbKey = Deno.env.get('TMDB_API_KEY') || '';
+      const fanartKey = Deno.env.get('FANART_API_KEY') || '';
+      const sourceResults = await withTimeout(
+        searchBySource(source.toLowerCase(), query, type || '', tmdbKey, fanartKey),
+        8000,
+        source
+      ) || [];
 
-    if (type) {
-      dbQuery.eq('type', type.toLowerCase());
-    }
+      // Cache freshly fetched covers for future lookups (fire and forget).
+      if (sourceResults.length > 0) {
+        supabase.from('media_metadata')
+          .upsert(sourceResults.slice(0, 10), { onConflict: 'title,type' })
+          .then(() => {}).catch(() => {});
+      }
 
-    const { data: cachedResults, error: dbError } = await dbQuery;
-
-    // If found in database, return immediately
-    if (cachedResults && cachedResults.length > 0) {
       return new Response(
         JSON.stringify({
           success: true,
-          source: 'database',
+          source,
           query,
           type: type || 'all',
-          count: cachedResults.length,
-          results: cachedResults,
+          count: sourceResults.length,
+          results: sourceResults.slice(0, limit),
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // DB-first lookup (skipped when refresh=1 so the client can force a fresh fetch).
+    if (!refresh) {
+      const dbQuery = supabase
+        .from('media_metadata')
+        .select('*')
+        .ilike('title', `%${query}%`)
+        .limit(limit);
+
+      if (type) {
+        dbQuery.eq('type', type.toLowerCase());
+      }
+
+      const { data: cachedResults } = await dbQuery;
+
+      // If found in database, return immediately
+      if (cachedResults && cachedResults.length > 0) {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            source: 'database',
+            query,
+            type: type || 'all',
+            count: cachedResults.length,
+            results: cachedResults,
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // Not found in database, search external APIs in PARALLEL with timeout
@@ -532,6 +693,7 @@ Deno.serve(async (req) => {
       apiPromises = [
         withTimeout(searchTMDB(query, normalizedType, tmdbKey || ''), 3000, 'TMDB'),
         withTimeout(searchTVmaze(query), 3000, 'TVmaze'),
+        withTimeout(searchWikidata(query, normalizedType || ''), 4000, 'Wikidata'),
       ];
     } else {
       apiPromises = [

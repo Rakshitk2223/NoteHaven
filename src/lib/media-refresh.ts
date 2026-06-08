@@ -9,15 +9,17 @@ const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/med
 // API priority order based on media type
 // MangaDex/MangaUpdates excluded: no CORS headers (fail from browser, work in edge function).
 // AniList/Kitsu/Jikan excluded for live-action types: they return wrong fuzzy anime matches.
+// wikidata + fanart are keyless/fallback poster sources for live-action types
+// (movies incl. Bollywood, series, k/j-drama). OMDB removed: its poster endpoint is patron-gated.
 const API_PRIORITY: Record<string, string[]> = {
-  'anime':   ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
-  'manga':   ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
-  'manhwa':  ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
-  'manhua':  ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb', 'omdb'],
-  'movie':   ['tvmaze', 'tmdb', 'omdb'],
-  'series':  ['tvmaze', 'tmdb', 'omdb'],
-  'kdrama':  ['tvmaze', 'tmdb', 'omdb'],
-  'jdrama':  ['tvmaze', 'tmdb', 'omdb'],
+  'anime':   ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
+  'manga':   ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
+  'manhwa':  ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
+  'manhua':  ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
+  'movie':   ['tmdb', 'tvmaze', 'wikidata', 'fanart'],
+  'series':  ['tvmaze', 'tmdb', 'wikidata', 'fanart'],
+  'kdrama':  ['tvmaze', 'tmdb', 'wikidata', 'fanart'],
+  'jdrama':  ['tvmaze', 'tmdb', 'wikidata', 'fanart'],
 };
 
 interface RefreshResult {
@@ -46,8 +48,10 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
         return await fetchFromTVmaze(title, normalizedType);
       case 'tmdb':
         return await fetchFromTMDB(title, normalizedType);
-      case 'omdb':
-        return await fetchFromOMDB(title, normalizedType);
+      case 'wikidata':
+        return await fetchFromWikidata(title, normalizedType);
+      case 'fanart':
+        return await fetchFromFanart(title, normalizedType);
       default:
         return null;
     }
@@ -228,52 +232,39 @@ async function fetchFromTVmaze(title: string, type: string): Promise<RefreshResu
   }
 }
 
-// TMDB API
-async function fetchFromTMDB(title: string, type: string): Promise<RefreshResult | null> {
-  const tmdbType = type === 'movie' ? 'movie' : 'tv';
-  const apiKey = import.meta.env.TMDB_API_KEY;
-  
-  if (!apiKey) return null;
-  
+// Proxy a single-source lookup through the edge function.
+// TMDB/Fanart API keys live server-side (non-VITE env vars are undefined in the browser),
+// so these must be fetched via the edge function rather than called directly.
+async function fetchFromEdgeSource(source: string, title: string, type: string): Promise<RefreshResult | null> {
   const response = await fetch(
-    `https://api.themoviedb.org/3/search/${tmdbType}?api_key=${apiKey}&query=${encodeURIComponent(title)}&page=1`,
-    { signal: AbortSignal.timeout(3000) }
+    `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(title)}&type=${encodeURIComponent(type)}&source=${source}&refresh=1&limit=1`,
+    { signal: AbortSignal.timeout(8000) }
   );
 
   if (!response.ok) return null;
-  
+
   const data = await response.json();
-  const result = data?.results?.[0];
-  
-  if (!result?.poster_path) return null;
-  
-  return {
-    coverImage: `https://image.tmdb.org/t/p/w500${result.poster_path}`,
-    apiSource: 'tmdb',
-  };
+  const cover = data?.results?.[0]?.cover_image;
+  if (!data?.success || !cover) return null;
+
+  return { coverImage: cover, apiSource: source };
 }
 
-// OMDB API
-async function fetchFromOMDB(title: string, type: string): Promise<RefreshResult | null> {
-  const apiKey = import.meta.env.OMDB_API_KEY;
-  
-  if (!apiKey) return null;
-  
-  const response = await fetch(
-    `https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${apiKey}`,
-    { signal: AbortSignal.timeout(3000) }
-  );
+// TMDB API (proxied through the edge function — key is server-side)
+async function fetchFromTMDB(title: string, type: string): Promise<RefreshResult | null> {
+  return fetchFromEdgeSource('tmdb', title, type);
+}
 
-  if (!response.ok) return null;
-  
-  const data = await response.json();
-  
-  if (data.Response === 'False' || !data.Poster || data.Poster === 'N/A') return null;
-  
-  return {
-    coverImage: data.Poster,
-    apiSource: 'omdb',
-  };
+// Wikidata + Wikimedia Commons (keyless, proxied through the edge function).
+// Live-action fallback — good for Bollywood / regional titles TMDB misses.
+async function fetchFromWikidata(title: string, type: string): Promise<RefreshResult | null> {
+  return fetchFromEdgeSource('wikidata', title, type);
+}
+
+// Fanart.tv (proxied through the edge function). Optional FANART_API_KEY set server-side;
+// no-ops gracefully until the key is added. Useful when TMDB is unreachable (e.g. blocked ISPs).
+async function fetchFromFanart(title: string, type: string): Promise<RefreshResult | null> {
+  return fetchFromEdgeSource('fanart', title, type);
 }
 
 // Main refresh function - FIXED: Cycles through ALL APIs

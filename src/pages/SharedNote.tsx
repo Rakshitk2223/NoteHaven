@@ -131,7 +131,7 @@ const SharedNote = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background p-6 max-w-4xl mx-auto">
+    <div className="min-h-screen bg-background p-4 sm:p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Shared Note</h1>
         {saving && <span className="text-xs text-muted-foreground">Saving…</span>}
@@ -141,7 +141,7 @@ const SharedNote = () => {
         contentEditable={meta?.allow_edit}
         suppressContentEditableWarning
         onInput={meta?.allow_edit ? handleTitleInput : undefined}
-        className={`text-3xl font-bold mb-4 focus:outline-none ${meta?.allow_edit ? 'border-b border-transparent focus:border-border' : ''}`}
+        className={`text-2xl sm:text-3xl font-bold mb-4 focus:outline-none ${meta?.allow_edit ? 'border-b border-transparent focus:border-border' : ''}`}
         aria-label="Note title"
       />
       <div

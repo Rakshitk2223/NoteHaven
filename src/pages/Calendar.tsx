@@ -49,7 +49,7 @@ const Calendar = () => {
       <div className="flex">
         <AppSidebar />
 
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           {/* Mobile Header */}
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">

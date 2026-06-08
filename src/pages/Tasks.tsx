@@ -307,7 +307,7 @@ const Tasks = () => {
       <div className="flex">
         <AppSidebar />
         
-        <div className="flex-1 lg:ml-0">
+        <div className="flex-1 lg:ml-0 min-w-0">
           {/* Mobile Header */}
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button
@@ -329,7 +329,7 @@ const Tasks = () => {
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {error && (
               <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
                 {error}
@@ -395,7 +395,7 @@ const Tasks = () => {
                 ))}
               </div>
             ) : tasks.length === 0 ? (
-              <div className="zen-card p-8 text-center">
+              <div className="zen-card p-4 sm:p-8 text-center">
                 <p className="text-muted-foreground mb-4">
                   You haven't created any tasks yet. Add your first task above to get started!
                 </p>

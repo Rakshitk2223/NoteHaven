@@ -33,9 +33,9 @@ const CheckEmail = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="max-w-md w-full mx-auto p-8 rounded-lg shadow-lg bg-card text-center">
-        <h1 className="text-3xl font-bold mb-4">Check Your Email</h1>
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="max-w-md w-full mx-auto p-6 sm:p-8 rounded-lg shadow-lg bg-card text-center">
+        <h1 className="text-2xl sm:text-3xl font-bold mb-4">Check Your Email</h1>
         <p className="mb-6 text-muted-foreground">
           We've sent a confirmation link to the email address you provided.<br />
           Please check your inbox (and spam folder) to complete your registration.

@@ -27,6 +27,7 @@ There is also a Node script (`scripts/backfill-cover-images.ts`) run locally wit
 3. `03_create_media_metadata.sql` — public `media_metadata` cache (public read; insert/update open to service role).
 4. `04_create_user_preferences.sql` — `user_preferences` (dashboard layout etc.).
 5. `05_add_cover_image_and_search_index.sql` — adds `media_tracker.cover_image`, enables `pg_trgm`, backfills covers from `media_metadata`, adds GIN trigram indexes on titles.
+6. `06_add_ledger_buckets.sql` — adds `ledger_buckets` (+ RLS, `updated_at` trigger), `bucket_id`/`from_bucket_id` on `ledger_entries`, and relaxes the `type` CHECK to allow `'transfer'`.
 
 ---
 
@@ -84,7 +85,9 @@ Junction tables (composite PK `(<entity>_id, tag_id)`, FKs to entity + `tags`):
 
 **`ledger_categories`**: `id`, `user_id`, `name`, `type` ('income'|'expense'), `color`, `description`, `created_at`.
 
-**`ledger_entries`**: `id`, `user_id`, `category_id` (FK), `type`, `amount` (numeric), `description`, `notes`, `transaction_date` (date), `is_recurring`, `recurring_interval`, `created_at`, `updated_at`.
+**`ledger_entries`**: `id`, `user_id`, `category_id` (FK), `type` ('income'|'expense'|'transfer'), `amount` (numeric), `description`, `notes`, `transaction_date` (date), `is_recurring`, `recurring_interval`, `bucket_id` (FK→ledger_buckets), `from_bucket_id` (FK→ledger_buckets, transfers only), `created_at`, `updated_at`.
+
+**`ledger_buckets`** (migration 06 — envelope budgeting): `id`, `user_id`, `name`, `kind` ('spending'|'saving'|'obligation'|'liability'), `color`, `target_amount` (nullable goal), `notes`, `sort_order`, `created_at`, `updated_at`. Income allocated to / expenses drawn from a bucket; `transfer` entries move between `from_bucket_id`→`bucket_id`. Balances computed client-side in `lib/buckets.ts`.
 
 **`subscription_categories`**: `id`, `user_id`, `name`, `color`, `created_at`.
 

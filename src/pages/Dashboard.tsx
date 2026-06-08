@@ -15,6 +15,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { fetchUserTags, type Tag } from '@/lib/tags';
 import { getUpcomingRenewals, type UpcomingRenewal } from '@/lib/subscriptions';
+import { getLedgerSummary, getMonthName } from '@/lib/ledger';
 import { parseYMD } from '@/lib/date-utils';
 import {
   loadWidgets,
@@ -407,40 +408,20 @@ const Dashboard = () => {
   };
 
   const fetchLedgerSummary = async (): Promise<LedgerSummaryData> => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not authenticated');
-
+    // Use the shared RPC-backed helper so month boundaries are computed server-side
+    // (avoids the UTC-drift bug from toISOString() on local Date objects in IST).
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1; // getLedgerSummary expects a 1-based month
 
-    const { data, error } = await supabase
-      .from('ledger_entries')
-      .select('amount, type')
-      .eq('user_id', user.id)
-      .gte('transaction_date', startOfMonth.toISOString().split('T')[0])
-      .lte('transaction_date', endOfMonth.toISOString().split('T')[0]);
-
-    if (error) throw error;
-
-    let income = 0;
-    let expenses = 0;
-
-    (data || []).forEach((entry) => {
-      const amount = Number(entry.amount) || 0;
-      if (entry.type === 'income') {
-        income += amount;
-      } else {
-        expenses += amount;
-      }
-    });
+    const summary = await getLedgerSummary(year, month);
 
     return {
-      income,
-      expenses,
-      net: income - expenses,
-      month: startOfMonth.toLocaleDateString('en-US', { month: 'long' }),
-      year: now.getFullYear()
+      income: summary.totalIncome,
+      expenses: summary.totalExpense,
+      net: summary.netBalance,
+      month: getMonthName(month),
+      year,
     };
   };
 
@@ -742,7 +723,7 @@ const Dashboard = () => {
       <div className="flex">
         <AppSidebar />
 
-        <div className="flex-1 lg:ml-0">
+        <div className="flex-1 lg:ml-0 min-w-0">
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button
               variant="ghost"

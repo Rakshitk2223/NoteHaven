@@ -73,7 +73,7 @@ deploy-edge-function.sh
 context/                  # frontend.md, backend.md (architecture docs)
 ```
 
-The `supabase/` folder is git-tracked and present: `config.toml`, the `media-search` edge function, and five SQL migrations (`migrations/01`→`05`). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
+The `supabase/` folder is git-tracked and present: `config.toml`, the `media-search` edge function, and six SQL migrations (`migrations/01`→`06`; `06` adds `ledger_buckets` + `bucket_id`/`from_bucket_id`/`transfer` for envelope budgeting). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
 
 ---
 
@@ -95,13 +95,13 @@ The `supabase/` folder is git-tracked and present: `config.toml`, the `media-sea
 
 These are documented more fully in the audit / context files. Be aware when touching related code:
 
-1. **Dashboard ledger widget is broken** — `Dashboard.tsx → fetchLedgerSummary` filters `ledger_entries` on a non-existent `date` column (should be `transaction_date`); the error is swallowed. Use `lib/ledger.ts` helpers instead of re-querying.
-2. **`/prompts` and `/library` both render `Library`**; `pages/Prompts.tsx` is dead/unreachable.
-3. **No mobile sidebar access** on `MoneyLedger`, `Subscriptions`, and `Calendar` (they lack the `lg:hidden` hamburger header other pages have).
-4. **Dead components**: `TagInput.tsx`, `QuickTagButtons.tsx`, and the `iconMap` const in `AppSidebar.tsx` are unused. Three tag selectors overlap — only `CompactTagSelector`/`TagFilter`/`TagCloud` are wired in.
-5. **Two toast systems** mounted (`Toaster` + `Sonner`); features only use `use-toast`.
-6. **Duplicated UI**: the Birthdays add/edit Dialog is copy-pasted in both mobile and desktop headers; Subscriptions has a 4th summary card that duplicates "Monthly Cost".
-7. **Browser TMDB/OMDB calls** in `media-refresh.ts` read non-`VITE_` env vars → undefined in the browser; those branches silently no-op.
+1. **Dashboard ledger widget** — now fixed: `fetchLedgerSummary` uses the RPC-backed `getLedgerSummary(year, month)` from `lib/ledger.ts` (previously an inline query with a `toISOString()` UTC-drift bug). Prefer the `lib/ledger.ts` helpers over re-querying `ledger_entries`.
+2. **`/prompts` is a working alias** that renders `Library` (same as `/library`); the old dead `pages/Prompts.tsx` has been removed.
+3. **Responsive/mobile**: all content pages now render an `lg:hidden` hamburger header (calling `toggleSidebar`). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` (`w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto`, `p-4 sm:p-6`) and `ui/sheet.tsx` (`overflow-y-auto`, `p-4 sm:p-6`) are mobile-safe, so prefer those defaults over per-dialog width hacks. Use responsive padding (`p-4 sm:p-6`) and text (`text-2xl sm:text-3xl`) on new pages.
+4. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components. (The old unused `TagInput.tsx`, `QuickTagButtons.tsx`, and `iconMap` in `AppSidebar.tsx` have been removed.)
+5. **Toasts**: only the shadcn `Toaster` (`use-toast`) is mounted. (The unused Sonner toaster has been removed.)
+6. *(resolved)* The Birthdays add/edit Dialog is now a single shared `<Dialog>` (both headers call `openAddModal`), and the duplicate Subscriptions summary card is gone (cards are Monthly Cost / Yearly Cost / Active / Renews Soon).
+7. **Cover refresh** proxies key-protected sources (TMDB, Fanart.tv) through the `media-search` edge function via `?source=&refresh=1` (keys live server-side; browser env vars were undefined). Live-action fallback chain: TMDB/TVmaze → Wikidata/Commons (keyless) → Fanart.tv (optional `FANART_API_KEY`). OMDB removed (poster endpoint is patron-gated). Edge-function changes require redeploy.
 8. **Secret in VCS**: `deploy-edge-function.sh` contains a hard-coded `TMDB_API_KEY` — rotate/remove; don't propagate it.
 9. **Large page files** (Notes ~1300, MediaTracker ~1900 lines) mix data fetching, state, and JSX. Prefer extracting when making substantial changes, but keep diffs scoped.
 

@@ -101,7 +101,7 @@ export async function fetchLedgerEntries(
 }
 
 export async function createLedgerEntry(
-  entry: Omit<LedgerEntry, 'id' | 'user_id' | 'created_at' | 'updated_at'>
+  entry: Omit<LedgerEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'category'>
 ): Promise<LedgerEntry> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
@@ -121,7 +121,7 @@ export async function createLedgerEntry(
 
 export async function updateLedgerEntry(
   id: number,
-  updates: Partial<Omit<LedgerEntry, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+  updates: Partial<Omit<LedgerEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'category'>>
 ): Promise<void> {
   const { error } = await supabase
     .from('ledger_entries')

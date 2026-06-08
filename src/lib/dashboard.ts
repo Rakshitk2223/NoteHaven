@@ -57,11 +57,14 @@ export interface WidgetProps {
   isLoading?: boolean;
 }
 
+// Col-spans are scoped to each breakpoint's column count (grid is
+// grid-cols-1 / md:grid-cols-2 / lg:grid-cols-4). Spanning more columns than
+// exist forces CSS Grid to create implicit columns → horizontal overflow on mobile.
 export const sizeClasses: Record<WidgetSize, string> = {
   quarter: 'col-span-1',
-  half: 'col-span-2',
-  'three-quarters': 'col-span-3',
-  full: 'col-span-4'
+  half: 'col-span-1 md:col-span-2',
+  'three-quarters': 'col-span-1 md:col-span-2 lg:col-span-3',
+  full: 'col-span-1 md:col-span-2 lg:col-span-4'
 };
 
 export const sizeLabels: Record<WidgetSize, string> = {
