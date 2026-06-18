@@ -73,6 +73,9 @@ export type Database = {
           category: string | null
           code: string
           created_at: string | null
+          description: string | null
+          filename: string | null
+          folder_id: number | null
           id: number
           is_favorited: boolean | null
           is_pinned: boolean | null
@@ -85,6 +88,9 @@ export type Database = {
           category?: string | null
           code?: string
           created_at?: string | null
+          description?: string | null
+          filename?: string | null
+          folder_id?: number | null
           id?: number
           is_favorited?: boolean | null
           is_pinned?: boolean | null
@@ -97,11 +103,52 @@ export type Database = {
           category?: string | null
           code?: string
           created_at?: string | null
+          description?: string | null
+          filename?: string | null
+          folder_id?: number | null
           id?: number
           is_favorited?: boolean | null
           is_pinned?: boolean | null
           language?: string
           title?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "code_snippets_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "snippet_folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      snippet_folders: {
+        Row: {
+          color: string | null
+          created_at: string | null
+          id: number
+          name: string
+          sort_order: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string | null
+          id?: number
+          name: string
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string | null
+          id?: number
+          name?: string
+          sort_order?: number | null
           updated_at?: string | null
           user_id?: string
         }
@@ -275,13 +322,16 @@ export type Database = {
           created_at: string | null
           description: string | null
           episodes: number | null
+          genres: string[] | null
           id: number
           last_updated: string | null
           mal_id: number | null
           rating: number | null
+          seasons: Json | null
           status: string | null
           title: string
           tmdb_id: number | null
+          total_seasons: number | null
           type: string | null
         }
         Insert: {
@@ -292,13 +342,16 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           episodes?: number | null
+          genres?: string[] | null
           id?: number
           last_updated?: string | null
           mal_id?: number | null
           rating?: number | null
+          seasons?: Json | null
           status?: string | null
           title: string
           tmdb_id?: number | null
+          total_seasons?: number | null
           type?: string | null
         }
         Update: {
@@ -309,13 +362,16 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           episodes?: number | null
+          genres?: string[] | null
           id?: number
           last_updated?: string | null
           mal_id?: number | null
           rating?: number | null
+          seasons?: Json | null
           status?: string | null
           title?: string
           tmdb_id?: number | null
+          total_seasons?: number | null
           type?: string | null
         }
         Relationships: []
@@ -357,7 +413,10 @@ export type Database = {
           current_chapter: number | null
           current_episode: number | null
           current_season: number | null
+          has_new_content: boolean
           id: number
+          last_known_total_episodes: number | null
+          last_known_total_seasons: number | null
           rating: number | null
           release_date: string | null
           status: string | null
@@ -372,7 +431,10 @@ export type Database = {
           current_chapter?: number | null
           current_episode?: number | null
           current_season?: number | null
+          has_new_content?: boolean
           id?: number
+          last_known_total_episodes?: number | null
+          last_known_total_seasons?: number | null
           rating?: number | null
           release_date?: string | null
           status?: string | null
@@ -387,7 +449,10 @@ export type Database = {
           current_chapter?: number | null
           current_episode?: number | null
           current_season?: number | null
+          has_new_content?: boolean
           id?: number
+          last_known_total_episodes?: number | null
+          last_known_total_seasons?: number | null
           rating?: number | null
           release_date?: string | null
           status?: string | null
@@ -956,6 +1021,7 @@ export const Constants = {
 export type LedgerCategory = Database["public"]["Tables"]["ledger_categories"]["Row"]
 export type LedgerBucket = Database["public"]["Tables"]["ledger_buckets"]["Row"]
 export type SubscriptionCategory = Database["public"]["Tables"]["subscription_categories"]["Row"]
+export type SnippetFolder = Database["public"]["Tables"]["snippet_folders"]["Row"]
 
 export type LedgerEntry = Database["public"]["Tables"]["ledger_entries"]["Row"] & {
   // populated when selected via `category:ledger_categories(*)`

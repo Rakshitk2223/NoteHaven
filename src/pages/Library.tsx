@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
-import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Menu, Code, MessageSquare, Search, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Menu, Code, MessageSquare, Search, ChevronDown, ChevronRight, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +20,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+} from "@/components/ui/dropdown-menu";
 import AppSidebar from "@/components/AppSidebar";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
@@ -30,18 +41,26 @@ import { motion } from "framer-motion";
 import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
-import { fetchUserTags, fetchPromptTags, setPromptTags, createTag, type Tag } from "@/lib/tags";
+import { fetchUserTags, fetchPromptTags, setPromptTags, createTag, TAG_COLORS, type Tag } from "@/lib/tags";
 import CodeEditor from "@/components/CodeEditor";
 import {
   type CodeSnippet,
+  type SnippetFolder,
   SUPPORTED_LANGUAGES,
+  LANGUAGE_EXTENSIONS,
   getLanguageLabel,
+  maskEnvValues,
   fetchSnippets,
   createSnippet,
   updateSnippet,
   deleteSnippet,
   toggleSnippetFavorite,
   toggleSnippetPin,
+  moveSnippetToFolder,
+  fetchFolders,
+  createFolder,
+  updateFolder,
+  deleteFolder,
 } from "@/lib/codeSnippets";
 
 interface Prompt {
@@ -675,8 +694,11 @@ const PromptsTab = () => {
   );
 };
 
+const UNFILED_KEY = 'unfiled';
+
 const SnippetsTab = () => {
   const [snippets, setSnippets] = useState<CodeSnippet[]>([]);
+  const [folders, setFolders] = useState<SnippetFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedSnippet, setSelectedSnippet] = useState<CodeSnippet | null>(null);
@@ -686,17 +708,31 @@ const SnippetsTab = () => {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [revealSecret, setRevealSecret] = useState(false);
   const { toast } = useToast();
 
-  const [formData, setFormData] = useState({ title: '', code: '', language: 'javascript', category: '' });
+  const [formData, setFormData] = useState<{ title: string; code: string; language: string; folder_id: number | null; filename: string; description: string }>({
+    title: '', code: '', language: 'javascript', folder_id: null, filename: '', description: '',
+  });
+
+  const [folderModal, setFolderModal] = useState<{ open: boolean; mode: 'create' | 'edit'; id: number | null; name: string; color: string }>({
+    open: false, mode: 'create', id: null, name: '', color: TAG_COLORS[0].value,
+  });
+  const [folderDeleteConfirm, setFolderDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
 
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [formTags, setFormTags] = useState<Tag[]>([]);
 
   useEffect(() => {
     loadSnippets();
+    loadFolders();
     loadTags();
   }, []);
+
+  // Reset the secret-reveal toggle whenever the viewed snippet changes.
+  useEffect(() => {
+    setRevealSecret(false);
+  }, [selectedSnippet?.id]);
 
   const loadTags = async () => {
     try {
@@ -704,6 +740,15 @@ const SnippetsTab = () => {
       setAvailableTags(tags);
     } catch (err) {
       console.error('Failed to fetch tags:', err);
+    }
+  };
+
+  const loadFolders = async () => {
+    try {
+      const data = await fetchFolders();
+      setFolders(data);
+    } catch (err) {
+      console.error('Failed to fetch folders:', err);
     }
   };
 
@@ -731,32 +776,50 @@ const SnippetsTab = () => {
     return snippets.filter(s =>
       s.title.toLowerCase().includes(q) ||
       s.language.toLowerCase().includes(q) ||
+      (s.filename || '').toLowerCase().includes(q) ||
+      (s.description || '').toLowerCase().includes(q) ||
       s.code.toLowerCase().includes(q)
     );
   }, [snippets, searchQuery]);
 
-  const groupedSnippets = useMemo(() => {
-    const groups: Record<string, CodeSnippet[]> = {};
+  // Group snippets by folder. Every folder is shown (even when empty) so empty
+  // projects are visible; "Unfiled" only appears when it has files. While
+  // searching, folders with no matching files are hidden.
+  const groups = useMemo(() => {
+    const byFolder = new Map<number, CodeSnippet[]>();
+    const unfiled: CodeSnippet[] = [];
     const sorted = [...filteredSnippets].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0));
-    for (const snippet of sorted) {
-      const lang = snippet.language || 'plaintext';
-      if (!groups[lang]) groups[lang] = [];
-      groups[lang].push(snippet);
+    for (const s of sorted) {
+      if (s.folder_id && folders.some(f => f.id === s.folder_id)) {
+        if (!byFolder.has(s.folder_id)) byFolder.set(s.folder_id, []);
+        byFolder.get(s.folder_id)!.push(s);
+      } else {
+        unfiled.push(s);
+      }
     }
-    return groups;
-  }, [filteredSnippets]);
 
-  const toggleGroup = (lang: string) => {
+    const result: { key: string; name: string; color: string | null; folder: SnippetFolder | null; items: CodeSnippet[] }[] = [];
+    for (const folder of folders) {
+      const items = byFolder.get(folder.id) || [];
+      if (searchQuery.trim() && items.length === 0) continue;
+      result.push({ key: String(folder.id), name: folder.name, color: folder.color ?? null, folder, items });
+    }
+    if (unfiled.length > 0) {
+      result.push({ key: UNFILED_KEY, name: 'Unfiled', color: null, folder: null, items: unfiled });
+    }
+    return result;
+  }, [filteredSnippets, folders, searchQuery]);
+
+  const toggleGroup = (key: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
-      if (next.has(lang)) {
-        next.delete(lang);
-      } else {
-        next.add(lang);
-      }
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   };
+
+  const fileLabel = (s: CodeSnippet) => (s.filename && s.filename.trim()) || s.title;
+  const langShort = (lang: string) => (LANGUAGE_EXTENSIONS[lang] || '').replace('.', '').toUpperCase() || lang.toUpperCase();
 
   const handleCreate = async () => {
     if (!formData.title.trim() || !formData.code.trim()) {
@@ -766,7 +829,14 @@ const SnippetsTab = () => {
 
     try {
       const newSnippet = await createSnippet(
-        { title: formData.title, code: formData.code, language: formData.language, category: formData.category || undefined },
+        {
+          title: formData.title,
+          code: formData.code,
+          language: formData.language,
+          folder_id: formData.folder_id,
+          filename: formData.filename.trim() || null,
+          description: formData.description.trim() || null,
+        },
         formTags
       );
       setIsCreating(false);
@@ -784,18 +854,88 @@ const SnippetsTab = () => {
     if (!selectedSnippet) return;
 
     try {
-      await updateSnippet(
-        selectedSnippet.id,
-        { title: formData.title, code: formData.code, language: formData.language, category: formData.category || undefined },
-        formTags
-      );
+      const patch = {
+        title: formData.title,
+        code: formData.code,
+        language: formData.language,
+        folder_id: formData.folder_id,
+        filename: formData.filename.trim() || null,
+        description: formData.description.trim() || null,
+      };
+      await updateSnippet(selectedSnippet.id, patch, formTags);
       setIsEditing(false);
       resetForm();
       await loadSnippets();
       await loadTags();
+      // Keep the viewer in sync with the edits (loadSnippets refreshes the list
+      // but not the currently-selected object reference).
+      setSelectedSnippet(prev => (prev ? { ...prev, ...patch, tags: formTags } : null));
       toast({ title: 'Updated', description: 'Code snippet updated successfully.' });
     } catch (err) {
       toast({ title: 'Error', description: 'Failed to update snippet.', variant: 'destructive' });
+    }
+  };
+
+  const handleMoveSnippet = async (snippet: CodeSnippet, folderId: number | null) => {
+    if ((snippet.folder_id ?? null) === folderId) return;
+    try {
+      await moveSnippetToFolder(snippet.id, folderId);
+      setSnippets(prev => prev.map(s => (s.id === snippet.id ? { ...s, folder_id: folderId } : s)));
+      if (selectedSnippet?.id === snippet.id) {
+        setSelectedSnippet(prev => (prev ? { ...prev, folder_id: folderId } : null));
+      }
+      const dest = folderId ? folders.find(f => f.id === folderId)?.name : 'Unfiled';
+      toast({ title: 'Moved', description: `Moved to ${dest || 'folder'}.` });
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to move snippet.', variant: 'destructive' });
+    }
+  };
+
+  const openCreateFolder = () => setFolderModal({ open: true, mode: 'create', id: null, name: '', color: TAG_COLORS[0].value });
+  const openEditFolder = (folder: SnippetFolder) => setFolderModal({ open: true, mode: 'edit', id: folder.id, name: folder.name, color: folder.color || TAG_COLORS[0].value });
+
+  const saveFolder = async () => {
+    const name = folderModal.name.trim();
+    if (!name) {
+      toast({ title: 'Error', description: 'Folder name is required.', variant: 'destructive' });
+      return;
+    }
+    try {
+      if (folderModal.mode === 'create') {
+        const created = await createFolder(name, folderModal.color);
+        setFolders(prev => [...prev, created].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name)));
+        // If a snippet form is open, drop the new file straight into this folder.
+        if (isCreating || isEditing) setFormData(prev => ({ ...prev, folder_id: created.id }));
+      } else if (folderModal.id) {
+        const id = folderModal.id;
+        await updateFolder(id, { name, color: folderModal.color });
+        setFolders(prev => prev.map(f => (f.id === id ? { ...f, name, color: folderModal.color } : f)));
+      }
+      setFolderModal({ open: false, mode: 'create', id: null, name: '', color: TAG_COLORS[0].value });
+      toast({ title: folderModal.mode === 'create' ? 'Folder created' : 'Folder updated' });
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      const dup = e?.code === '23505' || (typeof e?.message === 'string' && e.message.toLowerCase().includes('duplicate'));
+      toast({ title: 'Error', description: dup ? 'A folder with that name already exists.' : 'Failed to save folder.', variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteFolder = async () => {
+    const id = folderDeleteConfirm.id;
+    if (!id) return;
+    try {
+      await deleteFolder(id);
+      setFolders(prev => prev.filter(f => f.id !== id));
+      // Files keep existing; the DB FK (ON DELETE SET NULL) moves them to Unfiled.
+      setSnippets(prev => prev.map(s => (s.folder_id === id ? { ...s, folder_id: null } : s)));
+      if (selectedSnippet?.folder_id === id) {
+        setSelectedSnippet(prev => (prev ? { ...prev, folder_id: null } : null));
+      }
+      toast({ title: 'Folder deleted', description: 'Files moved to Unfiled.' });
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to delete folder.', variant: 'destructive' });
+    } finally {
+      setFolderDeleteConfirm({ open: false, id: null });
     }
   };
 
@@ -853,21 +993,29 @@ const SnippetsTab = () => {
   };
 
   const startEditing = (snippet: CodeSnippet) => {
-    setFormData({ title: snippet.title, code: snippet.code, language: snippet.language, category: snippet.category || '' });
+    setFormData({
+      title: snippet.title,
+      code: snippet.code,
+      language: snippet.language,
+      folder_id: snippet.folder_id ?? null,
+      filename: snippet.filename || '',
+      description: snippet.description || '',
+    });
     setFormTags(snippet.tags || []);
     setIsEditing(true);
     setIsCreating(false);
   };
 
-  const startCreating = () => {
+  const startCreating = (folderId: number | null = null) => {
     resetForm();
+    setFormData(prev => ({ ...prev, folder_id: folderId }));
     setIsCreating(true);
     setIsEditing(false);
     setSelectedSnippet(null);
   };
 
   const resetForm = () => {
-    setFormData({ title: '', code: '', language: 'javascript', category: '' });
+    setFormData({ title: '', code: '', language: 'javascript', folder_id: null, filename: '', description: '' });
     setFormTags([]);
   };
 
@@ -900,10 +1048,15 @@ const SnippetsTab = () => {
       <div className="flex gap-4 h-[calc(100vh-250px)]">
         <div className="w-64 flex-shrink-0 border border-border rounded-lg overflow-hidden flex flex-col bg-card">
           <div className="p-3 border-b border-border space-y-2">
-            <Button size="sm" className="w-full" onClick={startCreating}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Snippet
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" className="flex-1" onClick={() => startCreating()}>
+                <Plus className="h-4 w-4 mr-1" />
+                New File
+              </Button>
+              <Button size="sm" variant="outline" onClick={openCreateFolder} title="New folder">
+                <FolderPlus className="h-4 w-4" />
+              </Button>
+            </div>
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
@@ -924,47 +1077,135 @@ const SnippetsTab = () => {
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {Object.keys(groupedSnippets).length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-4">
-                {searchQuery ? 'No matches found.' : 'No snippets yet.'}
-              </p>
+            {groups.length === 0 ? (
+              <div className="text-center py-6 px-2">
+                <p className="text-xs text-muted-foreground mb-2">
+                  {searchQuery ? 'No matches found.' : folders.length === 0 ? 'No folders or files yet.' : 'No files yet.'}
+                </p>
+                {!searchQuery && folders.length === 0 && (
+                  <Button size="sm" variant="outline" onClick={openCreateFolder}>
+                    <FolderPlus className="h-4 w-4 mr-1" /> Create a folder
+                  </Button>
+                )}
+              </div>
             ) : (
-              Object.entries(groupedSnippets).map(([lang, items]) => (
-                <div key={lang}>
-                  <button
-                    onClick={() => toggleGroup(lang)}
-                    className="flex items-center gap-1 w-full text-xs font-medium text-muted-foreground hover:text-foreground py-1 px-1"
-                  >
-                    {collapsedGroups.has(lang) ? (
-                      <ChevronRight className="h-3 w-3" />
-                    ) : (
-                      <ChevronDown className="h-3 w-3" />
-                    )}
-                    {getLanguageLabel(lang)} ({items.length})
-                  </button>
-                  {!collapsedGroups.has(lang) && items.map(snippet => (
-                    <button
-                      key={snippet.id}
-                      onClick={() => {
-                        setSelectedSnippet(snippet);
-                        setIsCreating(false);
-                        setIsEditing(false);
-                        resetForm();
-                      }}
-                      className={`w-full text-left text-sm px-3 py-1.5 rounded-md truncate transition-colors ${
-                        selectedSnippet?.id === snippet.id && !isCreating
-                          ? 'bg-primary/10 text-primary font-medium'
-                          : 'text-foreground hover:bg-secondary/50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        {snippet.is_pinned && <Pin className="h-3 w-3 flex-shrink-0 text-primary" />}
-                        <span className="truncate">{snippet.title}</span>
+              groups.map(group => {
+                const collapsed = collapsedGroups.has(group.key);
+                return (
+                  <div key={group.key}>
+                    <div className="flex items-center gap-0.5 rounded-md group/folder hover:bg-secondary/40">
+                      <button
+                        onClick={() => toggleGroup(group.key)}
+                        className="flex items-center gap-1 flex-1 min-w-0 text-xs font-medium text-muted-foreground hover:text-foreground py-1.5 px-1"
+                      >
+                        {collapsed ? (
+                          <ChevronRight className="h-3 w-3 flex-shrink-0" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 flex-shrink-0" />
+                        )}
+                        {group.folder ? (
+                          <span className="h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: group.color || '#3B82F6' }} />
+                        ) : (
+                          <Folder className="h-3 w-3 flex-shrink-0" />
+                        )}
+                        <span className="truncate">{group.name}</span>
+                        <span className="flex-shrink-0 opacity-70">({group.items.length})</span>
+                      </button>
+                      {group.folder && (
+                        <div className="flex items-center opacity-0 group-hover/folder:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => startCreating(group.folder!.id)}
+                            className="p-1 text-muted-foreground hover:text-foreground"
+                            title="Add file to folder"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button className="p-1 text-muted-foreground hover:text-foreground" title="Folder options">
+                                <MoreVertical className="h-3.5 w-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openEditFolder(group.folder!)}>
+                                <Pencil className="h-4 w-4 mr-2" /> Rename / recolor
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setFolderDeleteConfirm({ open: true, id: group.folder!.id })}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" /> Delete folder
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      )}
+                    </div>
+
+                    {!collapsed && (
+                      <div className="ml-2 border-l border-border/60 pl-1">
+                        {group.items.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground italic px-2 py-1">Empty — add a file</p>
+                        ) : group.items.map(snippet => {
+                          const active = selectedSnippet?.id === snippet.id && !isCreating && !isEditing;
+                          return (
+                            <div
+                              key={snippet.id}
+                              className={`group/file flex items-center rounded-md transition-colors ${active ? 'bg-primary/10' : 'hover:bg-secondary/50'}`}
+                            >
+                              <button
+                                onClick={() => {
+                                  setSelectedSnippet(snippet);
+                                  setIsCreating(false);
+                                  setIsEditing(false);
+                                  resetForm();
+                                }}
+                                className={`flex-1 min-w-0 text-left text-sm px-2 py-1.5 ${active ? 'text-primary font-medium' : 'text-foreground'}`}
+                              >
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  {snippet.is_pinned && <Pin className="h-3 w-3 flex-shrink-0 text-primary" />}
+                                  <span className="truncate flex-1">{fileLabel(snippet)}</span>
+                                  <span className="text-[10px] font-mono text-muted-foreground flex-shrink-0">{langShort(snippet.language)}</span>
+                                </div>
+                              </button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    className="p-1 mr-0.5 text-muted-foreground hover:text-foreground opacity-0 group-hover/file:opacity-100 transition-opacity"
+                                    title="Move to folder"
+                                  >
+                                    <MoreVertical className="h-3.5 w-3.5" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel className="text-xs">Move to</DropdownMenuLabel>
+                                  <DropdownMenuItem
+                                    disabled={!snippet.folder_id}
+                                    onClick={() => handleMoveSnippet(snippet, null)}
+                                  >
+                                    <Folder className="h-4 w-4 mr-2" /> Unfiled
+                                  </DropdownMenuItem>
+                                  {folders.map(f => (
+                                    <DropdownMenuItem
+                                      key={f.id}
+                                      disabled={snippet.folder_id === f.id}
+                                      onClick={() => handleMoveSnippet(snippet, f.id)}
+                                    >
+                                      <span className="h-2.5 w-2.5 rounded-sm mr-2 flex-shrink-0" style={{ backgroundColor: f.color || '#3B82F6' }} />
+                                      {f.name}
+                                    </DropdownMenuItem>
+                                  ))}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </button>
-                  ))}
-                </div>
-              ))
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -997,21 +1238,41 @@ const SnippetsTab = () => {
                   </Select>
                 </div>
                 <div className="flex items-center gap-3">
+                  <Select
+                    value={formData.folder_id == null ? 'none' : String(formData.folder_id)}
+                    onValueChange={(val) => setFormData(prev => ({ ...prev, folder_id: val === 'none' ? null : Number(val) }))}
+                  >
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Folder" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No folder (Unfiled)</SelectItem>
+                      {folders.map(f => (
+                        <SelectItem key={f.id} value={String(f.id)}>{f.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" size="icon" onClick={openCreateFolder} title="New folder" className="flex-shrink-0">
+                    <FolderPlus className="h-4 w-4" />
+                  </Button>
                   <Input
-                    value={formData.category}
-                    onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-                    placeholder="Category (optional)"
-                    className="flex-1"
+                    value={formData.filename}
+                    onChange={(e) => setFormData(prev => ({ ...prev, filename: e.target.value }))}
+                    placeholder={`Filename (e.g. config${LANGUAGE_EXTENSIONS[formData.language] || ''})`}
+                    className="flex-1 font-mono text-sm"
                   />
-                  <div className="flex-1">
-                    <CompactTagSelector
-                      selectedTags={formTags}
-                      onChange={setFormTags}
-                      availableTags={availableTags}
-                      maxTags={3}
-                    />
-                  </div>
                 </div>
+                <Input
+                  value={formData.description}
+                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Description (optional)"
+                />
+                <CompactTagSelector
+                  selectedTags={formTags}
+                  onChange={setFormTags}
+                  availableTags={availableTags}
+                  maxTags={3}
+                />
               </div>
 
               <div className="flex-1 overflow-auto p-2">
@@ -1036,12 +1297,26 @@ const SnippetsTab = () => {
           ) : selectedSnippet ? (
             <div className="flex flex-col h-full">
               <div className="p-4 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                    {selectedSnippet.is_pinned && <Pin className="h-4 w-4 fill-current text-primary flex-shrink-0" />}
+                    {selectedSnippet.is_favorited && <Star className="h-4 w-4 fill-current text-yellow-500 flex-shrink-0" />}
                     <h2 className="text-lg font-semibold text-foreground truncate">
                       {selectedSnippet.title}
                     </h2>
+                    {selectedSnippet.filename && (
+                      <Badge variant="outline" className="font-mono text-xs">{selectedSnippet.filename}</Badge>
+                    )}
                     <Badge variant="secondary">{getLanguageLabel(selectedSnippet.language)}</Badge>
+                    {(() => {
+                      const folder = selectedSnippet.folder_id ? folders.find(f => f.id === selectedSnippet.folder_id) : null;
+                      return folder ? (
+                        <Badge variant="outline" className="gap-1">
+                          <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: folder.color || '#3B82F6' }} />
+                          {folder.name}
+                        </Badge>
+                      ) : null;
+                    })()}
                     {selectedSnippet.category && (
                       <Badge variant="outline">{selectedSnippet.category}</Badge>
                     )}
@@ -1058,39 +1333,85 @@ const SnippetsTab = () => {
                         <><Copy className="h-4 w-4 mr-1" /> Copy</>
                       )}
                     </Button>
+                    {selectedSnippet.language === 'env' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setRevealSecret(v => !v)}
+                        title={revealSecret ? 'Hide values' : 'Reveal values'}
+                      >
+                        {revealSecret ? <><EyeOff className="h-4 w-4 mr-1" /> Hide</> : <><Eye className="h-4 w-4 mr-1" /> Reveal</>}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => startEditing(selectedSnippet)}
                     >
-                      <Edit className="h-4 w-4" />
+                      <Edit className="h-4 w-4 mr-1" /> Edit
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleToggleFav(selectedSnippet)}
-                      className={selectedSnippet.is_favorited ? "text-yellow-500 hover:text-yellow-600" : ""}
-                    >
-                      <Star className={`h-4 w-4 ${selectedSnippet.is_favorited ? "fill-current" : ""}`} />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleTogglePinSnippet(selectedSnippet)}
-                      className={selectedSnippet.is_pinned ? "text-primary" : ""}
-                    >
-                      <Pin className={`h-4 w-4 ${selectedSnippet.is_pinned ? "fill-current" : ""}`} />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setDeleteConfirm({ open: true, id: selectedSnippet.id })}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="outline" title="More actions">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52">
+                        <DropdownMenuSub>
+                          <DropdownMenuSubTrigger>
+                            <FolderInput className="h-4 w-4 mr-2" /> Move to folder
+                          </DropdownMenuSubTrigger>
+                          <DropdownMenuSubContent>
+                            <DropdownMenuItem
+                              disabled={!selectedSnippet.folder_id}
+                              onClick={() => handleMoveSnippet(selectedSnippet, null)}
+                            >
+                              <Folder className="h-4 w-4 mr-2" /> Unfiled
+                            </DropdownMenuItem>
+                            {folders.map(f => (
+                              <DropdownMenuItem
+                                key={f.id}
+                                disabled={selectedSnippet.folder_id === f.id}
+                                onClick={() => handleMoveSnippet(selectedSnippet, f.id)}
+                              >
+                                <span className="h-2.5 w-2.5 rounded-sm mr-2 flex-shrink-0" style={{ backgroundColor: f.color || '#3B82F6' }} />
+                                {f.name}
+                              </DropdownMenuItem>
+                            ))}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={openCreateFolder}>
+                              <FolderPlus className="h-4 w-4 mr-2" /> New folder…
+                            </DropdownMenuItem>
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => handleToggleFav(selectedSnippet)}>
+                          <Star className={`h-4 w-4 mr-2 ${selectedSnippet.is_favorited ? 'fill-current text-yellow-500' : ''}`} />
+                          {selectedSnippet.is_favorited ? 'Remove from favorites' : 'Add to favorites'}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleTogglePinSnippet(selectedSnippet)}>
+                          <Pin className={`h-4 w-4 mr-2 ${selectedSnippet.is_pinned ? 'fill-current text-primary' : ''}`} />
+                          {selectedSnippet.is_pinned ? 'Unpin' : 'Pin'}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => setDeleteConfirm({ open: true, id: selectedSnippet.id })}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" /> Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
+                {selectedSnippet.description && (
+                  <p className="text-sm text-muted-foreground mt-2">{selectedSnippet.description}</p>
+                )}
+                {selectedSnippet.language === 'env' && !revealSecret && (
+                  <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                    <EyeOff className="h-3 w-3" /> Values hidden — click the eye to reveal. Copy still copies the real values.
+                  </p>
+                )}
                 {selectedSnippet.tags && selectedSnippet.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
                     {selectedSnippet.tags.map(tag => (
@@ -1102,7 +1423,8 @@ const SnippetsTab = () => {
 
               <div className="flex-1 overflow-auto p-2">
                 <CodeEditor
-                  value={selectedSnippet.code}
+                  key={`${selectedSnippet.id}-${revealSecret}`}
+                  value={selectedSnippet.language === 'env' && !revealSecret ? maskEnvValues(selectedSnippet.code) : selectedSnippet.code}
                   language={selectedSnippet.language}
                   readOnly
                   minHeight="100%"
@@ -1116,13 +1438,13 @@ const SnippetsTab = () => {
                 <Code className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
                 <p className="text-muted-foreground mb-4">
                   {snippets.length === 0
-                    ? "No code snippets yet. Create your first one!"
-                    : "Select a snippet from the sidebar to view it."}
+                    ? "No files yet. Create a folder for a project, then add files to it."
+                    : "Select a file from the sidebar to view it."}
                 </p>
                 {snippets.length === 0 && (
-                  <Button onClick={startCreating}>
+                  <Button onClick={() => startCreating()}>
                     <Plus className="h-4 w-4 mr-2" />
-                    Create First Snippet
+                    Create First File
                   </Button>
                 )}
               </div>
@@ -1138,6 +1460,55 @@ const SnippetsTab = () => {
         title="Delete Snippet"
         description="Are you sure you want to delete this code snippet? This action cannot be undone."
       />
+
+      <ConfirmDialog
+        open={folderDeleteConfirm.open}
+        onOpenChange={(open) => setFolderDeleteConfirm({ open, id: null })}
+        onConfirm={handleDeleteFolder}
+        title="Delete Folder"
+        description="The folder will be deleted. Files inside it are kept and moved to Unfiled."
+        confirmText="Delete folder"
+      />
+
+      <Dialog open={folderModal.open} onOpenChange={(o) => setFolderModal(prev => ({ ...prev, open: o }))}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>{folderModal.mode === 'create' ? 'New Folder' : 'Edit Folder'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="folder-name">Name</Label>
+              <Input
+                id="folder-name"
+                value={folderModal.name}
+                onChange={(e) => setFolderModal(prev => ({ ...prev, name: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveFolder(); } }}
+                placeholder="e.g. NoteHaven, Work API"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Color</Label>
+              <div className="flex flex-wrap gap-2">
+                {TAG_COLORS.map(c => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    onClick={() => setFolderModal(prev => ({ ...prev, color: c.value }))}
+                    className={`h-6 w-6 rounded-md border-2 transition-transform hover:scale-110 ${folderModal.color === c.value ? 'border-foreground' : 'border-transparent'}`}
+                    style={{ backgroundColor: c.value }}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setFolderModal(prev => ({ ...prev, open: false }))}>Cancel</Button>
+            <Button onClick={saveFolder}>{folderModal.mode === 'create' ? 'Create' : 'Save'}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

@@ -73,7 +73,7 @@ deploy-edge-function.sh
 context/                  # frontend.md, backend.md (architecture docs)
 ```
 
-The `supabase/` folder is git-tracked and present: `config.toml`, the `media-search` edge function, and six SQL migrations (`migrations/01`→`06`; `06` adds `ledger_buckets` + `bucket_id`/`from_bucket_id`/`transfer` for envelope budgeting). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
+The `supabase/` folder is git-tracked and present: `config.toml`, the `media-search` edge function, and seven SQL migrations (`migrations/01`→`07`; `06` adds `ledger_buckets` + `bucket_id`/`from_bucket_id`/`transfer` for envelope budgeting; `07` adds `snippet_folders` + `folder_id`/`filename`/`description` on `code_snippets` so snippets organise into project folders). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
 
 ---
 
