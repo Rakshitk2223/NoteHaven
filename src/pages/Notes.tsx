@@ -60,7 +60,6 @@ const Notes = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [lineCount, setLineCount] = useState(0);
-  const [lastServerUpdate, setLastServerUpdate] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
@@ -71,8 +70,10 @@ const Notes = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const { toast } = useToast();
   // Track local edit state to prevent remote overwrites
-  const localEditTimestampRef = useRef<number>(Date.now());
   const hasLocalChangesRef = useRef<boolean>(false);
+  // updated_at of the most recent save WE made, used to ignore our own realtime echoes
+  // (server vs. client clock comparison was the source of the false "conflict detected" toasts)
+  const lastSavedUpdatedAtRef = useRef<string | null>(null);
   // Track last loaded note ID to prevent cursor reset on auto-save
   const lastLoadedNoteIdRef = useRef<number | null>(null);
   // Sharing state
@@ -184,9 +185,14 @@ const Notes = () => {
     };
   };
 
+  // Auto-save debounce window (ms). Short enough to feel instant, long enough to batch keystrokes.
+  const AUTOSAVE_DELAY_MS = 800;
   // Debouncing for auto-save - using refs to avoid re-renders and memory leaks
   const titleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const contentTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Latest unsaved payloads, so a pending save can be flushed immediately on note switch / unmount
+  const pendingTitleRef = useRef<{ noteId: number; value: string; previous: string } | null>(null);
+  const pendingContentRef = useRef<{ noteId: number; value: string; previous: string } | null>(null);
 
   // Fetch notes on component mount
   useEffect(() => {
@@ -238,49 +244,38 @@ const Notes = () => {
   });
   editorRef.current = editor;
 
-  // Load selected note into editor (HTML direct)
+  // Load selected note into editor (HTML direct).
+  // Keyed on selectedNote.id ONLY: this effect must NOT re-run when the selectedNote
+  // object reference changes due to an auto-save or a realtime echo, otherwise the
+  // editor.commands.setContent() below would reset the caret mid-typing. The id-only
+  // dependency means setContent() runs exactly once per real note switch.
   useEffect(() => {
     if (!editor) return;
-    
-    // Check if we're actually switching to a different note
-    // If it's the same note (e.g., auto-save update), don't reload to prevent cursor reset
-    const isSameNote = selectedNote?.id === lastLoadedNoteIdRef.current;
-    if (isSameNote) {
-      // Still update server update timestamp for conflict detection
-      if (selectedNote) {
-        setLastServerUpdate(selectedNote.updated_at);
-      }
-      return;
-    }
-    
-    // Save any pending changes before switching notes
-    if (titleTimeoutRef.current) {
-      clearTimeout(titleTimeoutRef.current);
-      titleTimeoutRef.current = null;
-    }
-    if (contentTimeoutRef.current) {
-      clearTimeout(contentTimeoutRef.current);
-      contentTimeoutRef.current = null;
-    }
-    
+
     if (selectedNote) {
       const title = selectedNote.title || '';
       const html = selectedNote.content || '';
       setTitleValue(title);
       setContentValue(html);
-      setLastServerUpdate(selectedNote.updated_at);
       editor.commands.setContent(html);
       // Track that we loaded this note
       lastLoadedNoteIdRef.current = selectedNote.id;
+      // Loading a fresh copy from the server -> no unsaved local changes yet
+      hasLocalChangesRef.current = false;
     } else {
       setTitleValue('');
       setContentValue('');
-      setLastServerUpdate(null);
       editor.commands.clearContent();
       lastLoadedNoteIdRef.current = null;
     }
+
+    // When leaving this note (id change) or unmounting, flush any debounced save
+    // for the note we are leaving so fast-typing-then-switching never loses text.
+    return () => {
+      flushPendingSaves();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNote, editor]);
+  }, [selectedNote?.id, editor]);
 
   // If URL has ?note=ID, select that note once notes are loaded
   useEffect(() => {
@@ -408,12 +403,14 @@ const Notes = () => {
               });
             } else if (payload.eventType === 'UPDATE') {
               const updatedNote = payload.new as Note;
-              const remoteTime = new Date(updatedNote.updated_at).getTime();
-              const localTime = localEditTimestampRef.current;
-              
-              // Only update if remote is newer AND we don't have unsaved local changes
-              const shouldApplyRemote = remoteTime > localTime && !hasLocalChangesRef.current;
-              
+              // Ignore the realtime echo of our OWN save (matched by the server updated_at
+              // we recorded when saving). This replaces the old client-vs-server clock
+              // comparison, which produced false "conflict" handling under clock skew.
+              const isOwnEcho = updatedNote.updated_at === lastSavedUpdatedAtRef.current;
+
+              // Apply a genuine remote change only when we have no unsaved local edits.
+              const shouldApplyRemote = !isOwnEcho && !hasLocalChangesRef.current;
+
               setNotes(prev => prev.map(note => {
                 if (note.id !== updatedNote.id) return note;
                 // Only update note list if remote is newer
@@ -566,47 +563,26 @@ const Notes = () => {
   const saveField = useCallback(async (noteId: number, field: 'title' | 'content', value: string, previous: string) => {
     try {
       setIsSaving(true);
-      
-      // Check for conflicts before saving (if we have a last known server update time)
-      if (lastServerUpdate) {
-        const { data: serverNote, error: checkError } = await supabase
-          .from('notes')
-          .select('updated_at, title, content')
-          .eq('id', noteId)
-          .single();
-        
-        if (!checkError && serverNote) {
-          const serverTime = new Date(serverNote.updated_at).getTime();
-          const localTime = new Date(lastServerUpdate).getTime();
-          
-          // Only show conflict if server was updated AND the content actually differs
-          // This prevents false positives from our own saves
-          if (serverTime > localTime) {
-            const hasRealConflict = field === 'title' 
-              ? serverNote.title !== previous 
-              : serverNote.content !== previous;
-              
-            if (hasRealConflict) {
-              // Just show a toast notification instead of blocking confirmation
-              toast({ 
-                title: 'Note conflict detected', 
-                description: 'This note was modified elsewhere. Saving your changes anyway.', 
-                variant: 'default' 
-              });
-              // Continue with save
-            }
-          }
-        }
-      }
-      
-      const { error } = await supabase.from('notes').update({ [field]: value }).eq('id', noteId);
+
+      // Single round-trip: write the field and read back the server-generated updated_at.
+      // We trust the DB's updated_at (not a client clock) so realtime echo-matching is exact.
+      const { data: saved, error } = await supabase
+        .from('notes')
+        .update({ [field]: value })
+        .eq('id', noteId)
+        .select('updated_at')
+        .single();
       if (error) throw error;
-      const now = new Date().toISOString();
-      setLastServerUpdate(now);
-      // Reset local changes flag since save was successful
-      hasLocalChangesRef.current = false;
-      localEditTimestampRef.current = Date.now();
-  // Update list & selected note with new field value so previews stay fresh
+
+      const now = saved?.updated_at ?? new Date().toISOString();
+      // Record the server timestamp of our own write so its realtime echo is ignored.
+      lastSavedUpdatedAtRef.current = now;
+      // Reset local changes flag only if nothing else is still queued (e.g. the user
+      // already switched to another note that has its own pending edit).
+      if (!pendingTitleRef.current && !pendingContentRef.current) {
+        hasLocalChangesRef.current = false;
+      }
+      // Update list & selected note with new field value so previews stay fresh
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value, updated_at: now } : n));
       setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value, updated_at: now } : prev);
     } catch (e) {
@@ -617,23 +593,46 @@ const Notes = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [toast, lastServerUpdate, editor]);
+  }, [toast]);
 
   const scheduleTitleSave = useCallback((noteId: number, newValue: string, previous: string) => {
+    pendingTitleRef.current = { noteId, value: newValue, previous };
     if (titleTimeoutRef.current) clearTimeout(titleTimeoutRef.current);
-    titleTimeoutRef.current = setTimeout(() => saveField(noteId, 'title', newValue, previous), 2000);
+    titleTimeoutRef.current = setTimeout(() => {
+      titleTimeoutRef.current = null;
+      const p = pendingTitleRef.current;
+      pendingTitleRef.current = null;
+      if (p) saveField(p.noteId, 'title', p.value, p.previous);
+    }, AUTOSAVE_DELAY_MS);
   }, [saveField]);
 
   const scheduleContentSave = useCallback((noteId: number, newValue: string, previous: string) => {
+    pendingContentRef.current = { noteId, value: newValue, previous };
     if (contentTimeoutRef.current) clearTimeout(contentTimeoutRef.current);
-    contentTimeoutRef.current = setTimeout(() => saveField(noteId, 'content', newValue, previous), 2000);
+    contentTimeoutRef.current = setTimeout(() => {
+      contentTimeoutRef.current = null;
+      const p = pendingContentRef.current;
+      pendingContentRef.current = null;
+      if (p) saveField(p.noteId, 'content', p.value, p.previous);
+    }, AUTOSAVE_DELAY_MS);
+  }, [saveField]);
+
+  // Immediately persist any debounced-but-not-yet-saved title/content. Called when
+  // switching notes, on unmount, and before the tab unloads, so the last keystrokes
+  // before navigating away are never dropped.
+  const flushPendingSaves = useCallback(() => {
+    if (titleTimeoutRef.current) { clearTimeout(titleTimeoutRef.current); titleTimeoutRef.current = null; }
+    if (contentTimeoutRef.current) { clearTimeout(contentTimeoutRef.current); contentTimeoutRef.current = null; }
+    const pt = pendingTitleRef.current; pendingTitleRef.current = null;
+    const pc = pendingContentRef.current; pendingContentRef.current = null;
+    if (pt) saveField(pt.noteId, 'title', pt.value, pt.previous);
+    if (pc) saveField(pc.noteId, 'content', pc.value, pc.previous);
   }, [saveField]);
 
   const handleTitleChange = (val: string) => {
     setTitleValue(val);
     // Mark that user has made local changes
     hasLocalChangesRef.current = true;
-    localEditTimestampRef.current = Date.now();
     if (selectedNote) {
       const previous = selectedNote.title || '';
       if (val !== previous) scheduleTitleSave(selectedNote.id, val, previous);
@@ -644,7 +643,6 @@ const Notes = () => {
     setContentValue(html);
     // Mark that user has made local changes
     hasLocalChangesRef.current = true;
-    localEditTimestampRef.current = Date.now();
     if (selectedNote) {
       const previous = selectedNote.content || '';
       if (html !== previous) scheduleContentSave(selectedNote.id, html, previous);
@@ -788,13 +786,17 @@ const Notes = () => {
 
   // Tiptap toolbar helpers
   const run = (cb: (e: any) => any) => () => { if (editor) { editor.chain().focus(); cb(editor); } };
-  // Cleanup timeouts on unmount
+  // Flush any pending save when the tab is being closed/refreshed (best-effort),
+  // and once more on unmount as a safety net. Note-switch flushing is handled by
+  // the note-load effect's cleanup above.
   useEffect(() => {
+    const handleBeforeUnload = () => flushPendingSaves();
+    window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
-      if (titleTimeoutRef.current) clearTimeout(titleTimeoutRef.current);
-      if (contentTimeoutRef.current) clearTimeout(contentTimeoutRef.current);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      flushPendingSaves();
     };
-  }, []);
+  }, [flushPendingSaves]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -1245,7 +1247,7 @@ const Notes = () => {
                       </div>
                     </div>
                     <div className="flex-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-2 pt-2 border-t border-border text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2"><span className="hidden sm:inline">Autosave every 5s</span><span className="sm:hidden">Autosave</span></div>
+                      <div className="flex items-center gap-2"><span className="hidden sm:inline">{isSaving ? 'Saving…' : 'Autosaved'}</span><span className="sm:hidden">{isSaving ? 'Saving…' : 'Saved'}</span></div>
                       <div className="px-2 tabular-nums select-none">Words: {wordCount}<span className="hidden sm:inline"> | Lines: {lineCount}</span></div>
                     </div>
                   </div>
