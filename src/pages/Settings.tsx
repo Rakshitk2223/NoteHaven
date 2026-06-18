@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
 import { cn } from '@/lib/utils';
-import { Menu, ExternalLink, GripVertical, Save, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { Menu, ExternalLink, GripVertical, Save, RotateCcw, ChevronDown, ChevronRight, LogOut, Mail, CalendarDays, Download } from 'lucide-react';
 
 interface SidebarItem {
   name: string;
@@ -33,9 +34,12 @@ const STORAGE_KEY = 'sidebar-order';
 
 const Settings = () => {
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
+  const { signOut } = useAuth();
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'light' ? 'light' : 'dark'));
   const [colorTheme, setColorTheme] = useState(() => getCurrentTheme());
   const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [memberSince, setMemberSince] = useState('');
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [pw1, setPw1] = useState('');
   const [pw2, setPw2] = useState('');
@@ -68,6 +72,12 @@ const Settings = () => {
         if (error) throw error;
         if (user?.user_metadata?.display_name) {
           setDisplayName(user.user_metadata.display_name);
+        }
+        if (user?.email) setEmail(user.email);
+        if (user?.created_at) {
+          setMemberSince(new Date(user.created_at).toLocaleDateString('en-IN', {
+            year: 'numeric', month: 'long', day: 'numeric',
+          }));
         }
       } catch (e) {
         console.error(e);
@@ -215,21 +225,33 @@ const Settings = () => {
       if (!user) throw new Error('Not authenticated');
       const userId = user.id;
 
-      const [prompts, notes, tasks, media] = await Promise.all([
-        supabase.from('prompts').select('*').eq('user_id', userId),
-        supabase.from('notes').select('*').eq('user_id', userId),
-        supabase.from('tasks').select('*').eq('user_id', userId),
-        supabase.from('media_tracker').select('*').eq('user_id', userId)
-      ]);
+      // Every user-owned table — a full account backup, not just the original four.
+      const tables = [
+        'prompts', 'notes', 'tasks', 'media_tracker',
+        'subscriptions', 'subscription_categories',
+        'ledger_entries', 'ledger_categories', 'ledger_buckets',
+        'birthdays', 'countdowns', 'code_snippets', 'snippet_folders', 'tags',
+      ] as const;
 
-      const exportObj = {
+      // allSettled so a single failing table can't sink the whole export.
+      const results = await Promise.allSettled(
+        tables.map((t) =>
+          supabase.from(t).select('*').eq('user_id', userId).then((r) => {
+            if (r.error) throw r.error;
+            return r.data || [];
+          })
+        )
+      );
+
+      const exportObj: Record<string, unknown> = {
         exported_at: new Date().toISOString(),
         user_id: userId,
-        prompts: prompts.data || [],
-        notes: notes.data || [],
-        tasks: tasks.data || [],
-        media: media.data || []
+        email: user.email,
       };
+      tables.forEach((t, i) => {
+        const res = results[i];
+        exportObj[t] = res.status === 'fulfilled' ? res.value : [];
+      });
 
       const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -323,6 +345,51 @@ const Settings = () => {
                   <Switch checked={theme === 'dark'} onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')} />
                   <span className="text-xs text-muted-foreground">Dark</span>
                 </div>
+              </div>
+
+              {/* Reset to the default Netflix dark look */}
+              <div className="flex items-center justify-between pt-2 border-t border-border/60">
+                <div>
+                  <p className="font-medium">Reset appearance</p>
+                  <p className="text-sm text-muted-foreground">Back to Netflix dark (default)</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setColorTheme('netflix');
+                    setTheme('dark');
+                    saveTheme('netflix');
+                    applyTheme('netflix', 'dark');
+                    toast({ title: 'Appearance reset', description: 'Netflix dark restored' });
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Reset
+                </Button>
+              </div>
+            </Card>
+
+            {/* Account */}
+            <Card className="p-6 space-y-4">
+              <h2 className="text-lg font-semibold">Account</h2>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 text-sm">
+                  <Mail className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <span className="text-muted-foreground">Email</span>
+                  <span className="ml-auto font-medium truncate">{email || '—'}</span>
+                </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <CalendarDays className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <span className="text-muted-foreground">Member since</span>
+                  <span className="ml-auto font-medium">{memberSince || '—'}</span>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-border/60">
+                <Button variant="outline" onClick={() => signOut()} className="text-destructive hover:text-destructive">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign Out
+                </Button>
               </div>
             </Card>
 
@@ -418,8 +485,11 @@ const Settings = () => {
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Data Management</h2>
               <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">Download all your data as JSON (prompts, notes, tasks, media).</p>
-                <Button onClick={handleExportData} disabled={exporting}>{exporting ? 'Exporting...' : 'Export All My Data'}</Button>
+                <p className="text-sm text-muted-foreground">Download a full backup of your account as JSON — notes, tasks, prompts, media, subscriptions, ledger (entries, categories, buckets), birthdays, countdowns, code snippets &amp; tags.</p>
+                <Button onClick={handleExportData} disabled={exporting}>
+                  <Download className="h-4 w-4 mr-2" />
+                  {exporting ? 'Exporting…' : 'Export All My Data'}
+                </Button>
               </div>
             </Card>
 

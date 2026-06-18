@@ -102,7 +102,7 @@ const Subscriptions = () => {
     return subscriptions.filter((sub) => {
       if (sub.status !== 'active' && sub.status !== 'renew') return false;
       const days = getDaysUntilRenewal(sub.next_renewal_date);
-      return days >= 0 && days <= 7;
+      return days !== null && days >= 0 && days <= 7;
     }).length;
   }, [subscriptions]);
 
@@ -206,13 +206,16 @@ const Subscriptions = () => {
     });
   };
 
-  const getDaysUntilRenewal = (date: string) => {
+  // Null-safe: subscriptions without a renewal date (or with a malformed one)
+  // must not throw during render. Returns null when no valid date is present.
+  const getDaysUntilRenewal = (date: string | null | undefined): number | null => {
+    if (!date) return null;
     const renewal = parseYMD(date);
+    if (isNaN(renewal.getTime())) return null;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diffTime = renewal.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
   return (
@@ -496,7 +499,8 @@ const Subscriptions = () => {
                           
                           <div className="text-right">
                             <p className="text-sm font-medium">
-                              {daysUntil === 0 ? 'Renews today' : 
+                              {daysUntil === null ? 'No renewal date' :
+                               daysUntil === 0 ? 'Renews today' :
                                daysUntil === 1 ? 'Renews tomorrow' :
                                daysUntil < 0 ? 'Overdue' :
                                `Renews in ${daysUntil} days`}
