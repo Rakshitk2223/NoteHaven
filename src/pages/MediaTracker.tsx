@@ -579,45 +579,67 @@ const MediaTracker = () => {
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
 
-  // Fetch group counts from database (separate from items query)
+  // Keep the overview/pill counts in sync when the library size changes
+  // (add / delete / import all move totalCount).
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
+  }, [totalCount, queryClient]);
+
+  // Fetch group counts from database (separate from items query).
+  // Paginated so libraries larger than PostgREST's 1000-row response cap are
+  // counted accurately. Also emits per-type × status-category counts so the
+  // overview cards can react to the selected category.
   const { data: groupCountsData } = useQuery({
     queryKey: ['groupCounts', customGroups],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return { all: 0 };
 
-      // Single query for type + status aggregates
-      const { data, error } = await supabase
-        .from('media_tracker')
-        .select('type, status')
-        .eq('user_id', user.id);
+      // Page through all rows (type+status only — cheap) to bypass the 1000 cap.
+      const rows: Array<{ type: string; status: string | null }> = [];
+      const chunk = 1000;
+      let from = 0;
+      for (;;) {
+        const { data, error } = await supabase
+          .from('media_tracker')
+          .select('type, status')
+          .eq('user_id', user.id)
+          .range(from, from + chunk - 1);
+        if (error || !data || data.length === 0) break;
+        rows.push(...(data as Array<{ type: string; status: string | null }>));
+        if (data.length < chunk) break;
+        from += chunk;
+      }
 
-      if (error || !data) return { all: 0 };
-
-      // Count by type
       const typeCounts: Record<string, number> = {};
-      const statusCounts: Record<string, number> = {};
-      data.forEach((row) => {
+      // Per-type status-category breakdown: type -> { inProgress, planned, completed }.
+      const typeStatus: Record<string, { inProgress: number; planned: number; completed: number }> = {};
+      const ensure = (t: string) => (typeStatus[t] ??= { inProgress: 0, planned: 0, completed: 0 });
+      rows.forEach((row) => {
         typeCounts[row.type] = (typeCounts[row.type] || 0) + 1;
-        if (row.status) statusCounts[row.status] = (statusCounts[row.status] || 0) + 1;
+        const cat = getStatusCategory(row.status || 'Active'); // Active | Planned | Completed
+        const bucket = cat === 'Active' ? 'inProgress' : cat === 'Planned' ? 'planned' : 'completed';
+        ensure(row.type)[bucket] += 1;
       });
 
-      const groupCounts: Record<string, number> = { all: data.length };
-      // Aggregate status counts for the overview strip.
-      const inProgress = (statusCounts['Watching'] || 0) + (statusCounts['Reading'] || 0);
-      const planned = (statusCounts['Plan to Watch'] || 0) + (statusCounts['Plan to Read'] || 0);
-      groupCounts['stat:inProgress'] = inProgress;
-      groupCounts['stat:planned'] = planned;
-      groupCounts['stat:completed'] = statusCounts['Completed'] || 0;
-      // Per-type counts so the unified category row can show counts on type pills.
-      for (const [t, c] of Object.entries(typeCounts)) {
-        groupCounts[`type:${t}`] = c;
+      const groupCounts: Record<string, number> = { all: rows.length };
+      // Global status totals (sum of per-type buckets keeps them consistent).
+      let gIn = 0, gPlan = 0, gDone = 0;
+      for (const t of Object.keys(typeCounts)) {
+        const s = ensure(t);
+        gIn += s.inProgress; gPlan += s.planned; gDone += s.completed;
+        groupCounts[`type:${t}`] = typeCounts[t];
+        groupCounts[`type:${t}:inProgress`] = s.inProgress;
+        groupCounts[`type:${t}:planned`] = s.planned;
+        groupCounts[`type:${t}:completed`] = s.completed;
       }
+      groupCounts['stat:inProgress'] = gIn;
+      groupCounts['stat:planned'] = gPlan;
+      groupCounts['stat:completed'] = gDone;
+
       for (const group of customGroups) {
         let count = 0;
-        for (const t of group.types) {
-          count += typeCounts[t] || 0;
-        }
+        for (const t of group.types) count += typeCounts[t] || 0;
         groupCounts[group.id] = count;
       }
 
@@ -838,6 +860,34 @@ const MediaTracker = () => {
     return groupCountsData || { all: 0 };
   }, [groupCountsData]);
 
+  // Overview stats that react to the selected category (All vs a type/custom group).
+  const currentStats = useMemo(() => {
+    const gc = groupCountsData;
+    if (!gc) return { all: 0, inProgress: 0, planned: 0, completed: 0 };
+
+    if (activeCategory === 'all') {
+      return {
+        all: gc['all'] || 0,
+        inProgress: gc['stat:inProgress'] || 0,
+        planned: gc['stat:planned'] || 0,
+        completed: gc['stat:completed'] || 0,
+      };
+    }
+
+    const types = isTypeCategory(activeCategory)
+      ? [typeOf(activeCategory)]
+      : (customGroups.find((g) => g.id === activeCategory)?.types ?? []);
+
+    let all = 0, inProgress = 0, planned = 0, completed = 0;
+    for (const t of types) {
+      all += gc[`type:${t}`] || 0;
+      inProgress += gc[`type:${t}:inProgress`] || 0;
+      planned += gc[`type:${t}:planned`] || 0;
+      completed += gc[`type:${t}:completed`] || 0;
+    }
+    return { all, inProgress, planned, completed };
+  }, [groupCountsData, activeCategory, customGroups]);
+
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
     finalItems.forEach(item => {
@@ -924,6 +974,9 @@ const MediaTracker = () => {
     try {
       const { error } = await supabase.from('media_tracker').update({ status: newStatus }).eq('id', item.id);
       if (error) throw error;
+      // Status moves an item between In progress / Planned / Completed without
+      // changing the total, so refresh the overview counts explicitly.
+      queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
       toast({ title: 'Status updated', description: `Changed to ${newStatus}` });
     } catch (e: unknown) {
       // Revert optimistic update on error
@@ -1210,6 +1263,7 @@ const MediaTracker = () => {
       resetForm();
       fetchTags();
   refetch();
+      queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
       toast({ title: 'Updated', description: 'Media item saved successfully' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update media item';
@@ -1300,6 +1354,45 @@ const MediaTracker = () => {
     }
     setDetailsOpen(true);
   }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder]);
+
+  // Resolve the items for a Refresh Library sweep. With no filters this pages
+  // through the WHOLE library (not just the items loaded into the grid); with
+  // filters active it uses the currently-visible filtered set.
+  const getSweepItems = useCallback(async () => {
+    const toSweep = (rows: Array<Pick<MediaItem, 'id' | 'title' | 'type' | 'cover_image' | 'current_season' | 'current_episode' | 'current_chapter' | 'last_known_total_episodes' | 'last_known_total_seasons'>>) =>
+      rows.map((i) => ({
+        id: i.id,
+        title: i.title,
+        type: i.type,
+        cover_image: i.cover_image ?? imageUrls.get(i.id) ?? null,
+        current_season: i.current_season,
+        current_episode: i.current_episode,
+        current_chapter: i.current_chapter,
+        last_known_total_episodes: i.last_known_total_episodes,
+        last_known_total_seasons: i.last_known_total_seasons,
+      }));
+
+    if (hasActiveFilters) return toSweep(finalItems);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return toSweep(finalItems);
+
+    const all: MediaItem[] = [];
+    const chunk = 1000;
+    let from = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from('media_tracker')
+        .select('id, title, type, cover_image, current_season, current_episode, current_chapter, last_known_total_episodes, last_known_total_seasons')
+        .eq('user_id', user.id)
+        .range(from, from + chunk - 1);
+      if (error || !data || data.length === 0) break;
+      all.push(...(data as unknown as MediaItem[]));
+      if (data.length < chunk) break;
+      from += chunk;
+    }
+    return toSweep(all);
+  }, [hasActiveFilters, finalItems, imageUrls]);
 
   // Remove a wrong cover → falls back to the letter-gradient placeholder.
   const handleRemoveCover = useCallback(async (item: MediaItem) => {
@@ -2103,21 +2196,17 @@ const MediaTracker = () => {
           <RefreshLibraryDialog
             open={refreshLibraryOpen}
             onOpenChange={setRefreshLibraryOpen}
-            items={finalItems.map((i) => ({
-              id: i.id,
-              title: i.title,
-              type: i.type,
-              cover_image: i.cover_image ?? imageUrls.get(i.id) ?? null,
-              current_season: i.current_season,
-              current_episode: i.current_episode,
-              current_chapter: i.current_chapter,
-              last_known_total_episodes: i.last_known_total_episodes,
-              last_known_total_seasons: i.last_known_total_seasons,
-            }))}
-            scopeLabel={hasActiveFilters ? `${finalItems.length} filtered item${finalItems.length === 1 ? '' : 's'}` : `all ${finalItems.length} item${finalItems.length === 1 ? '' : 's'}`}
+            fetchItems={getSweepItems}
+            count={hasActiveFilters ? finalItems.length : totalCount}
+            scopeLabel={
+              hasActiveFilters
+                ? `${finalItems.length} filtered item${finalItems.length === 1 ? '' : 's'}`
+                : `all ${totalCount} item${totalCount === 1 ? '' : 's'}`
+            }
             onComplete={() => {
               refetch();
               reloadMetadata();
+              queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
             }}
           />
 
@@ -2225,10 +2314,10 @@ const MediaTracker = () => {
             {/* Overview strip — at-a-glance totals; cards filter by status when clicked */}
             <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
               {([
-                { key: 'all', label: 'Total', value: categoryCounts['all'] ?? 0, status: 'All', dot: 'bg-foreground/40' },
-                { key: 'inProgress', label: 'In progress', value: categoryCounts['stat:inProgress'] ?? 0, status: 'Active', dot: 'bg-green-500' },
-                { key: 'planned', label: 'Planned', value: categoryCounts['stat:planned'] ?? 0, status: 'Planned', dot: 'bg-amber-500' },
-                { key: 'completed', label: 'Completed', value: categoryCounts['stat:completed'] ?? 0, status: 'Completed', dot: 'bg-purple-500' },
+                { key: 'all', label: 'Total', value: currentStats.all, status: 'All', dot: 'bg-foreground/40' },
+                { key: 'inProgress', label: 'In progress', value: currentStats.inProgress, status: 'Active', dot: 'bg-green-500' },
+                { key: 'planned', label: 'Planned', value: currentStats.planned, status: 'Planned', dot: 'bg-amber-500' },
+                { key: 'completed', label: 'Completed', value: currentStats.completed, status: 'Completed', dot: 'bg-purple-500' },
               ] as const).map((stat) => {
                 const active = filterStatus === stat.status;
                 return (

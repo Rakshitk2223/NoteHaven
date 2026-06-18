@@ -208,8 +208,13 @@ export const MediaCard = ({
     );
   }
 
+  // Only build/mount the hover preview for cards near the viewport. Mounting a
+  // Radix HoverCard per card across a 200+ grid is what made tab-switching janky;
+  // gating on inView keeps the live count to roughly what's on screen.
+  const showPreview = inView && hasPreview;
+
   // Streaming-style hover preview (desktop only — Radix HoverCard ignores touch).
-  const previewContent = hasPreview ? (
+  const previewContent = showPreview ? (
     <HoverCardContent
       side="right"
       align="start"
@@ -448,11 +453,17 @@ export const MediaCard = ({
         'group relative rounded-lg transition-shadow',
         selected && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
       )}
+      // Let the browser skip layout/paint for off-screen cards in long grids.
+      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 340px' } as React.CSSProperties}
     >
-      <HoverCard openDelay={350} closeDelay={120}>
-        <HoverCardTrigger asChild>{poster}</HoverCardTrigger>
-        {previewContent}
-      </HoverCard>
+      {showPreview ? (
+        <HoverCard openDelay={350} closeDelay={120}>
+          <HoverCardTrigger asChild>{poster}</HoverCardTrigger>
+          {previewContent}
+        </HoverCard>
+      ) : (
+        poster
+      )}
 
       {/* Title, status, and inline progress */}
       <div className="mt-2 space-y-1.5">

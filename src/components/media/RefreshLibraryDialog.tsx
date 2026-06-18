@@ -3,7 +3,7 @@
 // library with a live progress bar. New-season detection runs when "Seasons &
 // episodes" is ticked.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { RefreshCw, ImageIcon, ListVideo, FileText, Star, Radio } from 'lucide-react';
 import {
   Dialog,
@@ -57,8 +57,14 @@ interface SweepItem {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The items to sweep (already-filtered set from the page). */
-  items: SweepItem[];
+  /**
+   * Resolves the full set of items to sweep at run time. Returning a promise
+   * (rather than a static array) lets the page page through the whole library —
+   * not just the items currently loaded into the infinite-scroll grid.
+   */
+  fetchItems: () => Promise<SweepItem[]>;
+  /** Expected number of items (for the label + button before the fetch runs). */
+  count: number;
   /** Label describing the scope, e.g. "all 124 items" or "42 filtered items". */
   scopeLabel: string;
   /** Called after a sweep finishes so the page can refetch + re-pull metadata. */
@@ -73,11 +79,17 @@ const FIELDS: Array<{ key: keyof RefreshOptions; label: string; hint: string; Ic
   { key: 'status', label: 'Airing status', hint: 'Ongoing / Completed / Upcoming', Icon: Radio },
 ];
 
-export function RefreshLibraryDialog({ open, onOpenChange, items, scopeLabel, onComplete }: Props) {
+export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, scopeLabel, onComplete }: Props) {
   const { toast } = useToast();
   const [opts, setOpts] = useState<RefreshOptions>(loadOpts);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<RefreshProgress | null>(null);
+
+  // Reset any previous run's progress each time the dialog is reopened, so it
+  // doesn't show a stale "Done 200/200" from last time.
+  useEffect(() => {
+    if (open) setProgress(null);
+  }, [open]);
 
   const anyChecked = Object.values(opts).some(Boolean);
   const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
@@ -90,10 +102,16 @@ export function RefreshLibraryDialog({ open, onOpenChange, items, scopeLabel, on
     });
 
   const run = async () => {
-    if (!anyChecked || items.length === 0) return;
+    if (!anyChecked) return;
     setRunning(true);
-    setProgress({ done: 0, total: items.length, updated: 0, newContent: 0 });
+    setProgress({ done: 0, total: count, updated: 0, newContent: 0 });
     try {
+      const items = await fetchItems();
+      if (items.length === 0) {
+        toast({ title: 'Nothing to refresh', description: 'No items in scope.' });
+        return;
+      }
+      setProgress({ done: 0, total: items.length, updated: 0, newContent: 0 });
       const result = await refreshLibrary(opts, items, (p) => setProgress({ ...p }));
       toast({
         title: 'Library refreshed',
@@ -161,8 +179,8 @@ export function RefreshLibraryDialog({ open, onOpenChange, items, scopeLabel, on
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={running}>
             {progress && !running ? 'Close' : 'Cancel'}
           </Button>
-          <Button onClick={run} disabled={running || !anyChecked || items.length === 0}>
-            {running ? 'Refreshing…' : `Refresh ${items.length} item${items.length === 1 ? '' : 's'}`}
+          <Button onClick={run} disabled={running || !anyChecked || count === 0}>
+            {running ? 'Refreshing…' : `Refresh ${count} item${count === 1 ? '' : 's'}`}
           </Button>
         </DialogFooter>
       </DialogContent>
