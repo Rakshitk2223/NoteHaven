@@ -51,6 +51,9 @@ async function searchMangaUpdates(query: string): Promise<any[]> {
         status: 'upcoming',
         episodes: null,
         chapters: null,
+        total_seasons: null,
+        seasons: null,
+        genres: Array.isArray(record?.genres) ? record.genres.map((g: any) => g.genre).filter(Boolean) : null,
         anilist_id: null,
         tmdb_id: null,
         mal_id: null,
@@ -97,6 +100,9 @@ async function searchMangaDex(query: string): Promise<any[]> {
         status: mapStatus(manga.attributes?.status),
         episodes: null,
         chapters: null,
+        total_seasons: null,
+        seasons: null,
+        genres: null,
         anilist_id: null,
         tmdb_id: null,
         mal_id: null,
@@ -120,7 +126,7 @@ async function searchTVmaze(query: string): Promise<any[]> {
     const data = await response.json();
     if (!Array.isArray(data)) return [];
 
-    return data.slice(0, 5).map((item: any) => {
+    const mapped = data.slice(0, 5).map((item: any) => {
       const show = item.show;
       const language = show.language || '';
       let determinedType = 'series';
@@ -135,16 +141,68 @@ async function searchTVmaze(query: string): Promise<any[]> {
         description: (show.summary || '').replace(/<[^>]*>/g, '').substring(0, 500),
         rating: show.rating?.average || 0,
         status: mapTMDBStatus(show.status),
-        episodes: show._links?.previousepisode ? null : null,
+        episodes: null,
         chapters: null,
+        total_seasons: null,
+        seasons: null,
+        genres: Array.isArray(show.genres) && show.genres.length ? show.genres : null,
         anilist_id: null,
         tmdb_id: show.externals?.thetvdb || null,
+        _tvmaze_id: show.id,
         mal_id: null,
       };
     }).filter((x: any) => x.cover_image);
+
+    // Enrich the top match with real season structure by grouping its episodes.
+    if (mapped[0]?._tvmaze_id) {
+      const seasonData = await fetchTVmazeSeasons(mapped[0]._tvmaze_id);
+      if (seasonData) Object.assign(mapped[0], seasonData);
+    }
+    // Strip the internal id so it isn't written to the cache table.
+    mapped.forEach((m: any) => delete m._tvmaze_id);
+
+    return mapped;
   } catch (error) {
     console.error('TVmaze error:', error);
     return [];
+  }
+}
+
+// Group a TVmaze show's episodes into seasons for the per-season breakdown.
+async function fetchTVmazeSeasons(showId: number): Promise<any | null> {
+  try {
+    const res = await fetch(`https://api.tvmaze.com/shows/${showId}?embed=episodes`);
+    if (!res.ok) return null;
+    const show = await res.json();
+    const episodes: any[] = show?._embedded?.episodes || [];
+    if (!episodes.length) return null;
+
+    const bySeason = new Map<number, { count: number; air_date: string | null }>();
+    for (const ep of episodes) {
+      const sn = ep.season ?? 1;
+      const existing = bySeason.get(sn) || { count: 0, air_date: ep.airdate || null };
+      existing.count += 1;
+      if (!existing.air_date && ep.airdate) existing.air_date = ep.airdate;
+      bySeason.set(sn, existing);
+    }
+
+    const seasons = [...bySeason.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([season_number, v]) => ({
+        season_number,
+        episode_count: v.count,
+        air_date: v.air_date,
+        name: `Season ${season_number}`,
+      }));
+
+    return {
+      total_seasons: seasons.length,
+      seasons,
+      episodes: episodes.length,
+    };
+  } catch (error) {
+    console.error('TVmaze seasons error:', error);
+    return null;
   }
 }
 
@@ -200,20 +258,30 @@ async function searchAniList(query: string, type: string): Promise<any[]> {
     
     if (!media || !Array.isArray(media)) return [];
 
-    return media.map((item: any) => ({
-      title: item.title.english || item.title.romaji || item.title.native,
-      type,
-      cover_image: item.coverImage?.extraLarge || item.coverImage?.large || '',
-      banner_image: item.bannerImage || null,
-      description: item.description?.replace(/<[^>]*>/g, '').substring(0, 500) || '',
-      rating: item.averageScore ? item.averageScore / 10 : 0,
-      status: mapStatus(item.status),
-      episodes: item.episodes || null,
-      chapters: item.chapters || null,
-      anilist_id: item.id,
-      tmdb_id: null,
-      mal_id: null,
-    }));
+    return media.map((item: any) => {
+      const episodes = item.episodes || null;
+      // Anime is modeled as a single "season" with all its episodes; manga has none.
+      const seasons = type === 'anime' && episodes
+        ? [{ season_number: 1, episode_count: episodes, air_date: null, name: 'Season 1' }]
+        : null;
+      return {
+        title: item.title.english || item.title.romaji || item.title.native,
+        type,
+        cover_image: item.coverImage?.extraLarge || item.coverImage?.large || '',
+        banner_image: item.bannerImage || null,
+        description: item.description?.replace(/<[^>]*>/g, '').substring(0, 500) || '',
+        rating: item.averageScore ? item.averageScore / 10 : 0,
+        status: mapStatus(item.status),
+        episodes,
+        chapters: item.chapters || null,
+        total_seasons: seasons ? 1 : null,
+        seasons,
+        genres: Array.isArray(item.genres) ? item.genres : null,
+        anilist_id: item.id,
+        tmdb_id: null,
+        mal_id: null,
+      };
+    });
   } catch (error) {
     console.error('AniList error:', error);
     return [];
@@ -237,20 +305,29 @@ async function searchJikan(query: string, type: string): Promise<any[]> {
     
     if (!Array.isArray(results)) return [];
 
-    return results.map((result: any) => ({
-      title: result.title || result.title_english || result.title_japanese,
-      type,
-      cover_image: result.images?.jpg?.large_image_url || result.images?.jpg?.image_url || '',
-      banner_image: result.trailer?.images?.maximum_image_url || null,
-      description: result.synopsis?.substring(0, 500) || '',
-      rating: result.score || 0,
-      status: mapStatus(result.status),
-      episodes: result.episodes || null,
-      chapters: result.chapters || null,
-      anilist_id: null,
-      tmdb_id: null,
-      mal_id: result.mal_id,
-    }));
+    return results.map((result: any) => {
+      const episodes = result.episodes || null;
+      const seasons = type === 'anime' && episodes
+        ? [{ season_number: 1, episode_count: episodes, air_date: null, name: 'Season 1' }]
+        : null;
+      return {
+        title: result.title || result.title_english || result.title_japanese,
+        type,
+        cover_image: result.images?.jpg?.large_image_url || result.images?.jpg?.image_url || '',
+        banner_image: result.trailer?.images?.maximum_image_url || null,
+        description: result.synopsis?.substring(0, 500) || '',
+        rating: result.score || 0,
+        status: mapStatus(result.status),
+        episodes,
+        chapters: result.chapters || null,
+        total_seasons: seasons ? 1 : null,
+        seasons,
+        genres: Array.isArray(result.genres) ? result.genres.map((g: any) => g.name).filter(Boolean) : null,
+        anilist_id: null,
+        tmdb_id: null,
+        mal_id: result.mal_id,
+      };
+    });
   } catch (error) {
     console.error('Jikan error:', error);
     return [];
@@ -271,11 +348,11 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
 
     const data = await response.json();
     const results = data?.results;
-    
+
     if (!Array.isArray(results)) return [];
 
     // Get top 10 results
-    return results.slice(0, 10).map((result: any) => ({
+    const mapped = results.slice(0, 10).map((result: any) => ({
       title: result.title || result.name,
       type: determineType(result, type),
       cover_image: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : '',
@@ -285,13 +362,66 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
       status: mapTMDBStatus(result.status),
       episodes: result.number_of_episodes || null,
       chapters: null,
+      total_seasons: null,
+      seasons: null,
+      genres: null,
       anilist_id: null,
       tmdb_id: result.id,
       mal_id: null,
     }));
+
+    // The search endpoint omits season/episode structure and genres — enrich the
+    // top result via the details endpoint (one extra call, only for the primary match).
+    const top = results[0];
+    if (top?.id && mapped[0]) {
+      const details = await fetchTMDBDetails(top.id, searchType === 'movie', apiKey);
+      if (details) Object.assign(mapped[0], details);
+    }
+
+    return mapped;
   } catch (error) {
     console.error('TMDB error:', error);
     return [];
+  }
+}
+
+// Fetch full details for a single TMDB title to obtain real season structure + genres.
+// TV → number_of_seasons + per-season episode counts; Movie → genres only.
+async function fetchTMDBDetails(id: number, isMovie: boolean, apiKey: string): Promise<any | null> {
+  try {
+    if (!apiKey) return null;
+    const endpoint = isMovie ? 'movie' : 'tv';
+    const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${apiKey}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+
+    const genres = Array.isArray(d.genres) ? d.genres.map((g: any) => g.name).filter(Boolean) : null;
+    if (isMovie) {
+      return { genres, status: mapTMDBStatus(d.status) };
+    }
+
+    // Drop "Season 0" (specials) so counts reflect real seasons.
+    const seasons = Array.isArray(d.seasons)
+      ? d.seasons
+          .filter((s: any) => (s.season_number ?? 0) > 0 && (s.episode_count ?? 0) > 0)
+          .map((s: any) => ({
+            season_number: s.season_number,
+            episode_count: s.episode_count,
+            air_date: s.air_date || null,
+            name: s.name || `Season ${s.season_number}`,
+          }))
+      : null;
+
+    return {
+      total_seasons: d.number_of_seasons ?? (seasons?.length || null),
+      seasons: seasons && seasons.length ? seasons : null,
+      episodes: d.number_of_episodes || null,
+      genres,
+      status: mapTMDBStatus(d.status),
+    };
+  } catch (error) {
+    console.error('TMDB details error:', error);
+    return null;
   }
 }
 
@@ -336,6 +466,9 @@ async function searchWikidata(query: string, type: string): Promise<any[]> {
         status: 'completed',
         episodes: null,
         chapters: null,
+        total_seasons: null,
+        seasons: null,
+        genres: null,
         anilist_id: null,
         tmdb_id: null,
         mal_id: null,
@@ -393,6 +526,9 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
       status: 'completed',
       episodes: null,
       chapters: null,
+      total_seasons: null,
+      seasons: null,
+      genres: null,
       anilist_id: null,
       tmdb_id: tmdbId,
       mal_id: null,

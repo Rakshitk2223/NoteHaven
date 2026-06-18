@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,10 +53,13 @@ import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
-import { typeBadgeSoft, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/media-style";
+import { typeBadgeSoft, AIRING_STYLE, AIRING_LABEL, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/media-style";
 import { CustomGroupBuilder } from "@/components/media/CustomGroupBuilder";
+import { RefreshLibraryDialog } from "@/components/media/RefreshLibraryDialog";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { refreshCoverImage } from "@/lib/media-refresh";
+import { fetchMediaMetadataBatch, removeCoverImage, acknowledgeNewContent, computeProgress, type MediaMeta } from "@/lib/media-metadata";
+import { Progress } from "@/components/ui/progress";
 
 interface MediaItem {
   id: number;
@@ -73,6 +76,9 @@ interface MediaItem {
   created_at: string;
   updated_at?: string;
   tags?: Tag[];
+  has_new_content?: boolean;
+  last_known_total_episodes?: number | null;
+  last_known_total_seasons?: number | null;
 }
 
 // Valid types and statuses for runtime validation
@@ -300,15 +306,18 @@ const MediaTracker = () => {
     return ['Anime','Manga','Manhwa','Manhua','Series','Movie','KDrama','JDrama'];
   });
   const [needsCoverOnly, setNeedsCoverOnly] = useState(false);
+  // Quick "what should I watch?" filter: all | behind (progress < total) | new (new season dropped)
+  const [progressFilter, setProgressFilter] = useState<'all' | 'behind' | 'new'>('all');
+  const [refreshLibraryOpen, setRefreshLibraryOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [tabsManageOpen, setTabsManageOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>('All');
-  const [sortBy, setSortBy] = useState<'title' | 'rating' | 'updated_at' | 'created_at'>(() => {
+  const [sortBy, setSortBy] = useState<'title' | 'rating' | 'updated_at' | 'created_at' | 'pct_complete' | 'ext_rating'>(() => {
     try {
       const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerSortBy') : null;
-      if (stored === 'title' || stored === 'rating' || stored === 'updated_at' || stored === 'created_at') return stored;
+      if (stored === 'title' || stored === 'rating' || stored === 'updated_at' || stored === 'created_at' || stored === 'pct_complete' || stored === 'ext_rating') return stored;
     } catch {
       // ignore
     }
@@ -359,6 +368,9 @@ const MediaTracker = () => {
   // Image loading state - direct Supabase fetch
   const [imageUrls, setImageUrls] = useState<Map<number, string | null>>(new Map());
   const [imageApiSources, setImageApiSources] = useState<Map<number, string>>(new Map());
+  // Cached media metadata (synopsis, real totals, seasons, airing status, genres).
+  const [metadataMap, setMetadataMap] = useState<Map<number, MediaMeta>>(new Map());
+  const metadataAttemptedRef = useRef<Set<number>>(new Set());
 
   // Save custom groups to localStorage
   useEffect(() => {
@@ -425,9 +437,12 @@ const MediaTracker = () => {
         .from('media_tracker')
         .select('*, media_tags(tags(*))', { count: 'exact' });
       // Dynamic primary sort. Nulls last keeps unrated/undated items from dominating.
-      query = query.order(sortBy, { ascending: sortOrder === 'asc', nullsFirst: false });
+      // pct_complete / ext_rating are derived from metadata (not DB columns) and are
+      // sorted client-side, so fall back to a stable title order at the DB level.
+      const dbSort = (sortBy === 'pct_complete' || sortBy === 'ext_rating') ? 'title' : sortBy;
+      query = query.order(dbSort, { ascending: sortOrder === 'asc', nullsFirst: false });
       // Stable secondary sort.
-      if (sortBy !== 'title') {
+      if (dbSort !== 'title') {
         query = query.order('title', { ascending: true });
       }
       query = query.range(from, to);
@@ -540,6 +555,26 @@ const MediaTracker = () => {
       setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
     }).catch(err => console.error('Initial load error:', err));
   }, [mediaItems, imageUrls.size]);
+
+  // Fetch cached metadata (synopsis/totals/seasons/etc.) for loaded items in one
+  // query. Tracked via a ref so each id is attempted at most once per mount.
+  useEffect(() => {
+    if (mediaItems.length === 0) return;
+    const todo = mediaItems.filter((i) => !metadataAttemptedRef.current.has(i.id));
+    if (todo.length === 0) return;
+    todo.forEach((i) => metadataAttemptedRef.current.add(i.id));
+    fetchMediaMetadataBatch(todo.map((i) => ({ id: i.id, title: i.title, type: i.type })))
+      .then((m) => {
+        if (m.size) setMetadataMap((prev) => new Map([...prev, ...m]));
+      })
+      .catch((err) => console.error('Metadata load error:', err));
+  }, [mediaItems]);
+
+  // Force a fresh metadata pull (e.g. after a library refresh sweep).
+  const reloadMetadata = useCallback(() => {
+    metadataAttemptedRef.current = new Set();
+    setMetadataMap(new Map());
+  }, []);
 
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
@@ -660,12 +695,33 @@ const MediaTracker = () => {
   }, [filteredByTagsMediaItems, activeCategory, customGroups]);
 
   const finalItems = useMemo(() => {
-    const base = categoryFilteredItems;
-    if (!needsCoverOnly) return base;
+    let base = categoryFilteredItems;
+
     // "Needs cover" = no persisted cover_image AND no resolved cover from the lazy loader.
     // Using the persisted column keeps the filter stable regardless of scroll position.
-    return base.filter((i) => !i.cover_image && !imageUrls.get(i.id));
-  }, [categoryFilteredItems, needsCoverOnly, imageUrls]);
+    if (needsCoverOnly) {
+      base = base.filter((i) => !i.cover_image && !imageUrls.get(i.id));
+    }
+
+    // "What should I watch?" quick filter.
+    if (progressFilter === 'new') {
+      base = base.filter((i) => i.has_new_content);
+    } else if (progressFilter === 'behind') {
+      base = base.filter((i) => computeProgress(i, metadataMap.get(i.id)).behind);
+    }
+
+    // Client-side sort for metadata-derived orders (not available as DB columns).
+    if (sortBy === 'pct_complete' || sortBy === 'ext_rating') {
+      const dir = sortOrder === 'asc' ? 1 : -1;
+      const keyOf = (i: MediaItem) =>
+        sortBy === 'pct_complete'
+          ? computeProgress(i, metadataMap.get(i.id)).pct
+          : (metadataMap.get(i.id)?.rating ?? 0);
+      base = [...base].sort((a, b) => (keyOf(a) - keyOf(b)) * dir || a.title.localeCompare(b.title));
+    }
+
+    return base;
+  }, [categoryFilteredItems, needsCoverOnly, imageUrls, progressFilter, sortBy, sortOrder, metadataMap]);
 
   // Whether any filter that can hide existing items is active.
   const hasActiveFilters = useMemo(() => (
@@ -673,8 +729,9 @@ const MediaTracker = () => {
     searchTerm.trim() !== '' ||
     activeCategory !== 'all' ||
     needsCoverOnly ||
+    progressFilter !== 'all' ||
     selectedTags.length > 0
-  ), [filterStatus, searchTerm, activeCategory, needsCoverOnly, selectedTags]);
+  ), [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags]);
 
   const resetAllFilters = useCallback(() => {
     setFilterStatus('All');
@@ -682,6 +739,7 @@ const MediaTracker = () => {
     setTypedSearchTerm('');
     setActiveCategory('all');
     setNeedsCoverOnly(false);
+    setProgressFilter('all');
     setSelectedTags([]);
   }, []);
 
@@ -692,9 +750,10 @@ const MediaTracker = () => {
     if (searchTerm.trim() !== '') n += 1;
     if (activeCategory !== 'all') n += 1;
     if (needsCoverOnly) n += 1;
+    if (progressFilter !== 'all') n += 1;
     n += selectedTags.length;
     return n;
-  }, [filterStatus, searchTerm, activeCategory, needsCoverOnly, selectedTags]);
+  }, [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags]);
 
   const selectedItems = useMemo(() => {
     if (selectedIds.size === 0) return [];
@@ -1225,8 +1284,44 @@ const MediaTracker = () => {
         current_chapter: item.current_chapter?.toString() || "",
       });
     }
+    // Opening the item counts as "seeing" any new-season alert — clear the flag.
+    if (item.has_new_content) {
+      acknowledgeNewContent(item.id);
+      queryClient.setQueryData<{ pages: Array<{ items: MediaItem[]; count: number; page: number }> }>(
+        ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
+        (old) => old ? {
+          ...old,
+          pages: old.pages.map((pg) => ({
+            ...pg,
+            items: pg.items.map((i) => i.id === item.id ? { ...i, has_new_content: false } : i),
+          })),
+        } : old
+      );
+    }
     setDetailsOpen(true);
-  }, []);
+  }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder]);
+
+  // Remove a wrong cover → falls back to the letter-gradient placeholder.
+  const handleRemoveCover = useCallback(async (item: MediaItem) => {
+    const ok = await removeCoverImage(item.id);
+    if (!ok) {
+      toast({ title: 'Could not remove cover', variant: 'destructive' });
+      return;
+    }
+    setImageUrls((prev) => new Map([...prev, [item.id, null]]));
+    setImageApiSources((prev) => { const n = new Map(prev); n.delete(item.id); return n; });
+    queryClient.setQueryData<{ pages: Array<{ items: MediaItem[]; count: number; page: number }> }>(
+      ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
+      (old) => old ? {
+        ...old,
+        pages: old.pages.map((pg) => ({
+          ...pg,
+          items: pg.items.map((i) => i.id === item.id ? { ...i, cover_image: undefined } : i),
+        })),
+      } : old
+    );
+    toast({ title: 'Cover removed', description: 'Showing a clean placeholder instead.' });
+  }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder, toast]);
 
   // Open the details sheet in create mode (no editingItem) so the full Add form is reachable.
   const openCreate = useCallback(() => {
@@ -1400,60 +1495,181 @@ const MediaTracker = () => {
               </SheetHeader>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {detailsMode === 'view' && editingItem && (
-                  <div className="grid grid-cols-[120px_1fr] gap-4 items-start">
-                    <div className="relative aspect-[2/3] rounded-md overflow-hidden bg-muted">
-                      <img
-                        src={imageUrls.get(editingItem.id) || PLACEHOLDER_IMAGE}
-                        alt={editingItem.title}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="text-sm text-muted-foreground">Status</div>
-                        <div className="text-sm font-medium">{editingItem.status}</div>
-                        <div className="text-sm text-muted-foreground">Rating</div>
-                        <div className="text-sm font-medium">{editingItem.rating ? `${editingItem.rating}/10` : '-'}</div>
-                        <div className="text-sm text-muted-foreground">Progress</div>
-                        <div className="text-sm font-medium">
-                          {editingItem.current_episode
-                            ? `S${editingItem.current_season || 1} E${editingItem.current_episode}`
-                            : editingItem.current_chapter
-                            ? `Ch. ${editingItem.current_chapter}`
-                            : '-'}
+                {detailsMode === 'view' && editingItem && (() => {
+                  const meta = metadataMap.get(editingItem.id) ?? null;
+                  const prog = computeProgress(editingItem, meta);
+                  const airing = meta?.status ? AIRING_LABEL[meta.status] : null;
+                  const seasons = meta?.seasons ?? null;
+                  const coverUrl = imageUrls.get(editingItem.id);
+                  const bannerUrl = meta?.banner_image || coverUrl;
+                  const myProgress = editingItem.current_episode
+                    ? `S${editingItem.current_season || 1} · E${editingItem.current_episode}`
+                    : editingItem.current_chapter
+                    ? `Ch. ${editingItem.current_chapter}`
+                    : '—';
+                  return (
+                    <div className="space-y-5">
+                      {/* Cinematic banner */}
+                      {bannerUrl && (
+                        <div className="relative -mx-6 -mt-6 h-40 overflow-hidden">
+                          <img src={bannerUrl} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
+                          {editingItem.has_new_content && (
+                            <div className="absolute right-3 top-3 flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground shadow-lg">
+                              <Sparkles className="h-3.5 w-3.5" /> New content
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-[120px_1fr] gap-4 items-start">
+                        <div className="relative aspect-[2/3] rounded-md overflow-hidden bg-muted shadow-lg">
+                          <img
+                            src={coverUrl || PLACEHOLDER_IMAGE}
+                            alt={editingItem.title}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="space-y-3">
+                          {(airing || (meta?.rating ?? 0) > 0) && (
+                            <div className="flex flex-wrap items-center gap-2">
+                              {airing && (
+                                <Badge className={cn('border-0', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>
+                              )}
+                              {meta?.rating ? (
+                                <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                                  <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                                  {meta.rating.toFixed(1)}
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-y-1.5 text-sm">
+                            <div className="text-muted-foreground">Status</div>
+                            <div className="font-medium">{editingItem.status}</div>
+                            <div className="text-muted-foreground">My rating</div>
+                            <div className="font-medium">{editingItem.rating ? `${editingItem.rating}/10` : '—'}</div>
+                            <div className="text-muted-foreground">My progress</div>
+                            <div className="font-medium">{myProgress}</div>
+                            {meta?.total_seasons ? (
+                              <>
+                                <div className="text-muted-foreground">Total seasons</div>
+                                <div className="font-medium">{meta.total_seasons}</div>
+                              </>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={async () => {
+                                const src = imageApiSources.get(editingItem.id);
+                                const res = await refreshCoverImage(editingItem.title, editingItem.type, src, editingItem.id);
+                                if (res) {
+                                  setImageUrls(prev => new Map([...prev, [editingItem.id, res.coverImage]]));
+                                  setImageApiSources(prev => new Map([...prev, [editingItem.id, res.apiSource]]));
+                                  toast({ title: 'Cover updated', description: `Source: ${res.apiSource}` });
+                                } else {
+                                  toast({ title: 'No cover found', description: 'Tried all sources', variant: 'destructive' });
+                                }
+                              }}
+                            >
+                              <RefreshCw className="h-4 w-4 mr-2" /> Refresh cover
+                            </Button>
+                            {coverUrl && (
+                              <Button size="sm" variant="outline" onClick={() => handleRemoveCover(editingItem)}>
+                                <ImageOff className="h-4 w-4 mr-2" /> Remove cover
+                              </Button>
+                            )}
+                          </div>
+                          {editingItemTags.length > 0 && (
+                            <div className="pt-1 flex flex-wrap gap-1.5">
+                              {editingItemTags.map((tag) => (
+                                <TagBadge key={tag.id} tag={tag} size="sm" />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="pt-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={async () => {
-                            const src = imageApiSources.get(editingItem.id);
-                            const res = await refreshCoverImage(editingItem.title, editingItem.type, src, editingItem.id);
-                            if (res) {
-                              setImageUrls(prev => new Map([...prev, [editingItem.id, res.coverImage]]));
-                              setImageApiSources(prev => new Map([...prev, [editingItem.id, res.apiSource]]));
-                              toast({ title: 'Cover updated', description: `Source: ${res.apiSource}` });
-                            } else {
-                              toast({ title: 'No cover found', description: 'Tried all sources', variant: 'destructive' });
-                            }
-                          }}
-                        >
-                          Refresh cover
-                        </Button>
-                      </div>
-                      {editingItemTags.length > 0 && (
-                        <div className="pt-2 flex flex-wrap gap-1.5">
-                          {editingItemTags.map((tag) => (
-                            <TagBadge key={tag.id} tag={tag} size="sm" />
+
+                      {/* Overall progress vs. real total */}
+                      {prog.total > 0 && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium">{prog.kind === 'chapter' ? 'Reading progress' : 'Watch progress'}</span>
+                            <span className="tabular-nums text-muted-foreground">{prog.watched} / {prog.total} ({prog.pct}%)</span>
+                          </div>
+                          <Progress value={prog.pct} />
+                          {prog.behind && (
+                            <p className="text-xs text-muted-foreground">
+                              {prog.total - prog.watched} {prog.kind === 'chapter' ? 'chapters' : 'episodes'} left
+                              {editingItem.has_new_content ? ' · new content available!' : ''}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Synopsis */}
+                      {meta?.description && (
+                        <div className="space-y-1.5">
+                          <h4 className="text-sm font-semibold">Synopsis</h4>
+                          <p className="text-sm leading-relaxed text-muted-foreground">{meta.description}</p>
+                        </div>
+                      )}
+
+                      {/* Genres */}
+                      {meta?.genres && meta.genres.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {meta.genres.map((g) => (
+                            <span key={g} className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">{g}</span>
                           ))}
                         </div>
                       )}
+
+                      {/* Season-by-season breakdown with your position highlighted */}
+                      {seasons && seasons.length > 0 && (
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-semibold">Seasons & episodes</h4>
+                          <div className="space-y-2">
+                            {seasons.map((s) => {
+                              const curSeason = editingItem.current_season || 1;
+                              const isCurrent = curSeason === s.season_number;
+                              const epWatched = isCurrent
+                                ? Math.min(editingItem.current_episode || 0, s.episode_count)
+                                : curSeason > s.season_number
+                                ? s.episode_count
+                                : 0;
+                              const spct = s.episode_count ? Math.round((epWatched / s.episode_count) * 100) : 0;
+                              return (
+                                <div
+                                  key={s.season_number}
+                                  className={cn(
+                                    'rounded-lg border p-3',
+                                    isCurrent ? 'border-primary/60 bg-primary/5' : 'border-border'
+                                  )}
+                                >
+                                  <div className="flex items-center justify-between text-sm">
+                                    <span className="font-medium">
+                                      {s.name}
+                                      {isCurrent && <span className="ml-2 text-xs font-normal text-primary">● You're here</span>}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground tabular-nums">
+                                      {epWatched}/{s.episode_count} eps{s.air_date ? ` · ${s.air_date.slice(0, 4)}` : ''}
+                                    </span>
+                                  </div>
+                                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                                    <div className="h-full rounded-full bg-primary/70" style={{ width: `${spct}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {detailsMode === 'edit' && (
                   <form id="media-details-form" onSubmit={handleSubmit} className="space-y-4">
@@ -1692,6 +1908,9 @@ const MediaTracker = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setRefreshLibraryOpen(true)}>
+                      <RefreshCw className="h-4 w-4 mr-2" /> Refresh Library…
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
                       Import JSON
                     </DropdownMenuItem>
@@ -1880,6 +2099,28 @@ const MediaTracker = () => {
             </DialogContent>
           </Dialog>
 
+          {/* Refresh Library sweep (covers / seasons / descriptions / ratings / status) */}
+          <RefreshLibraryDialog
+            open={refreshLibraryOpen}
+            onOpenChange={setRefreshLibraryOpen}
+            items={finalItems.map((i) => ({
+              id: i.id,
+              title: i.title,
+              type: i.type,
+              cover_image: i.cover_image ?? imageUrls.get(i.id) ?? null,
+              current_season: i.current_season,
+              current_episode: i.current_episode,
+              current_chapter: i.current_chapter,
+              last_known_total_episodes: i.last_known_total_episodes,
+              last_known_total_seasons: i.last_known_total_seasons,
+            }))}
+            scopeLabel={hasActiveFilters ? `${finalItems.length} filtered item${finalItems.length === 1 ? '' : 's'}` : `all ${finalItems.length} item${finalItems.length === 1 ? '' : 's'}`}
+            onComplete={() => {
+              refetch();
+              reloadMetadata();
+            }}
+          />
+
           {/* Filters sheet (mobile + desktop) */}
           <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
             <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
@@ -1914,7 +2155,9 @@ const MediaTracker = () => {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="title">Title</SelectItem>
-                        <SelectItem value="rating">Rating</SelectItem>
+                        <SelectItem value="rating">My rating</SelectItem>
+                        <SelectItem value="ext_rating">Community rating</SelectItem>
+                        <SelectItem value="pct_complete">% complete</SelectItem>
                         <SelectItem value="updated_at">Recently updated</SelectItem>
                         <SelectItem value="created_at">Date added</SelectItem>
                       </SelectContent>
@@ -1929,6 +2172,22 @@ const MediaTracker = () => {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <Label>Show</Label>
+                  <Select value={progressFilter} onValueChange={(v) => setProgressFilter(v as typeof progressFilter)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Everything</SelectItem>
+                      <SelectItem value="behind">Behind (more to watch/read)</SelectItem>
+                      <SelectItem value="new">New seasons / episodes</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <Separator />
@@ -2235,12 +2494,15 @@ const MediaTracker = () => {
                               isLoading={loading && !imageUrls.has(item.id)}
                               isUpdating={updatingIds.has(item.id)}
                               showStatus={false}
+                              metadata={metadataMap.get(item.id) ?? null}
+                              hasNewContent={!!item.has_new_content}
                               selected={selectedIds.has(item.id)}
                               onToggleSelected={(id) => toggleSelected(id)}
                               onEdit={() => openDetails(item, 'edit')}
                               onOpen={() => openDetails(item, 'view')}
                               onProgressChange={(field, amount) => handleQuickUpdate(item, field, amount)}
                               onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
+                              onRemoveCover={() => handleRemoveCover(item)}
                               onVisibleChange={scheduleImageLoad}
                               onImageUpdate={(newImageUrl, newApiSource) => {
                                 setImageUrls(prev => new Map([...prev, [item.id, newImageUrl]]));

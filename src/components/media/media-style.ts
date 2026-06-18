@@ -16,6 +16,22 @@ export const TYPE_BADGE_SOFT: Record<string, string> = {
 export const typeBadgeSoft = (type: string) =>
   TYPE_BADGE_SOFT[type] || 'bg-muted text-muted-foreground ring-1 ring-inset ring-border';
 
+// Airing/publication status (from external metadata: ongoing/completed/upcoming/hiatus).
+// Soft tinted pills so they read as info, not alarms.
+export const AIRING_STYLE: Record<string, string> = {
+  ongoing: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 ring-1 ring-inset ring-emerald-500/30',
+  completed: 'bg-slate-500/15 text-slate-600 dark:text-slate-300 ring-1 ring-inset ring-slate-500/30',
+  upcoming: 'bg-amber-500/15 text-amber-600 dark:text-amber-300 ring-1 ring-inset ring-amber-500/30',
+  hiatus: 'bg-rose-500/15 text-rose-600 dark:text-rose-300 ring-1 ring-inset ring-rose-500/30',
+};
+
+export const AIRING_LABEL: Record<string, string> = {
+  ongoing: 'Ongoing',
+  completed: 'Completed',
+  upcoming: 'Upcoming',
+  hiatus: 'On Hiatus',
+};
+
 // Status dot colors (kept consistent across card + chips).
 export const STATUS_DOT: Record<string, string> = {
   Watching: 'bg-green-500',
