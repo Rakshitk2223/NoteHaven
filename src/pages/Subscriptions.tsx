@@ -93,6 +93,19 @@ const Subscriptions = () => {
     }
   };
 
+  // Null-safe: subscriptions without a renewal date (or with a malformed one)
+  // must not throw during render. Returns null when no valid date is present.
+  // Declared before the memos below that use it (const isn't hoisted → TDZ).
+  const getDaysUntilRenewal = (date: string | null | undefined): number | null => {
+    if (!date) return null;
+    const renewal = parseYMD(date);
+    if (isNaN(renewal.getTime())) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffTime = renewal.getTime() - today.getTime();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
   const summary = useMemo(() => {
     return calculateSubscriptionSummary(subscriptions);
   }, [subscriptions]);
@@ -204,18 +217,6 @@ const Subscriptions = () => {
       status: 'active',
       notes: ''
     });
-  };
-
-  // Null-safe: subscriptions without a renewal date (or with a malformed one)
-  // must not throw during render. Returns null when no valid date is present.
-  const getDaysUntilRenewal = (date: string | null | undefined): number | null => {
-    if (!date) return null;
-    const renewal = parseYMD(date);
-    if (isNaN(renewal.getTime())) return null;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const diffTime = renewal.getTime() - today.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
   return (
