@@ -14,7 +14,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "backfill:covers": "tsx scripts/backfill-cover-images.ts"
+    "backfill:covers": "tsx scripts/backfill-cover-images.ts",
+    "backfill:metadata": "tsx scripts/backfill-media-metadata.ts"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",

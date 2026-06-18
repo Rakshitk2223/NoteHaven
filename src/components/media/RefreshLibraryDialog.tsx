@@ -104,19 +104,22 @@ export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, sc
   const run = async () => {
     if (!anyChecked) return;
     setRunning(true);
-    setProgress({ done: 0, total: count, updated: 0, newContent: 0 });
+    const zero = { done: 0, total: count, updated: 0, failed: 0, skipped: 0, newContent: 0, failedTitles: [] as string[] };
+    setProgress(zero);
     try {
       const items = await fetchItems();
       if (items.length === 0) {
         toast({ title: 'Nothing to refresh', description: 'No items in scope.' });
+        setProgress(null);
         return;
       }
-      setProgress({ done: 0, total: items.length, updated: 0, newContent: 0 });
+      setProgress({ ...zero, total: items.length });
       const result = await refreshLibrary(opts, items, (p) => setProgress({ ...p }));
       toast({
         title: 'Library refreshed',
-        description: `${result.updated} item${result.updated === 1 ? '' : 's'} updated` +
-          (result.newContent > 0 ? ` · ${result.newContent} with new seasons 🎉` : ''),
+        description: `${result.updated} updated` +
+          (result.failed > 0 ? ` · ${result.failed} no match` : '') +
+          (result.newContent > 0 ? ` · ${result.newContent} new seasons 🎉` : ''),
       });
       onComplete();
     } catch (error) {
@@ -170,8 +173,21 @@ export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, sc
             <Progress value={pct} />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>{running ? 'Refreshing…' : 'Done'} {progress.done} / {progress.total}</span>
-              <span>{progress.updated} updated{progress.newContent > 0 ? ` · ${progress.newContent} new` : ''}</span>
+              <span className="flex items-center gap-2">
+                <span className="text-emerald-600 dark:text-emerald-400">{progress.updated} updated</span>
+                {progress.failed > 0 && <span className="text-rose-600 dark:text-rose-400">{progress.failed} no match</span>}
+                {progress.skipped > 0 && <span>{progress.skipped} skipped</span>}
+                {progress.newContent > 0 && <span className="text-primary">{progress.newContent} new</span>}
+              </span>
             </div>
+            {!running && progress.failed > 0 && progress.failedTitles.length > 0 && (
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer hover:text-foreground">
+                  {progress.failed} couldn't be matched{progress.failedTitles.length < progress.failed ? ' (showing first 25)' : ''}
+                </summary>
+                <p className="mt-1 max-h-24 overflow-y-auto leading-relaxed">{progress.failedTitles.join(', ')}</p>
+              </details>
+            )}
           </div>
         )}
 

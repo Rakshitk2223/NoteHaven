@@ -118,10 +118,15 @@ export const CustomGroupBuilder = ({
     setSelectedTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]));
   };
 
+  // Show the count on every pill (not just the active one) so library sizes are
+  // discoverable at a glance; tint differs for active vs inactive.
   const renderCount = (key: string, active: boolean) =>
-    active && itemCounts[key] > 0 ? (
+    itemCounts[key] > 0 ? (
       <span
-        className="text-xs px-2 py-0.5 rounded-full bg-primary-foreground/20"
+        className={cn(
+          'text-xs px-2 py-0.5 rounded-full',
+          active ? 'bg-primary-foreground/20' : 'bg-muted text-muted-foreground'
+        )}
         title={COUNT_TOOLTIP}
       >
         {itemCounts[key]}

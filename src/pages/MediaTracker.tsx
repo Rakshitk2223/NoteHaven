@@ -888,6 +888,30 @@ const MediaTracker = () => {
     return { all, inProgress, planned, completed };
   }, [groupCountsData, activeCategory, customGroups]);
 
+  // Scope (count + label) for the Refresh Library sweep, matching getSweepItems'
+  // DB filtering. Tag filters can't be counted server-side here, so fall back to
+  // the loaded count for those.
+  const sweepScope = useMemo(() => {
+    if (selectedTags.length > 0) {
+      const n = finalItems.length;
+      return { count: n, label: `${n} filtered item${n === 1 ? '' : 's'}` };
+    }
+    const count =
+      filterStatus === 'Active' ? currentStats.inProgress :
+      filterStatus === 'Planned' ? currentStats.planned :
+      filterStatus === 'Completed' ? currentStats.completed :
+      currentStats.all;
+    const catLabel = activeCategory === 'all'
+      ? 'all'
+      : isTypeCategory(activeCategory)
+      ? typeOf(activeCategory)
+      : (customGroups.find((g) => g.id === activeCategory)?.name ?? 'all');
+    const scope = activeCategory === 'all' && filterStatus === 'All'
+      ? `all ${count}`
+      : `${count} ${catLabel}`;
+    return { count, label: `${scope} item${count === 1 ? '' : 's'}` };
+  }, [selectedTags, finalItems, filterStatus, currentStats, activeCategory, customGroups]);
+
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
     finalItems.forEach(item => {
@@ -936,48 +960,6 @@ const MediaTracker = () => {
       const { error } = await supabase.from('media_tracker').update({ [field]: newValue }).eq('id', item.id);
       if (error) throw error;
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
-    } catch (e: unknown) {
-      // Revert optimistic update on error
-      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
-      const message = e instanceof Error ? e.message : 'Error';
-      toast({ title: 'Update failed', description: message, variant: 'destructive' });
-    } finally {
-      setUpdatingIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
-    }
-  };
-
-  const handleQuickStatusChange = async (item: MediaItem, newStatus: string) => {
-    setUpdatingIds(prev => new Set(prev).add(item.id));
-
-    // Optimistic update - update cache immediately
-    interface QueryPage {
-      items: MediaItem[];
-      count: number;
-      page: number;
-    }
-    interface QueryData {
-      pages: QueryPage[];
-    }
-    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortBy, sortOrder], (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          items: page.items.map((i) =>
-            i.id === item.id ? { ...i, status: newStatus } : i
-          )
-        }))
-      };
-    });
-
-    try {
-      const { error } = await supabase.from('media_tracker').update({ status: newStatus }).eq('id', item.id);
-      if (error) throw error;
-      // Status moves an item between In progress / Planned / Completed without
-      // changing the total, so refresh the overview counts explicitly.
-      queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
-      toast({ title: 'Status updated', description: `Changed to ${newStatus}` });
     } catch (e: unknown) {
       // Revert optimistic update on error
       queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
@@ -1296,21 +1278,6 @@ const MediaTracker = () => {
     }
   };
 
-  const handleEditMedia = (item: MediaItem) => {
-    setEditingItem(item);
-    setFormData({
-      title: item.title,
-      type: item.type,
-      status: item.status,
-      rating: item.rating?.toString() || "",
-      current_season: item.current_season?.toString() || "",
-      current_episode: item.current_episode?.toString() || "",
-      current_chapter: item.current_chapter?.toString() || ""
-    });
-    setDetailsMode('edit');
-    setDetailsOpen(true);
-  };
-
   const resetForm = () => {
     setFormData({
       title: "",
@@ -1355,9 +1322,10 @@ const MediaTracker = () => {
     setDetailsOpen(true);
   }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder]);
 
-  // Resolve the items for a Refresh Library sweep. With no filters this pages
-  // through the WHOLE library (not just the items loaded into the grid); with
-  // filters active it uses the currently-visible filtered set.
+  // Resolve the FULL set of items for a Refresh Library sweep by querying the DB
+  // with the active type/status/search filters (paginated past the 1000-row cap)
+  // — so "refresh all Anime" sweeps every Anime, not just the loaded page. Tag
+  // filters aren't DB-queryable here, so those fall back to the loaded set.
   const getSweepItems = useCallback(async () => {
     const toSweep = (rows: Array<Pick<MediaItem, 'id' | 'title' | 'type' | 'cover_image' | 'current_season' | 'current_episode' | 'current_chapter' | 'last_known_total_episodes' | 'last_known_total_seasons'>>) =>
       rows.map((i) => ({
@@ -1372,27 +1340,45 @@ const MediaTracker = () => {
         last_known_total_seasons: i.last_known_total_seasons,
       }));
 
-    if (hasActiveFilters) return toSweep(finalItems);
+    // Tag filtering happens client-side on loaded items — can't express in the DB
+    // query, so honour it by sweeping just what's visible.
+    if (selectedTags.length > 0) return toSweep(finalItems);
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return toSweep(finalItems);
+
+    // Types implied by the selected category.
+    const types: string[] | null = activeCategory === 'all'
+      ? null
+      : isTypeCategory(activeCategory)
+      ? [typeOf(activeCategory)]
+      : (customGroups.find((g) => g.id === activeCategory)?.types ?? null);
+
+    const escaped = searchTerm.trim().replace(/[\\%_]/g, (m) => `\\${m}`);
 
     const all: MediaItem[] = [];
     const chunk = 1000;
     let from = 0;
     for (;;) {
-      const { data, error } = await supabase
+      let q = supabase
         .from('media_tracker')
         .select('id, title, type, cover_image, current_season, current_episode, current_chapter, last_known_total_episodes, last_known_total_seasons')
-        .eq('user_id', user.id)
-        .range(from, from + chunk - 1);
+        .eq('user_id', user.id);
+      if (types && types.length) q = q.in('type', types);
+      if (filterStatus === 'Active') q = q.in('status', ['Watching', 'Reading']);
+      else if (filterStatus === 'Planned') q = q.in('status', ['Plan to Watch', 'Plan to Read']);
+      else if (filterStatus !== 'All') q = q.eq('status', filterStatus);
+      if (escaped) q = q.ilike('title', `%${escaped}%`);
+      q = q.range(from, from + chunk - 1);
+
+      const { data, error } = await q;
       if (error || !data || data.length === 0) break;
       all.push(...(data as unknown as MediaItem[]));
       if (data.length < chunk) break;
       from += chunk;
     }
     return toSweep(all);
-  }, [hasActiveFilters, finalItems, imageUrls]);
+  }, [selectedTags, finalItems, imageUrls, activeCategory, customGroups, filterStatus, searchTerm]);
 
   // Remove a wrong cover → falls back to the letter-gradient placeholder.
   const handleRemoveCover = useCallback(async (item: MediaItem) => {
@@ -1415,6 +1401,50 @@ const MediaTracker = () => {
     );
     toast({ title: 'Cover removed', description: 'Showing a clean placeholder instead.' });
   }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder, toast]);
+
+  // ── Stable, identity-frozen callbacks for memoized MediaCards ──────────────
+  // Cards are React.memo'd. To keep them from re-rendering when unrelated state
+  // (the image / metadata maps) updates during lazy loading, every card callback
+  // must keep a stable identity. We read the latest item lookup + handlers from
+  // refs so these useCallbacks can have empty deps and never change.
+  const itemsById = useMemo(() => {
+    const m = new Map<number, MediaItem>();
+    mediaItems.forEach((i) => m.set(i.id, i));
+    return m;
+  }, [mediaItems]);
+  const itemsByIdRef = useRef(itemsById);
+  itemsByIdRef.current = itemsById;
+
+  const cardFnRef = useRef<{
+    open: (i: MediaItem) => void;
+    edit: (i: MediaItem) => void;
+    removeCover: (i: MediaItem) => void;
+    quick: (i: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => void;
+    schedule: (id: number, visible: boolean) => void;
+    toggle: (id: number) => void;
+  }>(null!);
+  cardFnRef.current = {
+    open: (i) => openDetails(i, 'view'),
+    edit: (i) => openDetails(i, 'edit'),
+    removeCover: handleRemoveCover,
+    quick: handleQuickUpdate,
+    schedule: scheduleImageLoad,
+    toggle: toggleSelected,
+  };
+
+  const cardOnOpen = useCallback((id: number) => { const it = itemsByIdRef.current.get(id); if (it) cardFnRef.current.open(it); }, []);
+  const cardOnEdit = useCallback((id: number) => { const it = itemsByIdRef.current.get(id); if (it) cardFnRef.current.edit(it); }, []);
+  const cardOnDelete = useCallback((id: number) => setDeleteConfirm({ open: true, id }), []);
+  const cardOnRemoveCover = useCallback((id: number) => { const it = itemsByIdRef.current.get(id); if (it) cardFnRef.current.removeCover(it); }, []);
+  const cardOnProgress = useCallback((id: number, field: 'current_episode' | 'current_chapter', amount: number) => {
+    const it = itemsByIdRef.current.get(id); if (it) cardFnRef.current.quick(it, field, amount);
+  }, []);
+  const cardOnVisible = useCallback((id: number, visible: boolean) => cardFnRef.current.schedule(id, visible), []);
+  const cardOnToggle = useCallback((id: number) => cardFnRef.current.toggle(id), []);
+  const cardOnImageUpdate = useCallback((id: number, url: string, src: string) => {
+    setImageUrls((prev) => new Map([...prev, [id, url]]));
+    setImageApiSources((prev) => new Map([...prev, [id, src]]));
+  }, []);
 
   // Open the details sheet in create mode (no editingItem) so the full Add form is reachable.
   const openCreate = useCallback(() => {
@@ -1595,10 +1625,21 @@ const MediaTracker = () => {
                   const seasons = meta?.seasons ?? null;
                   const coverUrl = imageUrls.get(editingItem.id);
                   const bannerUrl = meta?.banner_image || coverUrl;
-                  const myProgress = editingItem.current_episode
-                    ? `S${editingItem.current_season || 1} · E${editingItem.current_episode}`
+                  const isWatchableItem = WATCHABLE_TYPES.includes(editingItem.type);
+                  const isReadableItem = READABLE_TYPES.includes(editingItem.type);
+                  // "2 seasons · 24 episodes" / "412 chapters" — the media's real size.
+                  const totalsLine = isReadableItem
+                    ? (meta?.chapters ? `${meta.chapters} chapters` : null)
+                    : isWatchableItem
+                    ? ([
+                        meta?.total_seasons ? `${meta.total_seasons} season${meta.total_seasons === 1 ? '' : 's'}` : null,
+                        meta?.episodes ? `${meta.episodes} episodes` : null,
+                      ].filter(Boolean).join(' · ') || null)
+                    : null;
+                  const myProgress = editingItem.current_episode || editingItem.current_season
+                    ? `S${editingItem.current_season || 1} · E${editingItem.current_episode ?? 0}${meta?.episodes ? ` of ${meta.episodes}` : ''}`
                     : editingItem.current_chapter
-                    ? `Ch. ${editingItem.current_chapter}`
+                    ? `Ch. ${editingItem.current_chapter}${meta?.chapters ? ` of ${meta.chapters}` : ''}`
                     : '—';
                   return (
                     <div className="space-y-5">
@@ -1645,10 +1686,10 @@ const MediaTracker = () => {
                             <div className="font-medium">{editingItem.rating ? `${editingItem.rating}/10` : '—'}</div>
                             <div className="text-muted-foreground">My progress</div>
                             <div className="font-medium">{myProgress}</div>
-                            {meta?.total_seasons ? (
+                            {totalsLine ? (
                               <>
-                                <div className="text-muted-foreground">Total seasons</div>
-                                <div className="font-medium">{meta.total_seasons}</div>
+                                <div className="text-muted-foreground">Total</div>
+                                <div className="font-medium">{totalsLine}</div>
                               </>
                             ) : null}
                           </div>
@@ -1759,6 +1800,13 @@ const MediaTracker = () => {
                             })}
                           </div>
                         </div>
+                      )}
+
+                      {/* Hint when a watchable item has no cached season structure yet */}
+                      {isWatchableItem && (!seasons || seasons.length === 0) && (
+                        <p className="text-xs text-muted-foreground">
+                          Season &amp; episode data not loaded yet — run <span className="font-medium text-foreground">Refresh Library</span> (or the backfill script) to fetch it.
+                        </p>
                       )}
                     </div>
                   );
@@ -2197,12 +2245,8 @@ const MediaTracker = () => {
             open={refreshLibraryOpen}
             onOpenChange={setRefreshLibraryOpen}
             fetchItems={getSweepItems}
-            count={hasActiveFilters ? finalItems.length : totalCount}
-            scopeLabel={
-              hasActiveFilters
-                ? `${finalItems.length} filtered item${finalItems.length === 1 ? '' : 's'}`
-                : `all ${totalCount} item${totalCount === 1 ? '' : 's'}`
-            }
+            count={sweepScope.count}
+            scopeLabel={sweepScope.label}
             onComplete={() => {
               refetch();
               reloadMetadata();
@@ -2570,14 +2614,7 @@ const MediaTracker = () => {
                           {groupedByStatus.groups[statusKey].map((item) => (
                             <MediaCard
                               key={item.id}
-                              id={item.id}
-                              title={item.title}
-                              type={item.type}
-                              status={item.status}
-                              rating={item.rating}
-                              current_season={item.current_season}
-                              current_episode={item.current_episode}
-                              current_chapter={item.current_chapter}
+                              item={item}
                               imageUrl={imageUrls.get(item.id)}
                               apiSource={imageApiSources.get(item.id)}
                               isLoading={loading && !imageUrls.has(item.id)}
@@ -2586,17 +2623,14 @@ const MediaTracker = () => {
                               metadata={metadataMap.get(item.id) ?? null}
                               hasNewContent={!!item.has_new_content}
                               selected={selectedIds.has(item.id)}
-                              onToggleSelected={(id) => toggleSelected(id)}
-                              onEdit={() => openDetails(item, 'edit')}
-                              onOpen={() => openDetails(item, 'view')}
-                              onProgressChange={(field, amount) => handleQuickUpdate(item, field, amount)}
-                              onDelete={() => setDeleteConfirm({ open: true, id: item.id })}
-                              onRemoveCover={() => handleRemoveCover(item)}
-                              onVisibleChange={scheduleImageLoad}
-                              onImageUpdate={(newImageUrl, newApiSource) => {
-                                setImageUrls(prev => new Map([...prev, [item.id, newImageUrl]]));
-                                setImageApiSources(prev => new Map([...prev, [item.id, newApiSource]]));
-                              }}
+                              onToggleSelected={cardOnToggle}
+                              onEdit={cardOnEdit}
+                              onOpen={cardOnOpen}
+                              onProgress={cardOnProgress}
+                              onDelete={cardOnDelete}
+                              onRemoveCover={cardOnRemoveCover}
+                              onVisibleChange={cardOnVisible}
+                              onImageUpdate={cardOnImageUpdate}
                             />
                           ))}
                         </div>

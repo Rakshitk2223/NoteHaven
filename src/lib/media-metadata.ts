@@ -227,8 +227,11 @@ export interface RefreshOptions {
 export interface RefreshProgress {
   done: number;
   total: number;
-  updated: number;
-  newContent: number;
+  updated: number;       // items where fresh data was applied
+  failed: number;        // no match found / network or DB error
+  skipped: number;       // nothing to do (e.g. only covers ticked and cover already present)
+  newContent: number;    // items that gained a new season/episodes
+  failedTitles: string[]; // capped sample of titles that failed, for the summary
 }
 
 interface SweepItem {
@@ -256,7 +259,7 @@ export async function refreshLibrary(
   onProgress?: (p: RefreshProgress) => void
 ): Promise<RefreshProgress> {
   const { data: { user } } = await supabase.auth.getUser();
-  const progress: RefreshProgress = { done: 0, total: items.length, updated: 0, newContent: 0 };
+  const progress: RefreshProgress = { done: 0, total: items.length, updated: 0, failed: 0, skipped: 0, newContent: 0, failedTitles: [] };
 
   const CONCURRENCY = 5;
   let cursor = 0;
@@ -264,13 +267,20 @@ export async function refreshLibrary(
   const worker = async () => {
     while (cursor < items.length) {
       const item = items[cursor++];
+      let outcome: ItemOutcome = 'skipped';
       try {
-        await refreshOne(item, opts, user?.id, progress);
+        outcome = await refreshOne(item, opts, user?.id, progress);
       } catch (error) {
         console.error(`refreshLibrary: item ${item.id} failed`, error);
+        outcome = 'failed';
       }
+      if (outcome === 'updated') progress.updated += 1;
+      else if (outcome === 'failed') {
+        progress.failed += 1;
+        if (progress.failedTitles.length < 25) progress.failedTitles.push(item.title);
+      } else progress.skipped += 1;
       progress.done += 1;
-      onProgress?.({ ...progress });
+      onProgress?.({ ...progress, failedTitles: [...progress.failedTitles] });
     }
   };
 
@@ -278,17 +288,22 @@ export async function refreshLibrary(
   return progress;
 }
 
+type ItemOutcome = 'updated' | 'failed' | 'skipped';
+
 async function refreshOne(
   item: SweepItem,
   opts: RefreshOptions,
   userId: string | undefined,
   progress: RefreshProgress
-): Promise<void> {
-  let didUpdate = false;
+): Promise<ItemOutcome> {
+  let applied = false;   // fresh data was written somewhere
+  let attempted = false; // we tried to fetch something
+  let errored = false;   // a fetch/match failed
 
   // 1) Metadata (synopsis / totals / rating / status / seasons) — one fetch
   //    repopulates the cache for all of these at once.
   if (wantsMetadata(opts)) {
+    attempted = true;
     const source = metadataSourceFor(item.type);
     const url = `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(
       item.type.toLowerCase()
@@ -300,7 +315,7 @@ async function refreshOne(
         const data = await res.json();
         const top = data?.results?.[0];
         if (top) {
-          didUpdate = true;
+          applied = true;
 
           // New-content detection (only when seasons refresh was requested).
           if (opts.seasons && userId) {
@@ -324,15 +339,21 @@ async function refreshOne(
               await supabase.from('media_tracker').update(patch).eq('id', item.id).eq('user_id', userId);
             }
           }
+        } else {
+          errored = true; // no match for this title from the chosen source
         }
+      } else {
+        errored = true;
       }
     } catch (error) {
+      errored = true;
       devLog(`metadata refresh failed for "${item.title}": ${String(error)}`);
     }
   }
 
   // 2) Fill MISSING covers only — never overwrite an existing/intentionally-removed cover.
   if (opts.covers && !item.cover_image && userId) {
+    attempted = true;
     try {
       const res = await fetch(
         `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(
@@ -345,7 +366,7 @@ async function refreshOne(
         const cover = data?.results?.[0]?.cover_image;
         if (cover) {
           await supabase.from('media_tracker').update({ cover_image: cover }).eq('id', item.id).eq('user_id', userId);
-          didUpdate = true;
+          applied = true;
         }
       }
     } catch (error) {
@@ -353,7 +374,9 @@ async function refreshOne(
     }
   }
 
-  if (didUpdate) progress.updated += 1;
+  if (applied) return 'updated';
+  if (attempted && errored) return 'failed';
+  return 'skipped';
 }
 
 /** Clear the "new content" flag once the user has seen the item. */
