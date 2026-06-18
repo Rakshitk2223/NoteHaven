@@ -31,8 +31,9 @@ const AppInner = () => {
   useEffect(() => {
     const savedMode = localStorage.getItem('theme');
     const savedColorTheme = getCurrentTheme();
-    const mode: 'light' | 'dark' = savedMode === 'dark' ? 'dark' : 'light';
-    
+    // Default to dark for new users (Netflix is dark-first); honour saved choice.
+    const mode: 'light' | 'dark' = savedMode === 'light' ? 'light' : 'dark';
+
     if (mode === 'dark') {
       document.documentElement.classList.add('dark');
     }

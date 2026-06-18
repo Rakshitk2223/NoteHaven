@@ -34,6 +34,59 @@ export interface ThemeColors {
 }
 
 export const themes: Record<string, Theme> = {
+  'netflix': {
+    name: 'netflix',
+    label: 'Netflix',
+    description: 'Cinematic near-black with signature red — streaming-grade',
+    colors: {
+      // "Cinema light" — clean white surfaces with the Netflix red accent so the
+      // light/dark toggle still does something meaningful.
+      light: {
+        background: '0 0% 100%',
+        foreground: '0 0% 9%',
+        card: '0 0% 100%',
+        cardForeground: '0 0% 9%',
+        popover: '0 0% 100%',
+        popoverForeground: '0 0% 9%',
+        primary: '357 85% 45%',
+        primaryForeground: '0 0% 100%',
+        secondary: '0 0% 95%',
+        secondaryForeground: '0 0% 9%',
+        muted: '0 0% 95%',
+        mutedForeground: '0 0% 40%',
+        accent: '357 85% 45%',
+        accentForeground: '0 0% 100%',
+        destructive: '0 84.2% 60.2%',
+        destructiveForeground: '0 0% 100%',
+        border: '0 0% 89%',
+        input: '0 0% 89%',
+        ring: '357 85% 45%',
+      },
+      // Authentic Netflix — #141414 base, #E50914 red.
+      dark: {
+        background: '0 0% 8%',
+        foreground: '0 0% 98%',
+        card: '0 0% 12%',
+        cardForeground: '0 0% 98%',
+        popover: '0 0% 10%',
+        popoverForeground: '0 0% 98%',
+        primary: '357 92% 47%',
+        primaryForeground: '0 0% 100%',
+        secondary: '0 0% 18%',
+        secondaryForeground: '0 0% 95%',
+        muted: '0 0% 16%',
+        mutedForeground: '0 0% 64%',
+        accent: '357 92% 47%',
+        accentForeground: '0 0% 100%',
+        destructive: '0 84.2% 60.2%',
+        destructiveForeground: '0 0% 100%',
+        border: '0 0% 20%',
+        input: '0 0% 18%',
+        ring: '357 92% 47%',
+      }
+    }
+  },
+
   'zen-garden': {
     name: 'zen-garden',
     label: 'Zen Garden',
@@ -255,6 +308,23 @@ export function applyTheme(themeName: string, mode: 'light' | 'dark') {
     root.style.setProperty(`--${cssVar}`, value);
   });
 
+  // Reskin the sidebar to match the active theme. These vars aren't part of the
+  // ThemeColors record, so derive them from the theme's tokens — this makes the
+  // theme switch truly end-to-end (the sidebar used to stay on the defaults).
+  const sidebar: Record<string, string> = {
+    'sidebar-background': colors.background,
+    'sidebar-foreground': colors.foreground,
+    'sidebar-primary': colors.primary,
+    'sidebar-primary-foreground': colors.primaryForeground,
+    'sidebar-accent': colors.secondary,
+    'sidebar-accent-foreground': colors.foreground,
+    'sidebar-border': colors.border,
+    'sidebar-ring': colors.ring,
+  };
+  Object.entries(sidebar).forEach(([cssVar, value]) => {
+    root.style.setProperty(`--${cssVar}`, value);
+  });
+
   // Re-enable transitions after a small delay
   setTimeout(() => {
     root.style.removeProperty('transition');
@@ -263,7 +333,7 @@ export function applyTheme(themeName: string, mode: 'light' | 'dark') {
 
 // Get current theme from localStorage or default
 export function getCurrentTheme(): string {
-  return localStorage.getItem('app-theme') || 'zen-garden';
+  return localStorage.getItem('app-theme') || 'netflix';
 }
 
 // Save theme to localStorage

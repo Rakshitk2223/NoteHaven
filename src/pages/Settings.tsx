@@ -33,7 +33,7 @@ const STORAGE_KEY = 'sidebar-order';
 
 const Settings = () => {
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'dark' ? 'dark' : 'light'));
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'light' ? 'light' : 'dark'));
   const [colorTheme, setColorTheme] = useState(() => getCurrentTheme());
   const [displayName, setDisplayName] = useState('');
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -284,14 +284,29 @@ const Settings = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {Object.values(themes).map((t) => (
-                      <SelectItem key={t.name} value={t.name}>
-                        <div>
-                          <p className="font-medium">{t.label}</p>
-                          <p className="text-xs text-muted-foreground">{t.description}</p>
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {Object.values(themes).map((t) => {
+                      const swatch = t.colors[theme];
+                      const dots: string[] = [swatch.background, swatch.card, swatch.primary, swatch.accent];
+                      return (
+                        <SelectItem key={t.name} value={t.name}>
+                          <div className="flex items-center gap-3">
+                            <div className="flex -space-x-1">
+                              {dots.map((c, i) => (
+                                <span
+                                  key={i}
+                                  className="h-4 w-4 rounded-full ring-1 ring-border"
+                                  style={{ backgroundColor: `hsl(${c})` }}
+                                />
+                              ))}
+                            </div>
+                            <div>
+                              <p className="font-medium">{t.label}</p>
+                              <p className="text-xs text-muted-foreground">{t.description}</p>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">Choose your preferred color scheme</p>

@@ -72,6 +72,10 @@ export default {
 				md: 'calc(var(--radius) - 2px)',
 				sm: 'calc(var(--radius) - 4px)'
 			},
+			boxShadow: {
+				cinema: 'var(--shadow-cinema)',
+				'cinema-lg': 'var(--shadow-cinema-lg)',
+			},
 			keyframes: {
 				'accordion-down': {
 					from: {

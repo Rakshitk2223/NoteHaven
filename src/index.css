@@ -7,93 +7,94 @@ All colors MUST be HSL.
 */
 
 @layer base {
+  /* First-paint fallback before applyTheme() runs = Netflix (the default theme).
+     Light = "cinema light" (white + red), Dark = authentic Netflix (#141414 + #E50914). */
   :root {
-    /* Zen Garden Color Palette */
-    --background: 40 33% 96%;  /* Antique White #F8F7F4 */
-    --foreground: 0 0% 15%;    /* Darker Charcoal for better visibility */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
 
-    --card: 40 33% 96%;
-    --card-foreground: 0 0% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
 
-    --popover: 40 33% 96%;
-    --popover-foreground: 0 0% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
 
-    --primary: 213 34% 37%;     /* Deep Stone Blue #3D5A80 */
+    --primary: 357 85% 45%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 88%;      /* Light Gray #E0E0E0 */
-    --secondary-foreground: 0 0% 15%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 9%;
 
-    --muted: 0 0% 88%;
-    --muted-foreground: 0 0% 45%; /* Darker muted for better contrast */
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 40%;
 
-    --accent: 213 34% 37%;
+    --accent: 357 85% 45%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 88%;         /* Light Gray #E0E0E0 */
-    --input: 0 0% 88%;
-    --ring: 213 34% 37%;
+    --border: 0 0% 89%;
+    --input: 0 0% 89%;
+    --ring: 357 85% 45%;
 
-    --radius: 0.5rem;
+    --radius: 0.375rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* Cinematic elevation (subtle on light) */
+    --shadow-cinema: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-cinema-lg: 0 12px 32px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.10);
 
-    --sidebar-foreground: 0 0% 15%;
-
-    --sidebar-primary: 213 34% 37%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 0 0% 15%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 9%;
+    --sidebar-primary: 357 85% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 95%;
+    --sidebar-accent-foreground: 0 0% 9%;
+    --sidebar-border: 0 0% 89%;
+    --sidebar-ring: 357 85% 45%;
   }
 
   .dark {
-    /* Dark mode maintains zen aesthetic with deeper tones */
-    --background: 213 20% 15%;
-    --foreground: 40 33% 90%;
+    --background: 0 0% 8%;
+    --foreground: 0 0% 98%;
 
-    --card: 213 20% 18%;
-    --card-foreground: 40 33% 90%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 213 20% 18%;
-    --popover-foreground: 40 33% 90%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 213 50% 65%;
-    --primary-foreground: 213 20% 15%;
+    --primary: 357 92% 47%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 213 15% 25%;
-    --secondary-foreground: 40 33% 90%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 95%;
 
-    --muted: 213 15% 25%;
-    --muted-foreground: 0 0% 60%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 64%;
 
-    --accent: 213 50% 65%;
-    --accent-foreground: 213 20% 15%;
+    --accent: 357 92% 47%;
+    --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 213 15% 25%;
-    --input: 213 15% 25%;
-    --ring: 213 50% 65%;
-    
-    --sidebar-background: 213 20% 15%;
-    --sidebar-foreground: 40 33% 90%;
-    --sidebar-primary: 213 50% 65%;
-    --sidebar-primary-foreground: 213 20% 15%;
-    --sidebar-accent: 213 15% 25%;
-    --sidebar-accent-foreground: 40 33% 90%;
-    --sidebar-border: 213 15% 25%;
-    --sidebar-ring: 213 50% 65%;
+    --border: 0 0% 20%;
+    --input: 0 0% 18%;
+    --ring: 357 92% 47%;
+
+    /* Cinematic elevation (deep on dark, like a poster wall) */
+    --shadow-cinema: 0 2px 10px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-cinema-lg: 0 16px 40px rgba(0, 0, 0, 0.65), 0 6px 16px rgba(0, 0, 0, 0.5);
+
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 357 92% 47%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 18%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 0 0% 20%;
+    --sidebar-ring: 357 92% 47%;
   }
 }
 
@@ -108,15 +109,15 @@ All colors MUST be HSL.
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-heading font-bold;
+    @apply font-heading font-bold tracking-tight;
   }
-  
+
   h1 {
-    @apply text-foreground;
+    @apply text-foreground tracking-[-0.02em];
   }
-  
+
   h2 {
-    @apply text-foreground;
+    @apply text-foreground tracking-tight;
   }
 
   /* Global smooth transitions */
@@ -124,26 +125,46 @@ All colors MUST be HSL.
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  /* Zen Garden specific styles */
+  /* Card surface — subtle border + layered cinematic shadow, lifts on hover. */
   .zen-card {
-    @apply bg-card border border-border/60 rounded-lg shadow-sm;
-    background-color: hsl(var(--card) / 0.85);
+    @apply bg-card border border-border/60 rounded-lg;
+    background-color: hsl(var(--card) / 0.92);
+    box-shadow: var(--shadow-cinema);
     transition: transform 0.2s ease-out, box-shadow 0.3s ease-out, border-color 0.2s ease;
   }
 
   .zen-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08), 0 3px 8px rgba(0, 0, 0, 0.1);
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-cinema-lg);
+    border-color: hsl(var(--primary) / 0.35);
   }
 
   .zen-shadow {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow-cinema);
     transition: box-shadow 0.3s ease;
   }
 
   .zen-shadow-lg {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.08);
+    box-shadow: var(--shadow-cinema-lg);
     transition: box-shadow 0.3s ease;
+  }
+
+  /* iOS "liquid glass" — frosted translucency + specular top highlight.
+     Used by glassy buttons, headers, and floating bars. */
+  .glass {
+    background-color: hsl(var(--card) / 0.55);
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    border: 1px solid hsl(var(--foreground) / 0.10);
+    box-shadow: inset 0 1px 0 0 hsl(0 0% 100% / 0.12), var(--shadow-cinema);
+  }
+
+  .glass-strong {
+    background-color: hsl(var(--card) / 0.72);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid hsl(var(--foreground) / 0.12);
+    box-shadow: inset 0 1px 0 0 hsl(0 0% 100% / 0.14), var(--shadow-cinema-lg);
   }
 
   /* Smooth transitions for zen feel */
@@ -320,6 +341,43 @@ select:focus-visible {
 /* Smooth scroll behavior */
 html {
   scroll-behavior: smooth;
+}
+
+/* Themed text selection (red on Netflix) */
+::selection {
+  background-color: hsl(var(--primary) / 0.85);
+  color: hsl(var(--primary-foreground));
+}
+
+/* Thin, theme-aware scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.55);
+  background-clip: padding-box;
+}
+
+/* Cinematic helpers — bottom-up scrim + legible text over imagery */
+.cinematic-fade {
+  background-image: linear-gradient(to top, hsl(var(--background)) 0%, hsl(var(--background) / 0.6) 35%, transparent 100%);
+}
+.text-shadow-cinema {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 8px rgba(0, 0, 0, 0.4);
 }
 
 @media (prefers-reduced-motion: reduce) {

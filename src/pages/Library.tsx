@@ -1053,7 +1053,7 @@ const SnippetsTab = () => {
                 <Plus className="h-4 w-4 mr-1" />
                 New File
               </Button>
-              <Button size="sm" variant="outline" onClick={openCreateFolder} title="New folder">
+              <Button size="icon-sm" variant="outline" onClick={openCreateFolder} title="New folder" className="flex-shrink-0">
                 <FolderPlus className="h-4 w-4" />
               </Button>
             </div>

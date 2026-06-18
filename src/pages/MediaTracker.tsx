@@ -2012,12 +2012,12 @@ const MediaTracker = () => {
                 Media Tracker
               </h1>
               <div className="flex items-center gap-2">
-                {/* View toggle */}
-                <div className="hidden sm:flex items-center">
-                  <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'outline'} onClick={() => setViewMode('grid')} className="mr-1" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
+                {/* View toggle — glassy segmented control */}
+                <div className="hidden sm:flex items-center gap-0.5 rounded-md border border-foreground/10 bg-background/40 backdrop-blur-md p-0.5 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.10)]">
+                  <Button size="icon-sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
                     <LayoutGrid className="h-4 w-4" />
                   </Button>
-                  <Button size="sm" variant={viewMode === 'list' ? 'default' : 'outline'} onClick={() => setViewMode('list')} aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
+                  <Button size="icon-sm" variant={viewMode === 'list' ? 'default' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
                     <ListIcon className="h-4 w-4" />
                   </Button>
                 </div>
@@ -2044,7 +2044,7 @@ const MediaTracker = () => {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="px-2" aria-label="More actions" title="More actions">
+                    <Button variant="outline" size="icon-sm" aria-label="More actions" title="More actions">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
