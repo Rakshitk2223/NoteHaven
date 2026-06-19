@@ -69,7 +69,7 @@ export function LedgerEntryForm({ value, onChange, categories, buckets = [], onC
           <div className="flex items-center justify-between">
             <label className="text-sm font-medium">Category</label>
             {noCategories && onCreateCategories && (
-              <button onClick={onCreateCategories} className="text-xs text-blue-500 hover:underline">
+              <button onClick={onCreateCategories} className="text-xs text-primary hover:underline">
                 Create categories
               </button>
             )}

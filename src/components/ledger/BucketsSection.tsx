@@ -18,11 +18,12 @@ interface BucketsSectionProps {
   onChanged: () => void; // reload buckets after edits
 }
 
+// Type tags are neutral (badge discipline); the per-bucket color dot carries identity.
 const KIND_BADGE: Record<BucketKind, string> = {
-  spending:   'bg-blue-500/15 text-blue-600 dark:text-blue-300',
-  saving:     'bg-purple-500/15 text-purple-600 dark:text-purple-300',
-  obligation: 'bg-pink-500/15 text-pink-600 dark:text-pink-300',
-  liability:  'bg-red-500/15 text-red-600 dark:text-red-300',
+  spending:   'bg-muted text-muted-foreground',
+  saving:     'bg-muted text-muted-foreground',
+  obligation: 'bg-muted text-muted-foreground',
+  liability:  'bg-muted text-muted-foreground',
 };
 
 const emptyForm = { name: '', kind: 'spending' as BucketKind, color: '#3B82F6', target_amount: '' };
@@ -115,7 +116,7 @@ export function BucketsSection({ entries, buckets, onChanged }: BucketsSectionPr
                   <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded ${KIND_BADGE[kind]} mb-2`}>
                     {BUCKET_KINDS[kind].label}
                   </span>
-                  <div className={`text-lg font-bold ${balance >= 0 ? 'text-foreground' : 'text-red-600'}`}>
+                  <div className={`text-lg font-bold tabular-nums ${balance >= 0 ? 'text-foreground' : 'text-destructive'}`}>
                     {formatCurrency(balance)}
                   </div>
                   {target ? (
