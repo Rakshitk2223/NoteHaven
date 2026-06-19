@@ -61,57 +61,49 @@ export function LedgerWidget({
 
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20">
+              <div className="p-4 rounded-lg bg-muted">
                 <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp className="h-4 w-4 text-green-600 dark:text-green-400" />
-                  <span className="text-sm font-medium text-green-800 dark:text-green-300">
+                  <TrendingUp className="h-4 w-4 text-success" />
+                  <span className="text-sm font-medium text-muted-foreground">
                     Income
                   </span>
                 </div>
-                <p className="text-2xl font-bold text-green-700 dark:text-green-400">
+                <p className="text-2xl font-bold text-success tabular-nums">
                   {formatCurrency(data.income)}
                 </p>
               </div>
 
-              <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20">
+              <div className="p-4 rounded-lg bg-muted">
                 <div className="flex items-center gap-2 mb-2">
-                  <TrendingDown className="h-4 w-4 text-red-600 dark:text-red-400" />
-                  <span className="text-sm font-medium text-red-800 dark:text-red-300">
+                  <TrendingDown className="h-4 w-4 text-destructive" />
+                  <span className="text-sm font-medium text-muted-foreground">
                     Expenses
                   </span>
                 </div>
-                <p className="text-2xl font-bold text-red-700 dark:text-red-400">
+                <p className="text-2xl font-bold text-destructive tabular-nums">
                   {formatCurrency(data.expenses)}
                 </p>
               </div>
             </div>
 
-            <div
-              className={`p-4 rounded-lg ${
-                data.net >= 0
-                  ? 'bg-blue-50 dark:bg-blue-900/20'
-                  : 'bg-orange-50 dark:bg-orange-900/20'
-              }`}
-            >
+            <div className="p-4 rounded-lg bg-muted">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-muted-foreground">
                   Net Balance
                 </span>
                 <span
-                  className={`text-2xl font-bold ${
-                    data.net >= 0
-                      ? 'text-blue-700 dark:text-blue-400'
-                      : 'text-orange-700 dark:text-orange-400'
+                  className={`text-2xl font-bold tabular-nums ${
+                    data.net >= 0 ? 'text-success' : 'text-destructive'
                   }`}
                 >
                   {formatCurrency(data.net)}
                 </span>
               </div>
 
-              <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
+              <div className="mt-3 h-2 bg-background rounded-full overflow-hidden">
                 <div
                   className={`h-full transition-all ${
-                    data.net >= 0 ? 'bg-blue-500' : 'bg-orange-500'
+                    data.net >= 0 ? 'bg-success' : 'bg-destructive'
                   }`}
                   style={{
                     width: `${Math.min(

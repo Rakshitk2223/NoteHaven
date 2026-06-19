@@ -1,5 +1,6 @@
 import { CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { WidgetWrapper } from '../WidgetWrapper';
 import { formatCurrency } from '@/lib/ledger';
 import type { UpcomingRenewal } from '@/lib/subscriptions';
@@ -27,13 +28,10 @@ export function SubscriptionsWidget({
   );
 
   const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
-      renew:
-        'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-      cancel:
-        'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-      active:
-        'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+    const variants: Record<string, 'neutral' | 'warning' | 'success'> = {
+      renew: 'neutral',
+      cancel: 'warning',
+      active: 'success'
     };
 
     const labels: Record<string, string> = {
@@ -43,11 +41,9 @@ export function SubscriptionsWidget({
     };
 
     return (
-      <span
-        className={`text-xs px-2 py-0.5 rounded font-medium ${styles[status] || styles.active}`}
-      >
+      <Badge variant={variants[status] || 'success'}>
         {labels[status] || 'Active'}
-      </span>
+      </Badge>
     );
   };
 

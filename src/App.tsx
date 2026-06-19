@@ -43,7 +43,8 @@ const AppInner = () => {
   }, []);
   const location = useLocation();
   return (
-      <Routes location={location} key={location.pathname}>
+      <div key={location.pathname} className="animate-route">
+      <Routes location={location}>
         <Route path="/" element={<Index />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
@@ -63,6 +64,7 @@ const AppInner = () => {
 <Route path="/check-email" element={<CheckEmail />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </div>
   );
 };
 

@@ -61,19 +61,18 @@ export const WeekView = ({ currentDate, events, onDateClick, onDateDoubleClick }
               className={cn(
                 "p-3 text-center border-r last:border-r-0",
                 isTodayDate && "bg-accent/30",
-                isWeekendDay && !isTodayDate && "bg-blue-50/50 dark:bg-blue-900/20"
+                isWeekendDay && !isTodayDate && "bg-muted"
               )}
             >
               <div className={cn(
-                "text-sm font-medium",
-                isWeekendDay ? "text-blue-500 dark:text-blue-400" : "text-muted-foreground"
+                "text-sm font-medium text-muted-foreground"
               )}>
                 {format(day, 'EEE')}
               </div>
               <div className={cn(
                 "text-lg font-semibold w-8 h-8 mx-auto flex items-center justify-center rounded-full",
                 isTodayDate && "bg-primary text-primary-foreground",
-                isWeekendDay && !isTodayDate && "text-blue-600 dark:text-blue-400"
+                isWeekendDay && !isTodayDate && "text-muted-foreground"
               )}>
                 {format(day, 'd')}
               </div>
@@ -94,7 +93,7 @@ export const WeekView = ({ currentDate, events, onDateClick, onDateDoubleClick }
               className={cn(
                 "border-r last:border-r-0 p-2 cursor-pointer hover:bg-muted/30 transition-colors",
                 isToday(day) && "bg-accent/10",
-                isWeekendDay && "bg-blue-50/30 dark:bg-blue-900/10"
+                isWeekendDay && "bg-muted/40"
               )}
             >
               <div className="space-y-2">

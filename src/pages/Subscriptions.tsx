@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Plus, CreditCard, Trash2, Edit2, TrendingUp, Bell, CheckCircle, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -377,10 +378,10 @@ const Subscriptions = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Monthly Cost</CardTitle>
-                <CreditCard className="h-4 w-4 text-blue-500" />
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold tabular-nums">
                   {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.monthlyTotal)}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Active & Renew only</p>
@@ -390,10 +391,10 @@ const Subscriptions = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Yearly Cost</CardTitle>
-                <TrendingUp className="h-4 w-4 text-green-500" />
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold tabular-nums">
                   {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.yearlyTotal)}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Active & Renew only</p>
@@ -403,10 +404,10 @@ const Subscriptions = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Active</CardTitle>
-                <CheckCircle className="h-4 w-4 text-purple-500" />
+                <CheckCircle className="h-4 w-4 text-success" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold tabular-nums">
                   {loading ? <Skeleton className="h-8 w-12" /> : summary.activeCount}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Active + Renew</p>
@@ -416,10 +417,10 @@ const Subscriptions = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Renews Soon</CardTitle>
-                <Bell className="h-4 w-4 text-orange-500" />
+                <Bell className="h-4 w-4 text-warning" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
+                <div className="text-2xl font-bold tabular-nums">
                   {loading ? <Skeleton className="h-8 w-12" /> : renewsSoonCount}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Within the next 7 days</p>
@@ -429,7 +430,7 @@ const Subscriptions = () => {
 
           {/* Show loading state while categories are being initialized */}
           {!loading && categories.length === 0 && (
-            <div className="mb-6 p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+            <div className="mb-6 p-4 border border-border rounded-lg bg-muted">
               <p className="text-sm mb-2">Loading categories...</p>
               <Button onClick={refreshCategories} variant="outline">
                 <Plus className="h-4 w-4 mr-2" />
@@ -464,7 +465,12 @@ const Subscriptions = () => {
                   {subscriptions.map((sub) => {
                     const daysUntil = getDaysUntilRenewal(sub.next_renewal_date);
                     const statusColor = getStatusBadgeColor(sub.status);
-                    
+                    const statusVariant =
+                      sub.status === 'active' ? 'success'
+                      : sub.status === 'cancel' ? 'warning'
+                      : sub.status === 'cancelled' ? 'danger'
+                      : 'neutral';
+
                     return (
                       <div 
                         key={sub.id} 
@@ -516,12 +522,9 @@ const Subscriptions = () => {
                             )}
                           </div>
                           
-                          <div 
-                            className="px-2 py-1 rounded text-xs font-medium text-white"
-                            style={{ backgroundColor: statusColor }}
-                          >
+                          <Badge variant={statusVariant}>
                             {getStatusLabel(sub.status)}
-                          </div>
+                          </Badge>
                         </div>
                         
                         <div className="flex items-center gap-1 ml-4">

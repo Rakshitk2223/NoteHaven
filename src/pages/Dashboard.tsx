@@ -783,7 +783,7 @@ const Dashboard = () => {
               <div className="hidden md:flex items-center gap-3">
                 <CircularProgress value={completionRate} size={44} strokeWidth={5} />
                 <div className="flex flex-col">
-                  <span className="text-sm font-semibold text-foreground">{completionRate}%</span>
+                  <span className="text-sm font-semibold text-foreground tabular-nums">{completionRate}%</span>
                   <span className="text-xs text-muted-foreground">Tasks Done</span>
                 </div>
               </div>

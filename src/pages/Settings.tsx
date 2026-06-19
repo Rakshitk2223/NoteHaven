@@ -354,7 +354,7 @@ const Settings = () => {
                   <p className="text-sm text-muted-foreground">Back to Netflix dark (default)</p>
                 </div>
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => {
                     setColorTheme('netflix');
@@ -386,7 +386,7 @@ const Settings = () => {
                 </div>
               </div>
               <div className="pt-2 border-t border-border/60">
-                <Button variant="outline" onClick={() => signOut()} className="text-destructive hover:text-destructive">
+                <Button variant="ghost" onClick={() => signOut()} className="text-destructive hover:text-destructive hover:bg-destructive/10">
                   <LogOut className="h-4 w-4 mr-2" />
                   Sign Out
                 </Button>
@@ -439,7 +439,7 @@ const Settings = () => {
                       <Save className="h-4 w-4 mr-2" />
                       Save Order
                     </Button>
-                    <Button variant="outline" onClick={handleResetSidebarOrder}>
+                    <Button variant="secondary" onClick={handleResetSidebarOrder}>
                       <RotateCcw className="h-4 w-4 mr-2" />
                       Reset to Default
                     </Button>

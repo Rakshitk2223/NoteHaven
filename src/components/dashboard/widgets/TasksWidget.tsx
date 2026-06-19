@@ -27,7 +27,7 @@ export function TasksWidget({
 }: TasksWidgetProps) {
   const emptyState = (
     <div className="text-center py-8">
-      <Check className="h-8 w-8 text-green-500 mx-auto mb-2" />
+      <Check className="h-8 w-8 text-success mx-auto mb-2" />
       <p className="text-muted-foreground">All tasks completed!</p>
     </div>
   );

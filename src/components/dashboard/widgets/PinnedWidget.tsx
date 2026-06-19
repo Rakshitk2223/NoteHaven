@@ -1,4 +1,5 @@
 import { Pin } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { WidgetWrapper } from '../WidgetWrapper';
 import { sanitizeHtml } from '@/lib/utils';
 import type { WidgetProps } from '@/lib/dashboard';
@@ -37,12 +38,6 @@ export function PinnedWidget({
     prompt: 'Prompt'
   };
 
-  const typeColors: Record<string, string> = {
-    note: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-    task: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-    prompt: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
-  };
-
   return (
     <WidgetWrapper
       widget={widget}
@@ -57,11 +52,9 @@ export function PinnedWidget({
             onClick={() => onItemClick(item)}
             className="w-full text-left p-3 rounded-lg hover:bg-muted/60 transition-colors flex items-center gap-3 group"
           >
-            <span
-              className={`text-xs px-2 py-0.5 rounded font-medium flex-shrink-0 ${typeColors[item.type]}`}
-            >
+            <Badge variant="neutral" className="flex-shrink-0">
               {typeLabels[item.type]}
-            </span>
+            </Badge>
             <span
               className="flex-1 text-sm text-foreground truncate leading-tight"
               dangerouslySetInnerHTML={{

@@ -1028,7 +1028,7 @@ const Notes = () => {
                       >
                         <div className="font-semibold truncate flex items-center gap-2 min-w-0">
                           {note.title === 'Inbox' ? (
-                            <Lightbulb className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                            <Lightbulb className="h-3 w-3 text-warning flex-shrink-0" />
                           ) : note.is_pinned ? (
                             <Pin className="h-3 w-3 text-primary flex-shrink-0" />
                           ) : null}
@@ -1122,12 +1122,12 @@ const Notes = () => {
                       <div className="flex items-center gap-2 text-xs">
                         {isSaving && <span>Saving...</span>}
                       </div>
-                      <Button size="sm" variant="ghost" onClick={handleTogglePin} title={selectedNote.is_pinned ? 'Unpin' : 'Pin note'}>
+                      <Button size="icon" variant="ghost" onClick={handleTogglePin} title={selectedNote.is_pinned ? 'Unpin' : 'Pin note'}>
                         <Pin className="h-4 w-4" />
                       </Button>
                       <Popover open={showPalette} onOpenChange={setShowPalette}>
                         <PopoverTrigger asChild>
-                          <Button size="sm" variant="ghost" title="Change color">
+                          <Button size="icon" variant="ghost" title="Change color">
                             <Palette className="h-4 w-4" />
                           </Button>
                         </PopoverTrigger>
@@ -1169,7 +1169,7 @@ const Notes = () => {
                         </PopoverContent>
                       </Popover>
                       <Button
-                        size="sm"
+                        size="icon"
                         variant="ghost"
                         onClick={() => selectedNote && confirmDeleteNote(selectedNote)}
                         className="hover:text-destructive"
@@ -1179,7 +1179,7 @@ const Notes = () => {
                       </Button>
                       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
                         <DialogTrigger asChild>
-                          <Button size="sm" variant="ghost" title="Share note">
+                          <Button size="icon" variant="ghost" title="Share note">
                             <Share2 className="h-4 w-4" />
                           </Button>
                         </DialogTrigger>

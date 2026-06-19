@@ -86,8 +86,8 @@ export const MonthView = ({
             <div 
               key={day} 
               className={cn(
-                "p-2 text-center text-sm font-medium",
-                isWeekendDay ? "text-blue-500 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/20" : "text-muted-foreground"
+                "p-2 text-center text-sm font-medium text-muted-foreground",
+                isWeekendDay && "bg-muted"
               )}
             >
               {day}
@@ -114,7 +114,7 @@ export const MonthView = ({
                 !isCurrentMonth && "bg-muted/30 text-muted-foreground",
                 isSelected && "bg-primary/10 border-primary ring-1 ring-primary",
                 isTodayDate && !isSelected && "bg-accent/30",
-                isWeekendDay && isCurrentMonth && !isSelected && "bg-blue-50/30 dark:bg-blue-900/10",
+                isWeekendDay && isCurrentMonth && !isSelected && "bg-muted/40",
                 "hover:bg-muted/50"
               )}
             >
@@ -122,7 +122,7 @@ export const MonthView = ({
               <div className={cn(
                 "text-xs lg:text-sm font-medium mb-1 w-6 h-6 lg:w-7 lg:h-7 flex items-center justify-center rounded-full shrink-0",
                 isTodayDate && "bg-primary text-primary-foreground",
-                isWeekendDay && !isTodayDate && "text-blue-600 dark:text-blue-400"
+                isWeekendDay && !isTodayDate && "text-muted-foreground"
               )}>
                 {format(day, 'd')}
               </div>

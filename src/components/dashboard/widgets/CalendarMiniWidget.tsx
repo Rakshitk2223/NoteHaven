@@ -53,12 +53,12 @@ export function CalendarMiniWidget({
 
   const getEventDotColor = (type: string) => {
     const colors: Record<string, string> = {
-      task: 'bg-blue-500',
-      birthday: 'bg-green-500',
-      subscription: 'bg-red-500',
-      countdown: 'bg-purple-500'
+      task: 'bg-primary',
+      birthday: 'bg-success',
+      subscription: 'bg-warning',
+      countdown: 'bg-accent'
     };
-    return colors[type] || 'bg-gray-500';
+    return colors[type] || 'bg-muted';
   };
 
   const isToday = (day: number) => {
@@ -164,15 +164,15 @@ export function CalendarMiniWidget({
         <div className="flex items-center justify-between pt-2">
           <div className="flex gap-3 text-xs">
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-blue-500" />
+              <div className="w-2 h-2 rounded-full bg-primary" />
               <span className="text-muted-foreground">Tasks</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-green-500" />
+              <div className="w-2 h-2 rounded-full bg-success" />
               <span className="text-muted-foreground">Birthdays</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-red-500" />
+              <div className="w-2 h-2 rounded-full bg-warning" />
               <span className="text-muted-foreground">Renewals</span>
             </div>
           </div>

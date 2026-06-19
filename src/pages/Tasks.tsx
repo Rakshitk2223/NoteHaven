@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Pin, Pencil, Menu } from "lucide-react";
+import { Plus, Trash2, Pin, Pencil, Menu, ListTodo } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/DatePicker";
@@ -395,10 +396,12 @@ const Tasks = () => {
                 ))}
               </div>
             ) : tasks.length === 0 ? (
-              <div className="zen-card p-4 sm:p-8 text-center">
-                <p className="text-muted-foreground mb-4">
-                  You haven't created any tasks yet. Add your first task above to get started!
-                </p>
+              <div className="zen-card p-4 sm:p-8">
+                <EmptyState
+                  icon={ListTodo}
+                  title="No tasks yet"
+                  description="Add your first task using the field above to get started."
+                />
               </div>
             ) : (
               <div className="space-y-8">
@@ -465,7 +468,7 @@ const Tasks = () => {
                                 const due = new Date(year, month - 1, day);
                                 const diff = due.getTime() - today.getTime();
                                 const isPastOrToday = diff <= 0;
-                                return `text-xs font-medium ${isPastOrToday ? 'text-red-500' : 'text-muted-foreground'}`;
+                                return `text-xs font-medium ${isPastOrToday ? 'text-destructive' : 'text-muted-foreground'}`;
                               })()}>
                                 Due {(() => {
                                   const [year, month, day] = task.due_date.split('-').map(Number);

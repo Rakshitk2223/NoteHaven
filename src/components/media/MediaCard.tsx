@@ -284,7 +284,7 @@ const MediaCardComponent = ({
             progress.total > 0 ? 'bottom-2.5' : 'bottom-2',
             hasOverlay && '[@media(hover:hover)]:group-hover:opacity-0'
           )}>
-            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+            <Star className="h-3 w-3 fill-warning text-warning" />
             <span className="text-xs font-medium">{rating}</span>
           </div>
         )}
@@ -313,7 +313,7 @@ const MediaCardComponent = ({
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-white/85">
               {externalRating && (
                 <span className="inline-flex items-center gap-0.5">
-                  <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />{externalRating.toFixed(1)}
+                  <Star className="h-3 w-3 fill-warning text-warning" />{externalRating.toFixed(1)}
                 </span>
               )}
               {airing && <span>{airing}</span>}
@@ -344,7 +344,7 @@ const MediaCardComponent = ({
         <div className={cn('flex items-center gap-2', showStatus ? 'justify-between' : 'justify-end')}>
           {showStatus && (
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className={cn('h-2 w-2 rounded-full flex-shrink-0', STATUS_DOT[status] || 'bg-gray-400')} />
+              <span className={cn('h-2 w-2 rounded-full flex-shrink-0', STATUS_DOT[status] || 'bg-muted-foreground')} />
               <span className="text-xs text-muted-foreground truncate">{status}</span>
             </div>
           )}

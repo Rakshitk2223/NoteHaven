@@ -26,6 +26,8 @@ const buttonVariants = cva(
           "border border-border bg-transparent text-foreground hover:bg-secondary hover:border-border-strong",
         // ghost — tertiary / toolbar / "View All →".
         ghost: "bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground",
+        // icon — alias of ghost styling for icon-only buttons (pair with size="icon").
+        icon: "bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

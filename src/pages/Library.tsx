@@ -111,12 +111,18 @@ const Library = () => {
 
           <div className="p-4 sm:p-6">
             <Tabs value={activeTab} onValueChange={handleTabChange}>
-              <TabsList className="mb-6">
-                <TabsTrigger value="prompts" className="gap-2">
+              <TabsList className="mb-6 inline-flex h-auto gap-1 rounded-lg bg-muted p-1">
+                <TabsTrigger
+                  value="prompts"
+                  className="gap-2 rounded-md text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow"
+                >
                   <MessageSquare className="h-4 w-4" />
                   Prompts
                 </TabsTrigger>
-                <TabsTrigger value="snippets" className="gap-2">
+                <TabsTrigger
+                  value="snippets"
+                  className="gap-2 rounded-md text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow"
+                >
                   <Code className="h-4 w-4" />
                   Code Snippets
                 </TabsTrigger>
@@ -650,7 +656,7 @@ const PromptsTab = () => {
                     size="sm"
                     variant="outline"
                     onClick={() => handleToggleFavorite(prompt)}
-                    className={prompt.is_favorited ? "text-yellow-500 hover:text-yellow-600" : ""}
+                    className={prompt.is_favorited ? "text-warning hover:text-warning/80" : ""}
                   >
                     <Star className={`h-4 w-4 ${prompt.is_favorited ? "fill-current" : ""}`} />
                   </Button>
@@ -1104,7 +1110,7 @@ const SnippetsTab = () => {
                           <ChevronDown className="h-3 w-3 flex-shrink-0" />
                         )}
                         {group.folder ? (
-                          <span className="h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: group.color || '#3B82F6' }} />
+                          <span className="h-2.5 w-2.5 rounded-sm flex-shrink-0" style={{ backgroundColor: group.color || 'hsl(var(--muted-foreground))' }} />
                         ) : (
                           <Folder className="h-3 w-3 flex-shrink-0" />
                         )}
@@ -1192,7 +1198,7 @@ const SnippetsTab = () => {
                                       disabled={snippet.folder_id === f.id}
                                       onClick={() => handleMoveSnippet(snippet, f.id)}
                                     >
-                                      <span className="h-2.5 w-2.5 rounded-sm mr-2 flex-shrink-0" style={{ backgroundColor: f.color || '#3B82F6' }} />
+                                      <span className="h-2.5 w-2.5 rounded-sm mr-2 flex-shrink-0" style={{ backgroundColor: f.color || 'hsl(var(--muted-foreground))' }} />
                                       {f.name}
                                     </DropdownMenuItem>
                                   ))}
@@ -1300,7 +1306,7 @@ const SnippetsTab = () => {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-wrap">
                     {selectedSnippet.is_pinned && <Pin className="h-4 w-4 fill-current text-primary flex-shrink-0" />}
-                    {selectedSnippet.is_favorited && <Star className="h-4 w-4 fill-current text-yellow-500 flex-shrink-0" />}
+                    {selectedSnippet.is_favorited && <Star className="h-4 w-4 fill-current text-warning flex-shrink-0" />}
                     <h2 className="text-lg font-semibold text-foreground truncate">
                       {selectedSnippet.title}
                     </h2>
@@ -1312,7 +1318,7 @@ const SnippetsTab = () => {
                       const folder = selectedSnippet.folder_id ? folders.find(f => f.id === selectedSnippet.folder_id) : null;
                       return folder ? (
                         <Badge variant="outline" className="gap-1">
-                          <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: folder.color || '#3B82F6' }} />
+                          <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: folder.color || 'hsl(var(--muted-foreground))' }} />
                           {folder.name}
                         </Badge>
                       ) : null;
@@ -1324,7 +1330,7 @@ const SnippetsTab = () => {
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       onClick={() => handleCopy(selectedSnippet.code, selectedSnippet.id)}
                     >
                       {copiedId === selectedSnippet.id ? (
@@ -1336,7 +1342,7 @@ const SnippetsTab = () => {
                     {selectedSnippet.language === 'env' && (
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant="secondary"
                         onClick={() => setRevealSecret(v => !v)}
                         title={revealSecret ? 'Hide values' : 'Reveal values'}
                       >
@@ -1345,14 +1351,14 @@ const SnippetsTab = () => {
                     )}
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       onClick={() => startEditing(selectedSnippet)}
                     >
                       <Edit className="h-4 w-4 mr-1" /> Edit
                     </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button size="sm" variant="outline" title="More actions">
+                        <Button size="icon-sm" variant="secondary" title="More actions">
                           <MoreVertical className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -1374,7 +1380,7 @@ const SnippetsTab = () => {
                                 disabled={selectedSnippet.folder_id === f.id}
                                 onClick={() => handleMoveSnippet(selectedSnippet, f.id)}
                               >
-                                <span className="h-2.5 w-2.5 rounded-sm mr-2 flex-shrink-0" style={{ backgroundColor: f.color || '#3B82F6' }} />
+                                <span className="h-2.5 w-2.5 rounded-sm mr-2 flex-shrink-0" style={{ backgroundColor: f.color || 'hsl(var(--muted-foreground))' }} />
                                 {f.name}
                               </DropdownMenuItem>
                             ))}
@@ -1386,7 +1392,7 @@ const SnippetsTab = () => {
                         </DropdownMenuSub>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => handleToggleFav(selectedSnippet)}>
-                          <Star className={`h-4 w-4 mr-2 ${selectedSnippet.is_favorited ? 'fill-current text-yellow-500' : ''}`} />
+                          <Star className={`h-4 w-4 mr-2 ${selectedSnippet.is_favorited ? 'fill-current text-warning' : ''}`} />
                           {selectedSnippet.is_favorited ? 'Remove from favorites' : 'Add to favorites'}
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleTogglePinSnippet(selectedSnippet)}>

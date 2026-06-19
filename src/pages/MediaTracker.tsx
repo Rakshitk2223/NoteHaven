@@ -148,22 +148,22 @@ const getStatusColor = (status: string) => {
   switch (status) {
     case 'Watching':
     case 'Reading':
-      return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
+      return 'bg-[hsl(var(--success)/0.15)] text-success';
     case 'Plan to Watch':
     case 'Plan to Read':
-      return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
+      return 'bg-[hsl(var(--warning)/0.15)] text-warning';
     case 'Completed':
-      return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
+      return 'bg-muted text-muted-foreground';
     default:
-      return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+      return 'bg-muted text-muted-foreground';
   }
 };
 
 // Status-category dot colors for sticky grid section headers.
 const SECTION_DOT: Record<string, string> = {
-  Active: 'bg-green-500',
-  Planned: 'bg-amber-500',
-  Completed: 'bg-purple-500',
+  Active: 'bg-success',
+  Planned: 'bg-warning',
+  Completed: 'bg-muted-foreground',
 };
 
 // Module-scope list row so it isn't redefined (and remounted) on every parent render.
@@ -1673,7 +1673,7 @@ const MediaTracker = () => {
                               )}
                               {meta?.rating ? (
                                 <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                                  <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                                  <Star className="h-3.5 w-3.5 fill-warning text-warning" />
                                   {meta.rating.toFixed(1)}
                                 </span>
                               ) : null}
@@ -2028,7 +2028,7 @@ const MediaTracker = () => {
                 </Button>
 
                 <Button
-                  variant={hasActiveFilters ? 'default' : 'outline'}
+                  variant="secondary"
                   size="sm"
                   onClick={() => setFiltersOpen(true)}
                   aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'}
@@ -2036,7 +2036,7 @@ const MediaTracker = () => {
                   <Filter className="h-4 w-4 mr-2" />
                   Filters
                   {activeFilterCount > 0 && (
-                    <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary-foreground/20 text-[11px] font-medium">
+                    <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[11px] font-medium">
                       {activeFilterCount}
                     </span>
                   )}
@@ -2359,9 +2359,9 @@ const MediaTracker = () => {
             <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
               {([
                 { key: 'all', label: 'Total', value: currentStats.all, status: 'All', dot: 'bg-foreground/40' },
-                { key: 'inProgress', label: 'In progress', value: currentStats.inProgress, status: 'Active', dot: 'bg-green-500' },
-                { key: 'planned', label: 'Planned', value: currentStats.planned, status: 'Planned', dot: 'bg-amber-500' },
-                { key: 'completed', label: 'Completed', value: currentStats.completed, status: 'Completed', dot: 'bg-purple-500' },
+                { key: 'inProgress', label: 'In progress', value: currentStats.inProgress, status: 'Active', dot: 'bg-success' },
+                { key: 'planned', label: 'Planned', value: currentStats.planned, status: 'Planned', dot: 'bg-warning' },
+                { key: 'completed', label: 'Completed', value: currentStats.completed, status: 'Completed', dot: 'bg-muted-foreground' },
               ] as const).map((stat) => {
                 const active = filterStatus === stat.status;
                 return (
@@ -2606,7 +2606,7 @@ const MediaTracker = () => {
                     {groupedByStatus.keys.map((statusKey) => (
                       <div key={statusKey}>
                         <div className="sticky top-0 z-10 -mx-1 mb-4 flex items-center gap-2 bg-background/85 backdrop-blur px-1 py-2">
-                          <span className={cn('h-2.5 w-2.5 rounded-full', SECTION_DOT[statusKey] || 'bg-gray-400')} aria-hidden="true" />
+                          <span className={cn('h-2.5 w-2.5 rounded-full', SECTION_DOT[statusKey] || 'bg-muted-foreground')} aria-hidden="true" />
                           <h2 className="text-base font-semibold">{statusKey}</h2>
                           <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>
                         </div>

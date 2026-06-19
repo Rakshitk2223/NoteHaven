@@ -174,8 +174,8 @@ export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, sc
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>{running ? 'Refreshing…' : 'Done'} {progress.done} / {progress.total}</span>
               <span className="flex items-center gap-2">
-                <span className="text-emerald-600 dark:text-emerald-400">{progress.updated} updated</span>
-                {progress.failed > 0 && <span className="text-rose-600 dark:text-rose-400">{progress.failed} no match</span>}
+                <span className="text-success">{progress.updated} updated</span>
+                {progress.failed > 0 && <span className="text-destructive">{progress.failed} no match</span>}
                 {progress.skipped > 0 && <span>{progress.skipped} skipped</span>}
                 {progress.newContent > 0 && <span className="text-primary">{progress.newContent} new</span>}
               </span>

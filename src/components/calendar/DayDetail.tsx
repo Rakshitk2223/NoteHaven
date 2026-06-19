@@ -40,27 +40,27 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
     switch (type) {
       case 'task':
         return (
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#3B82F6' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(var(--primary))' }} />
         );
       case 'birthday':
         return (
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#10B981' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(var(--success))' }} />
         );
       case 'subscription':
         return (
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#EF4444' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(var(--destructive))' }} />
         );
       case 'countdown':
         return (
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#8B5CF6' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(var(--warning))' }} />
         );
       case 'media':
         return (
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#F97316' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(var(--muted-foreground))' }} />
         );
       case 'note':
         return (
-          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#6B7280' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'hsl(var(--muted-foreground))' }} />
         );
       default:
         return null;
@@ -129,13 +129,13 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
                 <div className="flex items-center gap-2 mt-2">
                   {event.data.completed ? (
                     <>
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">Completed</span>
+                      <CheckCircle2 className="h-4 w-4 text-success" />
+                      <span className="text-sm text-success">Completed</span>
                     </>
                   ) : (
                     <>
-                      <XCircle className="h-4 w-4 text-orange-500" />
-                      <span className="text-sm text-orange-600">Pending</span>
+                      <XCircle className="h-4 w-4 text-warning" />
+                      <span className="text-sm text-warning">Pending</span>
                     </>
                   )}
                 </div>

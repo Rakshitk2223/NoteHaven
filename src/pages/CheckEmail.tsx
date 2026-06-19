@@ -43,7 +43,7 @@ const CheckEmail = () => {
         <Button onClick={handleResend} disabled={resending} className="mb-2 w-full">
           {resending ? "Resending..." : "Resend Email"}
         </Button>
-        {resent && <div className="text-green-600 text-sm mb-2">Confirmation email resent!</div>}
+        {resent && <div className="text-success text-sm mb-2">Confirmation email resent!</div>}
         {error && <div className="text-destructive text-sm mb-2">{error}</div>}
       </div>
     </div>

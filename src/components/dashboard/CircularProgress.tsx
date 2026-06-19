@@ -18,9 +18,9 @@ export function CircularProgress({
   const offset = circumference - (value / 100) * circumference;
 
   const getColor = (value: number) => {
-    if (value >= 75) return 'text-green-500';
-    if (value >= 25) return 'text-yellow-500';
-    return 'text-red-500';
+    if (value >= 75) return 'text-success';
+    if (value >= 25) return 'text-warning';
+    return 'text-destructive';
   };
 
   return (
@@ -56,7 +56,7 @@ export function CircularProgress({
         />
       </svg>
       {/* Percentage text */}
-      <span className="absolute text-xs font-bold">
+      <span className="absolute text-xs font-bold tabular-nums">
         {Math.round(value)}%
       </span>
     </div>

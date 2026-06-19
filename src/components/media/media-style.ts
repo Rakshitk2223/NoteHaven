@@ -1,28 +1,28 @@
 // Shared visual helpers for the Media UI.
 
-// Soft (tinted) type badges: subtle background + colored text + ring, so artwork stays
-// the hero instead of loud solid fills competing across a 30+ card grid.
+// Type badges are intentionally NEUTRAL (badge discipline): a single quiet chip so
+// artwork stays the hero and color is reserved for semantic status, not taxonomy.
 export const TYPE_BADGE_SOFT: Record<string, string> = {
-  Anime: 'bg-orange-500/15 text-orange-600 dark:text-orange-300 ring-1 ring-inset ring-orange-500/30',
-  Manga: 'bg-violet-500/15 text-violet-600 dark:text-violet-300 ring-1 ring-inset ring-violet-500/30',
-  Manhwa: 'bg-pink-500/15 text-pink-600 dark:text-pink-300 ring-1 ring-inset ring-pink-500/30',
-  Manhua: 'bg-amber-500/15 text-amber-600 dark:text-amber-300 ring-1 ring-inset ring-amber-500/30',
-  Series: 'bg-blue-500/15 text-blue-600 dark:text-blue-300 ring-1 ring-inset ring-blue-500/30',
-  Movie: 'bg-red-500/15 text-red-600 dark:text-red-300 ring-1 ring-inset ring-red-500/30',
-  KDrama: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 ring-1 ring-inset ring-emerald-500/30',
-  JDrama: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 ring-1 ring-inset ring-cyan-500/30',
+  Anime: 'bg-muted text-muted-foreground',
+  Manga: 'bg-muted text-muted-foreground',
+  Manhwa: 'bg-muted text-muted-foreground',
+  Manhua: 'bg-muted text-muted-foreground',
+  Series: 'bg-muted text-muted-foreground',
+  Movie: 'bg-muted text-muted-foreground',
+  KDrama: 'bg-muted text-muted-foreground',
+  JDrama: 'bg-muted text-muted-foreground',
 };
 
 export const typeBadgeSoft = (type: string) =>
-  TYPE_BADGE_SOFT[type] || 'bg-muted text-muted-foreground ring-1 ring-inset ring-border';
+  TYPE_BADGE_SOFT[type] || 'bg-muted text-muted-foreground';
 
 // Airing/publication status (from external metadata: ongoing/completed/upcoming/hiatus).
-// Soft tinted pills so they read as info, not alarms.
+// Semantic tints: ongoing→success, upcoming→warning, hiatus→danger, completed→neutral.
 export const AIRING_STYLE: Record<string, string> = {
-  ongoing: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 ring-1 ring-inset ring-emerald-500/30',
-  completed: 'bg-slate-500/15 text-slate-600 dark:text-slate-300 ring-1 ring-inset ring-slate-500/30',
-  upcoming: 'bg-amber-500/15 text-amber-600 dark:text-amber-300 ring-1 ring-inset ring-amber-500/30',
-  hiatus: 'bg-rose-500/15 text-rose-600 dark:text-rose-300 ring-1 ring-inset ring-rose-500/30',
+  ongoing: 'bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]',
+  completed: 'bg-muted text-muted-foreground',
+  upcoming: 'bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]',
+  hiatus: 'bg-destructive/15 text-destructive',
 };
 
 export const AIRING_LABEL: Record<string, string> = {
@@ -34,11 +34,11 @@ export const AIRING_LABEL: Record<string, string> = {
 
 // Status dot colors (kept consistent across card + chips).
 export const STATUS_DOT: Record<string, string> = {
-  Watching: 'bg-green-500',
-  Reading: 'bg-blue-500',
-  Completed: 'bg-purple-500',
-  'Plan to Watch': 'bg-amber-500',
-  'Plan to Read': 'bg-amber-500',
+  Watching: 'bg-success',
+  Reading: 'bg-primary',
+  Completed: 'bg-muted-foreground',
+  'Plan to Watch': 'bg-warning',
+  'Plan to Read': 'bg-warning',
 };
 
 // Deterministic gradient palette for the letter fallback so a wall of cover-less items

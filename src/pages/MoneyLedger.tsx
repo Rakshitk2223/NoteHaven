@@ -378,10 +378,10 @@ const MoneyLedger = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Income</CardTitle>
-                <TrendingUp className="h-4 w-4 text-green-500" />
+                <TrendingUp className="h-4 w-4 text-success" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-600">
+                <div className="text-2xl font-bold tabular-nums text-success">
                   {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalIncome)}
                 </div>
               </CardContent>
@@ -390,10 +390,10 @@ const MoneyLedger = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-                <TrendingDown className="h-4 w-4 text-red-500" />
+                <TrendingDown className="h-4 w-4 text-destructive" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-600">
+                <div className="text-2xl font-bold tabular-nums text-destructive">
                   {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalExpense)}
                 </div>
               </CardContent>
@@ -402,10 +402,10 @@ const MoneyLedger = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Net Balance</CardTitle>
-                <Wallet className="h-4 w-4 text-blue-500" />
+                <Wallet className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className={`text-2xl font-bold ${summary.netBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <div className={`text-2xl font-bold tabular-nums ${summary.netBalance >= 0 ? 'text-success' : 'text-destructive'}`}>
                   {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.netBalance)}
                 </div>
               </CardContent>
@@ -424,7 +424,7 @@ const MoneyLedger = () => {
 
           {/* Show loading state while categories are being initialized */}
           {!loading && categories.length === 0 && (
-            <div className="mb-6 p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+            <div className="mb-6 p-4 border border-border rounded-lg bg-muted">
               <p className="text-sm mb-2">Loading categories...</p>
               <Button onClick={refreshCategories} variant="outline">
                 <Plus className="h-4 w-4 mr-2" />
@@ -540,10 +540,10 @@ const MoneyLedger = () => {
                               <span className="ml-2 text-xs text-muted-foreground">· {bucketName(entry.bucket_id)}</span>
                             )}
                           </td>
-                          <td className={`py-3 px-4 text-right font-medium ${
-                            entry.type === 'income' ? 'text-green-600'
+                          <td className={`py-3 px-4 text-right font-medium tabular-nums ${
+                            entry.type === 'income' ? 'text-success'
                             : entry.type === 'transfer' ? 'text-muted-foreground'
-                            : 'text-red-600'
+                            : 'text-destructive'
                           }`}>
                             {entry.type === 'income' ? '+' : entry.type === 'transfer' ? '' : '-'}{formatCurrency(Number(entry.amount))}
                           </td>

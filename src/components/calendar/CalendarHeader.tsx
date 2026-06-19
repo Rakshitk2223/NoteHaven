@@ -77,7 +77,7 @@ export const CalendarHeader = ({
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon"
               onClick={handlePrev}
               className="h-8 w-8"
@@ -85,7 +85,7 @@ export const CalendarHeader = ({
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon"
               onClick={handleNext}
               className="h-8 w-8"
@@ -106,14 +106,14 @@ export const CalendarHeader = ({
 
         <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
           <Button
-            variant={view === 'month' ? 'secondary' : 'ghost'}
+            variant={view === 'month' ? 'default' : 'ghost'}
             size="sm"
             onClick={() => onViewChange('month')}
           >
             Month
           </Button>
           <Button
-            variant={view === 'week' ? 'secondary' : 'ghost'}
+            variant={view === 'week' ? 'default' : 'ghost'}
             size="sm"
             onClick={() => onViewChange('week')}
           >

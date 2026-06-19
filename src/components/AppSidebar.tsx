@@ -56,10 +56,10 @@ interface SidebarItemProps {
 
 const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal }: SidebarItemProps) => {
   const baseClasses = cn(
-    "flex items-center gap-3 rounded-lg font-body font-medium transition-colors duration-200 relative group",
-    "hover:bg-secondary/50",
+    "flex items-center gap-3 rounded-sm font-body font-medium transition-colors duration-fast relative group",
+    "hover:bg-secondary",
     isActive
-      ? "bg-primary/15 text-foreground font-semibold"
+      ? "bg-secondary text-foreground font-semibold"
       : "text-muted-foreground hover:text-foreground",
     isCollapsed
       ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0"
@@ -68,13 +68,16 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
 
   const content = (
     <>
-      {/* Accent bar marking the active route (brand-red on Netflix) */}
-      {isActive && !isCollapsed && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary" />
+      {/* Accent indicator marking the active route — the one place red appears in the rail */}
+      {isActive && (
+        <span className={cn(
+          "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full bg-primary",
+          isCollapsed && "lg:left-0"
+        )} />
       )}
       <Icon className={cn(
         "h-5 w-5 flex-shrink-0",
-        isActive ? "text-primary" : "text-muted-foreground"
+        isActive ? "text-foreground" : "text-muted-foreground"
       )} />
       <span className={cn(
         "whitespace-nowrap",
@@ -282,8 +285,8 @@ const AppSidebar = () => {
           <button 
             onClick={handleLogout}
             className={cn(
-              "flex items-center rounded-lg font-body font-medium transition-colors duration-200 w-full relative group",
-              "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
+              "flex items-center rounded-sm font-body font-medium transition-colors duration-fast w-full relative group",
+              "text-muted-foreground hover:text-foreground hover:bg-secondary",
               isCollapsed 
                 ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0" 
                 : "justify-start gap-3 px-3 py-2.5"

@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2, Gift, Edit, Search, Cake, Clock, Menu } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -216,19 +217,16 @@ const Birthdays = () => {
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               {showAge && (
-                <span className="inline-flex items-center px-2 py-1 rounded-md bg-primary/10 text-primary text-xs font-medium">
+                <Badge variant="neutral">
                   {age} years old
-                </span>
+                </Badge>
               )}
-              <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${
-                days === 0 
-                  ? 'bg-pink-500 text-white animate-pulse' 
-                  : isPast
-                  ? 'bg-muted text-muted-foreground'
-                  : 'bg-blue-500/20 text-blue-600 dark:text-blue-400'
-              }`}>
+              <Badge
+                variant={days === 0 ? 'accent' : isPast ? 'neutral' : days <= 7 ? 'warning' : 'neutral'}
+                className={days === 0 ? 'animate-pulse' : undefined}
+              >
                 {days === 0 ? '🎉 Today!' : isPast ? `Was ${365 - days} days ago` : `In ${days} days`}
-              </span>
+              </Badge>
             </div>
           </div>
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -322,7 +320,7 @@ const Birthdays = () => {
                 {/* Upcoming Birthdays */}
                 <div className="zen-card p-6">
                   <h2 className="text-xl font-semibold mb-5 flex items-center gap-2">
-                    <Cake className="h-5 w-5 text-pink-500" />
+                    <Cake className="h-5 w-5 text-muted-foreground" />
                     Upcoming Birthdays
                   </h2>
                   {categorizedBirthdays.upcoming.length === 0 ? (
@@ -340,7 +338,7 @@ const Birthdays = () => {
                 {categorizedBirthdays.past.length > 0 && (
                   <div className="zen-card p-6">
                     <h2 className="text-xl font-semibold mb-5 flex items-center gap-2">
-                      <Clock className="h-5 w-5 text-blue-500" />
+                      <Clock className="h-5 w-5 text-muted-foreground" />
                       Recent Birthdays
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -354,7 +352,7 @@ const Birthdays = () => {
                 {/* All Birthdays */}
                 <div className="zen-card p-6">
                   <h2 className="text-xl font-semibold mb-5 flex items-center gap-2">
-                    <Gift className="h-5 w-5 text-purple-500" />
+                    <Gift className="h-5 w-5 text-muted-foreground" />
                     All Birthdays ({birthdays.length})
                   </h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
