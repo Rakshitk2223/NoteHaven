@@ -1,5 +1,8 @@
 // Theme Configuration System
-// Add new themes here without breaking existing code
+// Two families (Netflix, Prime), each with a light + dark mode = 4 themes total.
+// Netflix Dark is the default. Values are the streaming-platform palette from the
+// design brief, converted to HSL triplets so the existing shadcn token pipeline
+// (`hsl(var(--x))` + Tailwind opacity modifiers) keeps working unchanged.
 
 export interface Theme {
   name: string;
@@ -12,285 +15,162 @@ export interface Theme {
 }
 
 export interface ThemeColors {
-  background: string;
-  foreground: string;
-  card: string;
+  background: string;        // --canvas
+  foreground: string;        // --text-1
+  card: string;              // --surface-1
   cardForeground: string;
-  popover: string;
+  popover: string;           // --surface-1 (floating, glass)
   popoverForeground: string;
-  primary: string;
-  primaryForeground: string;
-  secondary: string;
+  primary: string;           // --accent (brand)
+  primaryForeground: string; // --accent-text
+  secondary: string;         // --surface-2
   secondaryForeground: string;
-  muted: string;
-  mutedForeground: string;
-  accent: string;
+  muted: string;             // --surface-3
+  mutedForeground: string;   // --text-2 (secondary body)
+  accent: string;            // shadcn hover-bg → --surface-2
   accentForeground: string;
-  destructive: string;
+  destructive: string;       // --danger
   destructiveForeground: string;
   border: string;
-  input: string;
-  ring: string;
+  input: string;             // --surface-3
+  ring: string;              // focus
+  // Extended design-system tokens (not part of base shadcn):
+  borderStrong: string;      // --border-strong
+  accentHover: string;       // --accent-hover
+  text3: string;             // --text-3 (captions / faint)
+  success: string;
+  warning: string;
 }
 
 export const themes: Record<string, Theme> = {
   'netflix': {
     name: 'netflix',
     label: 'Netflix',
-    description: 'Cinematic near-black with signature red — streaming-grade',
+    description: 'Near-black cinematic canvas, signature red as a rare accent',
     colors: {
-      // "Cinema light" — clean white surfaces with the Netflix red accent so the
-      // light/dark toggle still does something meaningful.
+      // NETFLIX LIGHT — secondary mode: clean, uncramped.
       light: {
-        background: '0 0% 100%',
-        foreground: '0 0% 9%',
-        card: '0 0% 100%',
-        cardForeground: '0 0% 9%',
+        background: '0 0% 96%',       // #f4f4f4
+        foreground: '0 0% 8%',        // #141414
+        card: '0 0% 100%',            // #ffffff
+        cardForeground: '0 0% 8%',
         popover: '0 0% 100%',
-        popoverForeground: '0 0% 9%',
-        primary: '357 85% 45%',
+        popoverForeground: '0 0% 8%',
+        primary: '357 92% 47%',       // #E50914
         primaryForeground: '0 0% 100%',
-        secondary: '0 0% 95%',
-        secondaryForeground: '0 0% 9%',
-        muted: '0 0% 95%',
-        mutedForeground: '0 0% 40%',
-        accent: '357 85% 45%',
-        accentForeground: '0 0% 100%',
-        destructive: '0 84.2% 60.2%',
+        secondary: '0 0% 98%',        // #fafafa
+        secondaryForeground: '0 0% 8%',
+        muted: '0 0% 93%',            // #eeeeee
+        mutedForeground: '0 0% 30%',  // #4d4d4d (text-2)
+        accent: '0 0% 98%',
+        accentForeground: '0 0% 8%',
+        destructive: '357 92% 47%',
         destructiveForeground: '0 0% 100%',
-        border: '0 0% 89%',
-        input: '0 0% 89%',
-        ring: '357 85% 45%',
-      },
-      // Authentic Netflix — #141414 base, #E50914 red.
-      dark: {
-        background: '0 0% 8%',
-        foreground: '0 0% 98%',
-        card: '0 0% 12%',
-        cardForeground: '0 0% 98%',
-        popover: '0 0% 10%',
-        popoverForeground: '0 0% 98%',
-        primary: '357 92% 47%',
-        primaryForeground: '0 0% 100%',
-        secondary: '0 0% 18%',
-        secondaryForeground: '0 0% 95%',
-        muted: '0 0% 16%',
-        mutedForeground: '0 0% 64%',
-        accent: '357 92% 47%',
-        accentForeground: '0 0% 100%',
-        destructive: '0 84.2% 60.2%',
-        destructiveForeground: '0 0% 100%',
-        border: '0 0% 20%',
-        input: '0 0% 18%',
+        border: '0 0% 92%',
+        input: '0 0% 93%',
         ring: '357 92% 47%',
+        borderStrong: '0 0% 86%',
+        accentHover: '357 92% 40%',   // #c40812
+        text3: '0 0% 54%',            // #8a8a8a
+        success: '141 68% 37%',       // #1e9e4a
+        warning: '43 89% 38%',        // #b8860b
+      },
+      // NETFLIX DARK — the design star. #141414 canvas, #E50914 accent.
+      dark: {
+        background: '0 0% 8%',        // #141414
+        foreground: '0 0% 100%',      // #ffffff (text-1)
+        card: '0 0% 11%',             // #1b1b1b (surface-1)
+        cardForeground: '0 0% 100%',
+        popover: '0 0% 11%',
+        popoverForeground: '0 0% 100%',
+        primary: '357 92% 47%',       // #E50914
+        primaryForeground: '0 0% 100%',
+        secondary: '0 0% 14%',        // #232323 (surface-2)
+        secondaryForeground: '0 0% 100%',
+        muted: '0 0% 17%',            // #2b2b2b (surface-3)
+        mutedForeground: '0 0% 70%',  // #b3b3b3 (text-2)
+        accent: '0 0% 14%',
+        accentForeground: '0 0% 100%',
+        destructive: '357 92% 47%',
+        destructiveForeground: '0 0% 100%',
+        border: '0 0% 16%',           // ≈ rgba(255,255,255,0.08) over canvas
+        input: '0 0% 17%',
+        ring: '357 92% 47%',
+        borderStrong: '0 0% 21%',     // ≈ rgba(255,255,255,0.14)
+        accentHover: '357 93% 52%',   // #f6121d
+        text3: '0 0% 43%',            // #6e6e6e
+        success: '135 62% 55%',       // #46d369
+        warning: '44 82% 50%',        // #e8b219
       }
     }
   },
 
-  'zen-garden': {
-    name: 'zen-garden',
-    label: 'Zen Garden',
-    description: 'Default calming theme with soft earth tones',
+  'prime': {
+    name: 'prime',
+    label: 'Prime',
+    description: 'Slate-navy canvas with cyan-blue accent — a different premium product',
     colors: {
+      // PRIME LIGHT
       light: {
-        background: '40 33% 96%',
-        foreground: '0 0% 15%',
-        card: '40 33% 96%',
-        cardForeground: '0 0% 15%',
-        popover: '40 33% 96%',
-        popoverForeground: '0 0% 15%',
-        primary: '213 34% 37%',
+        background: '210 18% 96%',    // #f2f4f6
+        foreground: '208 33% 9%',     // #0F171E
+        card: '0 0% 100%',
+        cardForeground: '208 33% 9%',
+        popover: '0 0% 100%',
+        popoverForeground: '208 33% 9%',
+        primary: '195 100% 33%',      // #007fa8
         primaryForeground: '0 0% 100%',
-        secondary: '0 0% 88%',
-        secondaryForeground: '0 0% 15%',
-        muted: '0 0% 88%',
-        mutedForeground: '0 0% 45%',
-        accent: '213 34% 37%',
-        accentForeground: '0 0% 100%',
-        destructive: '0 84.2% 60.2%',
+        secondary: '210 17% 99%',     // #fafbfc
+        secondaryForeground: '208 33% 9%',
+        muted: '210 21% 95%',         // #eef1f4
+        mutedForeground: '207 17% 32%', // #44535f (text-2)
+        accent: '210 17% 99%',
+        accentForeground: '208 33% 9%',
+        destructive: '358 67% 54%',   // #d83a3f
         destructiveForeground: '0 0% 100%',
-        border: '0 0% 88%',
-        input: '0 0% 88%',
-        ring: '213 34% 37%',
+        border: '210 16% 90%',
+        input: '210 21% 95%',
+        ring: '195 100% 33%',
+        borderStrong: '210 16% 84%',
+        accentHover: '197 100% 27%',  // #00638a
+        text3: '208 14% 58%',         // #8595a3
+        success: '156 69% 37%',       // #1d9e6b
+        warning: '36 83% 42%',        // #c47d12
       },
+      // PRIME DARK
       dark: {
-        background: '213 20% 15%',
-        foreground: '40 33% 90%',
-        card: '213 20% 18%',
-        cardForeground: '40 33% 90%',
-        popover: '213 20% 18%',
-        popoverForeground: '40 33% 90%',
-        primary: '213 50% 65%',
-        primaryForeground: '213 20% 15%',
-        secondary: '213 15% 25%',
-        secondaryForeground: '40 33% 90%',
-        muted: '213 15% 25%',
-        mutedForeground: '0 0% 60%',
-        accent: '213 50% 65%',
-        accentForeground: '213 20% 15%',
-        destructive: '0 84.2% 60.2%',
-        destructiveForeground: '0 0% 100%',
-        border: '213 15% 25%',
-        input: '213 15% 25%',
-        ring: '213 50% 65%',
-      }
-    }
-  },
-  
-  'ocean-breeze': {
-    name: 'ocean-breeze',
-    label: 'Ocean Breeze',
-    description: 'Fresh blue and teal tones inspired by the sea',
-    colors: {
-      light: {
-        background: '200 30% 96%',
-        foreground: '200 20% 15%',
-        card: '200 30% 96%',
-        cardForeground: '200 20% 15%',
-        popover: '200 30% 96%',
-        popoverForeground: '200 20% 15%',
-        primary: '195 85% 45%',
-        primaryForeground: '0 0% 100%',
-        secondary: '195 20% 85%',
-        secondaryForeground: '200 20% 15%',
-        muted: '195 20% 85%',
-        mutedForeground: '200 15% 45%',
-        accent: '175 60% 50%',
+        background: '208 33% 9%',     // #0F171E
+        foreground: '0 0% 100%',
+        card: '211 29% 14%',          // #1A242F (surface-1)
+        cardForeground: '0 0% 100%',
+        popover: '211 29% 14%',
+        popoverForeground: '0 0% 100%',
+        primary: '195 100% 44%',      // #00A8E1
+        primaryForeground: '200 100% 5%', // #001018 (dark text on bright cyan)
+        secondary: '213 28% 19%',     // #232F3E (surface-2)
+        secondaryForeground: '0 0% 100%',
+        muted: '211 26% 23%',         // #2b3a4a (surface-3)
+        mutedForeground: '210 18% 72%', // #aab7c4 (text-2)
+        accent: '213 28% 19%',
         accentForeground: '0 0% 100%',
-        destructive: '0 84.2% 60.2%',
+        destructive: '358 100% 68%',  // #ff5a5f
         destructiveForeground: '0 0% 100%',
-        border: '195 20% 85%',
-        input: '195 20% 85%',
-        ring: '195 85% 45%',
-      },
-      dark: {
-        background: '200 40% 12%',
-        foreground: '200 30% 90%',
-        card: '200 35% 16%',
-        cardForeground: '200 30% 90%',
-        popover: '200 35% 16%',
-        popoverForeground: '200 30% 90%',
-        primary: '195 85% 55%',
-        primaryForeground: '200 40% 12%',
-        secondary: '200 25% 22%',
-        secondaryForeground: '200 30% 90%',
-        muted: '200 25% 22%',
-        mutedForeground: '200 20% 60%',
-        accent: '175 60% 50%',
-        accentForeground: '200 40% 12%',
-        destructive: '0 84.2% 60.2%',
-        destructiveForeground: '0 0% 100%',
-        border: '200 25% 22%',
-        input: '200 25% 22%',
-        ring: '195 85% 55%',
-      }
-    }
-  },
-
-  'sunset-glow': {
-    name: 'sunset-glow',
-    label: 'Sunset Glow',
-    description: 'Warm oranges and purples like a beautiful sunset',
-    colors: {
-      light: {
-        background: '30 40% 96%',
-        foreground: '15 25% 15%',
-        card: '30 40% 96%',
-        cardForeground: '15 25% 15%',
-        popover: '30 40% 96%',
-        popoverForeground: '15 25% 15%',
-        primary: '25 85% 55%',
-        primaryForeground: '0 0% 100%',
-        secondary: '30 30% 85%',
-        secondaryForeground: '15 25% 15%',
-        muted: '30 30% 85%',
-        mutedForeground: '15 20% 45%',
-        accent: '280 60% 60%',
-        accentForeground: '0 0% 100%',
-        destructive: '0 84.2% 60.2%',
-        destructiveForeground: '0 0% 100%',
-        border: '30 30% 85%',
-        input: '30 30% 85%',
-        ring: '25 85% 55%',
-      },
-      dark: {
-        background: '270 35% 12%',
-        foreground: '30 40% 90%',
-        card: '270 30% 16%',
-        cardForeground: '30 40% 90%',
-        popover: '270 30% 16%',
-        popoverForeground: '30 40% 90%',
-        primary: '25 85% 60%',
-        primaryForeground: '270 35% 12%',
-        secondary: '270 20% 22%',
-        secondaryForeground: '30 40% 90%',
-        muted: '270 20% 22%',
-        mutedForeground: '270 15% 60%',
-        accent: '280 60% 65%',
-        accentForeground: '270 35% 12%',
-        destructive: '0 84.2% 60.2%',
-        destructiveForeground: '0 0% 100%',
-        border: '270 20% 22%',
-        input: '270 20% 22%',
-        ring: '25 85% 60%',
-      }
-    }
-  },
-
-  'forest-mist': {
-    name: 'forest-mist',
-    label: 'Forest Mist',
-    description: 'Earthy greens and natural tones',
-    colors: {
-      light: {
-        background: '120 20% 96%',
-        foreground: '120 15% 15%',
-        card: '120 20% 96%',
-        cardForeground: '120 15% 15%',
-        popover: '120 20% 96%',
-        popoverForeground: '120 15% 15%',
-        primary: '140 50% 40%',
-        primaryForeground: '0 0% 100%',
-        secondary: '120 15% 85%',
-        secondaryForeground: '120 15% 15%',
-        muted: '120 15% 85%',
-        mutedForeground: '120 10% 45%',
-        accent: '95 45% 50%',
-        accentForeground: '0 0% 100%',
-        destructive: '0 84.2% 60.2%',
-        destructiveForeground: '0 0% 100%',
-        border: '120 15% 85%',
-        input: '120 15% 85%',
-        ring: '140 50% 40%',
-      },
-      dark: {
-        background: '140 25% 12%',
-        foreground: '120 20% 90%',
-        card: '140 20% 16%',
-        cardForeground: '120 20% 90%',
-        popover: '140 20% 16%',
-        popoverForeground: '120 20% 90%',
-        primary: '140 50% 50%',
-        primaryForeground: '140 25% 12%',
-        secondary: '140 15% 22%',
-        secondaryForeground: '120 20% 90%',
-        muted: '140 15% 22%',
-        mutedForeground: '140 10% 60%',
-        accent: '95 45% 55%',
-        accentForeground: '140 25% 12%',
-        destructive: '0 84.2% 60.2%',
-        destructiveForeground: '0 0% 100%',
-        border: '140 15% 22%',
-        input: '140 15% 22%',
-        ring: '140 50% 50%',
+        border: '210 22% 22%',
+        input: '211 26% 23%',
+        ring: '195 100% 44%',
+        borderStrong: '210 22% 32%',
+        accentHover: '195 91% 54%',   // #1ec0f5
+        text3: '209 13% 48%',         // #6b7c8c
+        success: '157 64% 47%',       // #2bc48a
+        warning: '37 86% 59%',        // #f0a93b
       }
     }
   }
 };
 
-// Apply theme to the document
+// Apply theme to the document by writing CSS custom properties.
 export function applyTheme(themeName: string, mode: 'light' | 'dark') {
-  const theme = themes[themeName];
+  const theme = themes[themeName] || themes['netflix'];
   if (!theme) return;
 
   const colors = theme.colors[mode];
@@ -298,19 +178,19 @@ export function applyTheme(themeName: string, mode: 'light' | 'dark') {
 
   // Temporarily disable transitions for instant theme change
   root.style.setProperty('transition', 'none');
-  
-  // Force a reflow to ensure the transition disable takes effect
-  void root.offsetHeight;
+  void root.offsetHeight; // force reflow
 
-  // Apply all color changes at once
+  // Map known camelCase keys → kebab CSS vars (text3 → --text-3 explicitly).
   Object.entries(colors).forEach(([key, value]) => {
+    if (key === 'text3') {
+      root.style.setProperty('--text-3', value);
+      return;
+    }
     const cssVar = key.replace(/([A-Z])/g, '-$1').toLowerCase();
     root.style.setProperty(`--${cssVar}`, value);
   });
 
-  // Reskin the sidebar to match the active theme. These vars aren't part of the
-  // ThemeColors record, so derive them from the theme's tokens — this makes the
-  // theme switch truly end-to-end (the sidebar used to stay on the defaults).
+  // Reskin the sidebar from the active theme's tokens (surface-2 hover, accent active).
   const sidebar: Record<string, string> = {
     'sidebar-background': colors.background,
     'sidebar-foreground': colors.foreground,
@@ -325,18 +205,22 @@ export function applyTheme(themeName: string, mode: 'light' | 'dark') {
     root.style.setProperty(`--${cssVar}`, value);
   });
 
-  // Re-enable transitions after a small delay
+  // Persist the resolved data-theme for any attribute-based styling.
+  root.setAttribute('data-theme', `${themeName}-${mode}`);
+
   setTimeout(() => {
     root.style.removeProperty('transition');
   }, 0);
 }
 
-// Get current theme from localStorage or default
+// Migrate any legacy theme name (zen-garden, ocean-breeze, …) to the new default.
+const VALID_THEMES = new Set(['netflix', 'prime']);
+
 export function getCurrentTheme(): string {
-  return localStorage.getItem('app-theme') || 'netflix';
+  const saved = localStorage.getItem('app-theme');
+  return saved && VALID_THEMES.has(saved) ? saved : 'netflix';
 }
 
-// Save theme to localStorage
 export function saveTheme(themeName: string) {
   localStorage.setItem('app-theme', themeName);
 }

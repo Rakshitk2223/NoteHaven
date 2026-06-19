@@ -13,24 +13,25 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NoteHaven" />
-    <meta name="theme-color" content="#4B5D7A" />
+    <meta name="theme-color" content="#141414" />
 
     <!-- Apply saved light/dark mode before first paint to avoid a theme flash.
          Full per-theme color variables are applied by the app on mount. -->
     <script>
       (function () {
         try {
-          if (localStorage.getItem('theme') === 'dark') {
+          // Dark-first (Netflix default): dark unless the user explicitly chose light.
+          if (localStorage.getItem('theme') !== 'light') {
             document.documentElement.classList.add('dark');
           }
-        } catch (e) { /* localStorage unavailable */ }
+        } catch (e) { document.documentElement.classList.add('dark'); }
       })();
     </script>
-    
-    <!-- Google Fonts -->
+
+    <!-- Inter (variable) — the UI font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
     <meta property="og:title" content="NoteHaven - Your Personal Sanctuary" />
     <meta property="og:description" content="Your personal sanctuary for notes, tasks, and AI prompts" />

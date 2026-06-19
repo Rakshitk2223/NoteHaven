@@ -19,15 +19,19 @@ export default {
 		},
 		extend: {
 			fontFamily: {
-				heading: ['Poppins', 'sans-serif'],
-				body: ['Inter', 'sans-serif'],
+				heading: ['Inter', 'system-ui', 'sans-serif'],
+				body: ['Inter', 'system-ui', 'sans-serif'],
 			},
 			colors: {
 				border: 'hsl(var(--border))',
+				'border-strong': 'hsl(var(--border-strong))',
 				input: 'hsl(var(--input))',
 				ring: 'hsl(var(--ring))',
 				background: 'hsl(var(--background))',
 				foreground: 'hsl(var(--foreground))',
+				faint: 'hsl(var(--text-3))',
+				success: 'hsl(var(--success))',
+				warning: 'hsl(var(--warning))',
 				primary: {
 					DEFAULT: 'hsl(var(--primary))',
 					foreground: 'hsl(var(--primary-foreground))'
@@ -68,13 +72,24 @@ export default {
 				}
 			},
 			borderRadius: {
-				lg: 'var(--radius)',
-				md: 'calc(var(--radius) - 2px)',
-				sm: 'calc(var(--radius) - 4px)'
+				sm: 'var(--radius-sm)',   // 8px — buttons, inputs, chips
+				md: 'var(--radius-md)',   // 12px — cards, list items
+				lg: 'var(--radius-lg)',   // 16px — large panels, sheets
+				xl: 'var(--radius-xl)',   // 20px — modals
+				'2xl': '24px',
+				full: 'var(--radius-full)',
 			},
 			boxShadow: {
-				cinema: 'var(--shadow-cinema)',
-				'cinema-lg': 'var(--shadow-cinema-lg)',
+				1: 'var(--shadow-1)',
+				2: 'var(--shadow-2)',
+				3: 'var(--shadow-3)',
+				cinema: 'var(--shadow-1)',
+				'cinema-lg': 'var(--shadow-2)',
+			},
+			transitionDuration: {
+				fast: 'var(--dur-fast)',
+				base: 'var(--dur-base)',
+				slow: 'var(--dur-slow)',
 			},
 			keyframes: {
 				'accordion-down': {
@@ -141,6 +156,8 @@ export default {
 			transitionTimingFunction: {
 				'smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',
 				'bounce-in': 'cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+				spring: 'var(--ease-spring)',
+				'out-soft': 'var(--ease-out)',
 			}
 		}
 	},

@@ -308,7 +308,7 @@ const Settings = () => {
                   <SelectContent>
                     {Object.values(themes).map((t) => {
                       const swatch = t.colors[theme];
-                      const dots: string[] = [swatch.background, swatch.card, swatch.primary, swatch.accent];
+                      const dots: string[] = [swatch.background, swatch.card, swatch.primary];
                       return (
                         <SelectItem key={t.name} value={t.name}>
                           <div className="flex items-center gap-3">
