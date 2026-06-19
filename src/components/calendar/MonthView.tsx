@@ -112,7 +112,7 @@ export const MonthView = ({
               className={cn(
                 "min-h-[120px] lg:min-h-[140px] p-1.5 lg:p-2 border-r border-b cursor-pointer transition-all flex flex-col",
                 !isCurrentMonth && "bg-muted/30 text-muted-foreground",
-                isSelected && "bg-primary/10 border-primary ring-1 ring-primary",
+                isSelected && "bg-secondary ring-1 ring-primary",
                 isTodayDate && !isSelected && "bg-accent/30",
                 isWeekendDay && isCurrentMonth && !isSelected && "bg-muted/40",
                 "hover:bg-muted/50"

@@ -76,7 +76,7 @@ export function StatsWidget({ data, isLoading }: StatsWidgetProps) {
             </div>
             <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
-          <p className="text-2xl font-bold text-primary mb-1">
+          <p className="text-2xl font-bold text-foreground tabular-nums mb-1">
             {item.value}
           </p>
           <p className="text-sm font-medium text-foreground mb-1">

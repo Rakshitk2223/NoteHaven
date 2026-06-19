@@ -1,16 +1,17 @@
 // Shared visual helpers for the Media UI.
 
-// Type badges are intentionally NEUTRAL (badge discipline): a single quiet chip so
-// artwork stays the hero and color is reserved for semantic status, not taxonomy.
+// Category is meaningful information, so color is EARNED here — the one sanctioned
+// exception to single-color badge discipline. Distinct hues at one uniform, desaturated
+// saturation (/12 fill, no ring), confined to the type badge only. Not the old neon.
 export const TYPE_BADGE_SOFT: Record<string, string> = {
-  Anime: 'bg-muted text-muted-foreground',
-  Manga: 'bg-muted text-muted-foreground',
-  Manhwa: 'bg-muted text-muted-foreground',
-  Manhua: 'bg-muted text-muted-foreground',
-  Series: 'bg-muted text-muted-foreground',
-  Movie: 'bg-muted text-muted-foreground',
-  KDrama: 'bg-muted text-muted-foreground',
-  JDrama: 'bg-muted text-muted-foreground',
+  Anime:  'bg-sky-500/12 text-sky-700 dark:text-sky-300',
+  Manga:  'bg-violet-500/12 text-violet-700 dark:text-violet-300',
+  Manhwa: 'bg-rose-500/12 text-rose-700 dark:text-rose-300',
+  Manhua: 'bg-amber-500/12 text-amber-700 dark:text-amber-300',
+  Series: 'bg-blue-500/12 text-blue-700 dark:text-blue-300',
+  Movie:  'bg-red-500/12 text-red-700 dark:text-red-300',
+  KDrama: 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300',
+  JDrama: 'bg-teal-500/12 text-teal-700 dark:text-teal-300',
 };
 
 export const typeBadgeSoft = (type: string) =>
@@ -35,7 +36,7 @@ export const AIRING_LABEL: Record<string, string> = {
 // Status dot colors (kept consistent across card + chips).
 export const STATUS_DOT: Record<string, string> = {
   Watching: 'bg-success',
-  Reading: 'bg-primary',
+  Reading: 'bg-muted-foreground',
   Completed: 'bg-muted-foreground',
   'Plan to Watch': 'bg-warning',
   'Plan to Read': 'bg-warning',

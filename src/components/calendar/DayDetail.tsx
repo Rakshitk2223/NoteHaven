@@ -71,7 +71,7 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
     <div className="bg-card rounded-lg border shadow-sm p-4">
       <div className="flex items-center justify-between mb-4 pb-4 border-b">
         <div className="flex items-center gap-2">
-          <Calendar className="h-5 w-5 text-primary" />
+          <Calendar className="h-5 w-5 text-muted-foreground" />
           <h3 className="font-semibold">{format(date, 'EEEE, MMMM d')}</h3>
         </div>
         

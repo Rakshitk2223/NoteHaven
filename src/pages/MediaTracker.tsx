@@ -1649,7 +1649,7 @@ const MediaTracker = () => {
                           <img src={bannerUrl} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                           <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
                           {editingItem.has_new_content && (
-                            <div className="absolute right-3 top-3 flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground shadow-lg">
+                            <div className="absolute right-3 top-3 flex items-center gap-1 rounded-md bg-[hsl(var(--success)/0.15)] px-2 py-1 text-xs font-semibold text-[hsl(var(--success))] shadow-lg">
                               <Sparkles className="h-3.5 w-3.5" /> New content
                             </div>
                           )}
@@ -1780,7 +1780,7 @@ const MediaTracker = () => {
                                   key={s.season_number}
                                   className={cn(
                                     'rounded-lg border p-3',
-                                    isCurrent ? 'border-primary/60 bg-primary/5' : 'border-border'
+                                    isCurrent ? 'border-border-strong bg-secondary' : 'border-border'
                                   )}
                                 >
                                   <div className="flex items-center justify-between text-sm">
@@ -1998,7 +1998,7 @@ const MediaTracker = () => {
                   </span>
                 )}
               </Button>
-              <Button size="sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-8 w-8 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
+              <Button size="sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-8 w-8 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
                 {viewMode === 'grid' ? <ListIcon className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
               </Button>
             </div>
@@ -2014,10 +2014,10 @@ const MediaTracker = () => {
               <div className="flex items-center gap-2">
                 {/* View toggle — glassy segmented control */}
                 <div className="hidden sm:flex items-center gap-0.5 rounded-md border border-foreground/10 bg-background/40 backdrop-blur-md p-0.5 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.10)]">
-                  <Button size="icon-sm" variant={viewMode === 'grid' ? 'default' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
+                  <Button size="icon-sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
                     <LayoutGrid className="h-4 w-4" />
                   </Button>
-                  <Button size="icon-sm" variant={viewMode === 'list' ? 'default' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
+                  <Button size="icon-sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
                     <ListIcon className="h-4 w-4" />
                   </Button>
                 </div>
@@ -2372,7 +2372,7 @@ const MediaTracker = () => {
                     aria-pressed={active}
                     className={cn(
                       'rounded-lg border p-3 text-left transition-colors',
-                      active ? 'border-primary bg-primary/5' : 'border-border bg-card hover:bg-muted/50'
+                      active ? 'border-border-strong bg-secondary' : 'border-border bg-card hover:bg-muted/50'
                     )}
                   >
                     <div className="flex items-center gap-1.5">

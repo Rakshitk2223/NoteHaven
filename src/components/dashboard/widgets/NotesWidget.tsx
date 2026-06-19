@@ -42,7 +42,7 @@ export function NotesWidget({
           variant="outline" 
           size="sm" 
           onClick={onViewAll}
-          className="h-8 px-3 text-xs font-medium hover:bg-primary hover:text-primary-foreground transition-colors"
+          className="h-8 px-3 text-xs font-medium hover:bg-secondary hover:text-foreground transition-colors"
         >
           View All →
         </Button>

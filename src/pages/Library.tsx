@@ -609,7 +609,7 @@ const PromptsTab = () => {
                 whileHover={{ y: -4, scale: 1.01, transition: { duration: 0.2 } }}
               >
                 {prompt.is_pinned && (
-                  <div className="absolute -top-2 -right-2 bg-primary text-primary-foreground rounded-full p-1 shadow">
+                  <div className="absolute -top-2 -right-2 bg-secondary text-foreground border border-border rounded-full p-1 shadow">
                     <Pin className="h-3 w-3" />
                   </div>
                 )}
@@ -664,7 +664,7 @@ const PromptsTab = () => {
                     size="sm"
                     variant="outline"
                     onClick={() => handleTogglePin(prompt)}
-                    className={prompt.is_pinned ? "text-primary" : ""}
+                    className={prompt.is_pinned ? "text-foreground" : ""}
                   >
                     <Pin className={`h-4 w-4 ${prompt.is_pinned ? 'fill-current' : ''}`} />
                   </Button>
@@ -1158,7 +1158,7 @@ const SnippetsTab = () => {
                           return (
                             <div
                               key={snippet.id}
-                              className={`group/file flex items-center rounded-md transition-colors ${active ? 'bg-primary/10' : 'hover:bg-secondary/50'}`}
+                              className={`group/file flex items-center rounded-md border-l-2 transition-colors ${active ? 'bg-secondary border-primary' : 'border-transparent hover:bg-secondary/50'}`}
                             >
                               <button
                                 onClick={() => {
@@ -1167,10 +1167,10 @@ const SnippetsTab = () => {
                                   setIsEditing(false);
                                   resetForm();
                                 }}
-                                className={`flex-1 min-w-0 text-left text-sm px-2 py-1.5 ${active ? 'text-primary font-medium' : 'text-foreground'}`}
+                                className={`flex-1 min-w-0 text-left text-sm px-2 py-1.5 ${active ? 'text-foreground font-medium' : 'text-foreground'}`}
                               >
                                 <div className="flex items-center gap-1.5 min-w-0">
-                                  {snippet.is_pinned && <Pin className="h-3 w-3 flex-shrink-0 text-primary" />}
+                                  {snippet.is_pinned && <Pin className="h-3 w-3 flex-shrink-0 text-foreground" />}
                                   <span className="truncate flex-1">{fileLabel(snippet)}</span>
                                   <span className="text-[10px] font-mono text-muted-foreground flex-shrink-0">{langShort(snippet.language)}</span>
                                 </div>
@@ -1305,7 +1305,7 @@ const SnippetsTab = () => {
               <div className="p-4 border-b border-border">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                    {selectedSnippet.is_pinned && <Pin className="h-4 w-4 fill-current text-primary flex-shrink-0" />}
+                    {selectedSnippet.is_pinned && <Pin className="h-4 w-4 fill-current text-foreground flex-shrink-0" />}
                     {selectedSnippet.is_favorited && <Star className="h-4 w-4 fill-current text-warning flex-shrink-0" />}
                     <h2 className="text-lg font-semibold text-foreground truncate">
                       {selectedSnippet.title}
@@ -1396,7 +1396,7 @@ const SnippetsTab = () => {
                           {selectedSnippet.is_favorited ? 'Remove from favorites' : 'Add to favorites'}
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleTogglePinSnippet(selectedSnippet)}>
-                          <Pin className={`h-4 w-4 mr-2 ${selectedSnippet.is_pinned ? 'fill-current text-primary' : ''}`} />
+                          <Pin className={`h-4 w-4 mr-2 ${selectedSnippet.is_pinned ? 'fill-current text-foreground' : ''}`} />
                           {selectedSnippet.is_pinned ? 'Unpin' : 'Pin'}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />

@@ -208,7 +208,7 @@ const Birthdays = () => {
     const isPast = days > 300; // More than 300 days means it was recent past
     
     return (
-      <div className="group relative p-4 rounded-xl bg-gradient-to-br from-card to-card/50 border-2 border-border hover:border-primary/50 transition-all hover:shadow-lg">
+      <div className="group relative p-4 rounded-xl bg-gradient-to-br from-card to-card/50 border-2 border-border hover:border-border-strong transition-all hover:shadow-lg">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-lg mb-1 truncate">{birthday.name}</h3>
@@ -233,8 +233,8 @@ const Birthdays = () => {
             <Button 
               size="icon" 
               variant="ghost" 
-              onClick={() => openEditModal(birthday)} 
-              className="h-9 w-9 hover:bg-primary/10"
+              onClick={() => openEditModal(birthday)}
+              className="h-9 w-9 hover:bg-secondary"
             >
               <Edit className="h-4 w-4" />
             </Button>

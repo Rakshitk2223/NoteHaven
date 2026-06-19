@@ -456,7 +456,7 @@ const Tasks = () => {
                           />
                           <div className="flex-1 text-foreground flex flex-col gap-1 min-w-0">
                             <span className="flex items-center gap-2 break-words">
-                              {task.is_pinned && <Pin className="h-3 w-3 text-primary flex-shrink-0" />}
+                              {task.is_pinned && <Pin className="h-3 w-3 text-foreground flex-shrink-0" />}
                               <span className="break-words">{task.task_text}</span>
                             </span>
                             {task.due_date && (
@@ -490,7 +490,7 @@ const Tasks = () => {
                               size="sm"
                               variant="ghost"
                               onClick={() => handleTogglePin(task)}
-                              className={"h-8 w-8 p-0 text-muted-foreground hover:text-foreground touch-manipulation" + (task.is_pinned ? ' text-primary' : '')}
+                              className={"h-8 w-8 p-0 text-muted-foreground hover:text-foreground touch-manipulation" + (task.is_pinned ? ' text-foreground' : '')}
                               title={task.is_pinned ? 'Unpin' : 'Pin'}
                             >
                               <Pin className={`h-4 w-4 ${task.is_pinned ? 'fill-current' : ''}`} />
@@ -586,7 +586,7 @@ const Tasks = () => {
                             size="sm"
                             variant="ghost"
                             onClick={() => handleTogglePin(task)}
-                            className={"text-muted-foreground hover:text-foreground" + (task.is_pinned ? ' text-primary' : '')}
+                            className={"text-muted-foreground hover:text-foreground" + (task.is_pinned ? ' text-foreground' : '')}
                           >
                             <Pin className={`h-4 w-4 ${task.is_pinned ? 'fill-current' : ''}`} />
                           </Button>

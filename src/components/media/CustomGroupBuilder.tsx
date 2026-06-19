@@ -135,7 +135,7 @@ export const CustomGroupBuilder = ({
 
   const activeClasses = 'bg-primary text-primary-foreground border-primary shadow-md';
   const inactiveClasses =
-    'bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground';
+    'bg-background text-muted-foreground border-border hover:border-border-strong hover:text-foreground';
 
   return (
     <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide items-center">
@@ -187,7 +187,7 @@ export const CustomGroupBuilder = ({
                   e.stopPropagation();
                   handleEditGroup(group);
                 }}
-                className="w-5 h-5 rounded-full bg-secondary flex items-center justify-center hover:bg-primary hover:text-primary-foreground"
+                className="w-5 h-5 rounded-full bg-secondary flex items-center justify-center hover:bg-muted hover:text-foreground"
                 aria-label={`Edit group ${group.name}`}
                 title={`Edit group ${group.name}`}
               >
@@ -217,7 +217,7 @@ export const CustomGroupBuilder = ({
               onClick={handleAddGroup}
               className={cn(
                 pillBase,
-                'bg-background text-muted-foreground border-dashed border-border hover:border-primary hover:text-primary'
+                'bg-background text-muted-foreground border-dashed border-border hover:border-border-strong hover:text-foreground'
               )}
               aria-label="Add custom group"
             >

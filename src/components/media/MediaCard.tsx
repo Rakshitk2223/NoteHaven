@@ -219,7 +219,7 @@ const MediaCardComponent = ({
             </Badge>
           )}
           {hasNewContent && (
-            <span className="flex items-center gap-1 rounded-md bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-lg shadow-primary/40 ring-1 ring-primary/50 animate-pulse">
+            <span className="flex items-center gap-1 rounded-md bg-[hsl(var(--success)/0.15)] px-1.5 py-0.5 text-[10px] font-semibold text-[hsl(var(--success))] shadow-lg">
               <Sparkles className="h-3 w-3" /> New
             </span>
           )}

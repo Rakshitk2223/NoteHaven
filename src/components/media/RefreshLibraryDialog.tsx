@@ -177,7 +177,7 @@ export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, sc
                 <span className="text-success">{progress.updated} updated</span>
                 {progress.failed > 0 && <span className="text-destructive">{progress.failed} no match</span>}
                 {progress.skipped > 0 && <span>{progress.skipped} skipped</span>}
-                {progress.newContent > 0 && <span className="text-primary">{progress.newContent} new</span>}
+                {progress.newContent > 0 && <span className="text-success">{progress.newContent} new</span>}
               </span>
             </div>
             {!running && progress.failed > 0 && progress.failedTitles.length > 0 && (

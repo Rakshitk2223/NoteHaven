@@ -1030,7 +1030,7 @@ const Notes = () => {
                           {note.title === 'Inbox' ? (
                             <Lightbulb className="h-3 w-3 text-warning flex-shrink-0" />
                           ) : note.is_pinned ? (
-                            <Pin className="h-3 w-3 text-primary flex-shrink-0" />
+                            <Pin className="h-3 w-3 text-foreground flex-shrink-0" />
                           ) : null}
                           <span className="truncate min-w-0">{truncateText(note.title || 'Untitled', 80)}</span>
                         </div>
