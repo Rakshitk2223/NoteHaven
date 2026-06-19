@@ -4,31 +4,36 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+// ONE button family. Every button in the app routes through this primitive.
+// Shared anatomy: radius-sm, h-padding space-4, 14px/600, icon+label gap space-2,
+// fast spring transition, scale(0.97) on press, visible focus ring.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors zen-transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:scale-[1.01] active:scale-[0.99]",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm text-sm font-semibold transition-all duration-fast ease-spring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 active:scale-[0.97]",
   {
     variants: {
       variant: {
-        // Liquid-glass treatment: translucent surfaces + frosted, saturated backdrop
-        // blur + a bright specular top highlight, and a soft colour glow on the solid
-        // CTAs so they lift off the page. More transparent than a flat fill.
+        // primary — the single accent-filled action per screen.
         default:
-          "bg-primary/80 text-primary-foreground backdrop-blur-lg backdrop-saturate-150 border border-white/15 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.35),0_4px_18px_-4px_hsl(var(--primary)/0.45)] hover:bg-primary/90 hover:shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.40),0_6px_24px_-4px_hsl(var(--primary)/0.6)]",
+          "bg-primary text-primary-foreground hover:bg-[hsl(var(--accent-hover))] hover:shadow-[0_4px_16px_-2px_hsl(var(--primary)/0.45)]",
+        // destructive — delete / cancel confirmations only.
         destructive:
-          "bg-destructive/80 text-destructive-foreground backdrop-blur-lg backdrop-saturate-150 border border-white/15 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.30),0_4px_18px_-4px_hsl(var(--destructive)/0.45)] hover:bg-destructive/90",
-        outline:
-          "border border-foreground/15 bg-background/30 backdrop-blur-lg backdrop-saturate-150 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.12)] hover:bg-accent/40 hover:text-accent-foreground hover:border-foreground/25",
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:shadow-[0_4px_16px_-2px_hsl(var(--destructive)/0.45)]",
+        // secondary — common neutral actions (surface-2 + border).
         secondary:
-          "bg-secondary/40 text-secondary-foreground backdrop-blur-lg backdrop-saturate-150 border border-foreground/10 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.15)] hover:bg-secondary/60",
-        ghost: "hover:bg-foreground/5 hover:text-accent-foreground hover:backdrop-blur-md",
+          "bg-secondary text-foreground border border-border hover:bg-muted hover:border-border-strong",
+        // outline — neutral, kept distinct (transparent + border).
+        outline:
+          "border border-border bg-transparent text-foreground hover:bg-secondary hover:border-border-strong",
+        // ghost — tertiary / toolbar / "View All →".
+        ghost: "bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
-        icon: "h-10 w-10",
-        "icon-sm": "h-9 w-9", // square, matches the `sm` text-button height
+        default: "h-10 px-4 py-2",       // md — 40px
+        sm: "h-8 px-3",                   // 32px
+        lg: "h-12 px-6",                  // 48px
+        icon: "h-10 w-10",               // icon-only, 40×40
+        "icon-sm": "h-8 w-8",            // icon-only, 32×32
       },
     },
     defaultVariants: {
