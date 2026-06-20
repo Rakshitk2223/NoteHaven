@@ -128,6 +128,22 @@ const normalizeMediaItem = (item: MediaItem): MediaItem => {
 const READABLE_TYPES: MediaItem['type'][] = ['Manga', 'Manhwa', 'Manhua'];
 const WATCHABLE_TYPES: MediaItem['type'][] = ['Series', 'Anime', 'KDrama', 'JDrama'];
 
+// Big, frictionless +/- control for progress fields in the detail drawer.
+function ProgressStepper({ label, value, onDec, onInc }: { label: string; value: number; onDec: () => void; onInc: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      <div className="flex items-center gap-2.5">
+        <button type="button" onClick={onDec} aria-label={`Decrease ${label}`}
+          className="h-9 w-9 grid place-items-center rounded-lg border border-border-strong bg-card text-lg font-bold text-foreground transition hover:bg-secondary active:scale-90">−</button>
+        <span className="min-w-[2.75rem] text-center text-xl font-extrabold tabular-nums">{value}</span>
+        <button type="button" onClick={onInc} aria-label={`Increase ${label}`}
+          className="h-9 w-9 grid place-items-center rounded-lg bg-gradient-brand text-lg font-bold text-white shadow-glow transition hover:brightness-110 active:scale-90">+</button>
+      </div>
+    </div>
+  );
+}
+
 // Map status to display category for UI organization
 const getStatusCategory = (status: string): string => {
   switch (status) {
@@ -970,6 +986,41 @@ const MediaTracker = () => {
     }
   };
 
+  // Generic optimistic patch (status / rating / season / episode / chapter).
+  // Updates the open detail item AND the React Query cache so the drawer and the
+  // grid/list cards stay perfectly in sync — no refetch, instant feedback.
+  const patchMedia = async (
+    item: MediaItem,
+    patch: { status?: MediaItem['status']; rating?: number | null; current_season?: number; current_episode?: number; current_chapter?: number },
+  ) => {
+    setUpdatingIds((prev) => new Set(prev).add(item.id));
+    setEditingItem((prev) => (prev && prev.id === item.id ? ({ ...prev, ...patch } as MediaItem) : prev));
+    queryClient.setQueryData<{ pages: Array<{ items: MediaItem[]; count: number; page: number }> }>(
+      ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
+      (old) => old ? {
+        ...old,
+        pages: old.pages.map((pg) => ({ ...pg, items: pg.items.map((i) => i.id === item.id ? ({ ...i, ...patch } as MediaItem) : i) })),
+      } : old,
+    );
+    try {
+      const { error } = await supabase.from('media_tracker').update(patch).eq('id', item.id);
+      if (error) throw error;
+    } catch (e: unknown) {
+      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
+      toast({ title: 'Update failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
+    } finally {
+      setUpdatingIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
+    }
+  };
+
+  // +/- a numeric progress field from the detail drawer (floors at 1).
+  const bumpField = (item: MediaItem, field: 'current_season' | 'current_episode' | 'current_chapter', amount: number) => {
+    const v = Math.max((Number(item[field]) || 0) + amount, 1);
+    const patch: { current_season?: number; current_episode?: number; current_chapter?: number } = {};
+    patch[field] = v;
+    patchMedia(item, patch);
+  };
+
   const handleExportJson = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -1590,7 +1641,7 @@ const MediaTracker = () => {
 
         <div className="flex-1 lg:ml-0 min-w-0">
           <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
-            <SheetContent side="right" className="w-full sm:max-w-lg p-0">
+            <SheetContent side="right" className="w-full sm:max-w-xl p-0 flex flex-col">
               <SheetHeader className="p-6 border-b border-border">
                 <SheetTitle className="flex items-center justify-between gap-3">
                   <span className="truncate">
@@ -1724,6 +1775,70 @@ const MediaTracker = () => {
                               ))}
                             </div>
                           )}
+                        </div>
+                      </div>
+
+                      {/* Your progress — always-visible quick controls (the daily core) */}
+                      <div className="aurora-card p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-sm font-bold text-foreground">Your progress</h4>
+                          <span className="text-xs text-muted-foreground tabular-nums">{myProgress}</span>
+                        </div>
+                        {isReadableItem ? (
+                          <ProgressStepper
+                            label="Chapter"
+                            value={editingItem.current_chapter || 0}
+                            onDec={() => bumpField(editingItem, 'current_chapter', -1)}
+                            onInc={() => bumpField(editingItem, 'current_chapter', 1)}
+                          />
+                        ) : (
+                          <div className="space-y-3">
+                            <ProgressStepper
+                              label="Season"
+                              value={editingItem.current_season || 1}
+                              onDec={() => bumpField(editingItem, 'current_season', -1)}
+                              onInc={() => bumpField(editingItem, 'current_season', 1)}
+                            />
+                            <ProgressStepper
+                              label="Episode"
+                              value={editingItem.current_episode || 0}
+                              onDec={() => bumpField(editingItem, 'current_episode', -1)}
+                              onInc={() => bumpField(editingItem, 'current_episode', 1)}
+                            />
+                          </div>
+                        )}
+                        <div className="space-y-1.5">
+                          <span className="text-xs font-medium text-muted-foreground">Status</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(isReadableItem ? ['Reading', 'Plan to Read', 'Completed'] : ['Watching', 'Plan to Watch', 'Completed']).map((s) => (
+                              <button
+                                key={s}
+                                type="button"
+                                onClick={() => patchMedia(editingItem, { status: s as MediaItem['status'] })}
+                                className={cn(
+                                  'rounded-full px-3 py-1.5 text-xs font-semibold border transition active:scale-95',
+                                  editingItem.status === s
+                                    ? 'bg-gradient-brand text-white border-transparent shadow-glow'
+                                    : 'border-border text-muted-foreground hover:text-foreground hover:border-border-strong'
+                                )}
+                              >
+                                {s}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <span className="text-xs font-medium text-muted-foreground">Your rating</span>
+                          <div className="flex items-center gap-0.5 flex-wrap">
+                            {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                              <button key={n} type="button" onClick={() => patchMedia(editingItem, { rating: n })} className="p-0.5 transition active:scale-90" title={`${n}/10`}>
+                                <Star className={cn('h-5 w-5', (editingItem.rating || 0) >= n ? 'fill-warning text-warning' : 'text-muted-foreground/40')} />
+                              </button>
+                            ))}
+                            {editingItem.rating ? (
+                              <button type="button" onClick={() => patchMedia(editingItem, { rating: null })} className="ml-2 text-xs text-muted-foreground hover:text-foreground">Clear</button>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
 

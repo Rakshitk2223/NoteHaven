@@ -60,10 +60,23 @@ echo "✅ Function deployed successfully!"
 echo ""
 
 # Set environment variables
+# SECURITY: never hard-code secrets here. The previously-committed TMDB key was
+# exposed in git history and MUST be rotated at
+#   https://www.themoviedb.org/settings/api
+# Then provide the new key via your environment before running this script:
+#   export TMDB_API_KEY=your_new_key      (and optionally FANART_API_KEY=...)
 echo "🔧 Setting environment variables..."
-supabase secrets set TMDB_API_KEY="381f2d0e99cd3d0cc1e5b9fa1099a9d5"
-
-echo "✅ Environment variables set"
+if [ -z "$TMDB_API_KEY" ]; then
+    echo "⚠️  TMDB_API_KEY not set in environment — skipping (movies/series enrichment + poster fallback won't work until set)."
+    echo "    Run:  export TMDB_API_KEY=your_new_key  &&  ./deploy-edge-function.sh"
+else
+    supabase secrets set TMDB_API_KEY="$TMDB_API_KEY"
+    echo "✅ TMDB_API_KEY set"
+fi
+if [ -n "$FANART_API_KEY" ]; then
+    supabase secrets set FANART_API_KEY="$FANART_API_KEY"
+    echo "✅ FANART_API_KEY set"
+fi
 echo ""
 
 echo "🎉 Deployment complete!"

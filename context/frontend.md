@@ -11,10 +11,11 @@
 | Framework | React 18 (function components + hooks) |
 | Language | TypeScript 5.8 |
 | Build tool | Vite 5 (`@vitejs/plugin-react-swc`) |
-| Styling | Tailwind CSS 3 + custom "Zen Garden" design tokens (HSL CSS vars) |
+| Styling | Tailwind CSS 3 + **"Aurora"** design tokens (HSL CSS vars): charcoal canvas, indigo→cyan gradient accents, glass + glow |
 | UI primitives | shadcn/ui (Radix UI under the hood) — ~50 components in `src/components/ui` |
 | Icons | lucide-react |
-| Server state | TanStack React Query v5 (used heavily only in MediaTracker; most pages use manual `useState` + `useEffect`) |
+| Server state | TanStack React Query v5 w/ app-wide caching defaults (staleTime 5m, gcTime 30m, no refetch-on-focus); heavy use only in MediaTracker, most pages still manual `useState`+`useEffect` |
+| Code-splitting | All authenticated routes are `React.lazy` (Suspense + `RouteFallback`); vite `manualChunks` groups vendors; route chunks prefetched on nav hover |
 | Routing | react-router-dom v6 |
 | Animation | framer-motion + hand-written CSS keyframes in `index.css` |
 | Rich text | Tiptap v2 (StarterKit + Underline) for Notes |
@@ -37,15 +38,18 @@ Path alias: `@/` → `src/`.
 `src/App.tsx` composes the provider tree (outer → inner):
 
 ```
-QueryClientProvider
+QueryClientProvider          (caching defaults: staleTime 5m, gcTime 30m, no refetch-on-focus)
   └ AuthProvider              (src/hooks/useAuth.tsx)
      └ SidebarProvider        (src/contexts/SidebarContext.tsx)
         └ TooltipProvider
            ├ Toaster          (shadcn toast)
-           └ BrowserRouter → AppInner (Routes)
+           ├ AuroraBackdrop   (ambient indigo/cyan orbs, fixed z-0)
+           └ BrowserRouter
+                ├ CommandPalette        (⌘K launcher)
+                └ AppInner → Suspense(RouteFallback) → lazy Routes
 ```
 
-`AppInner` also applies the saved theme on mount (reads `localStorage.theme` for light/dark and `app-theme` for the color theme, then calls `applyTheme`).
+`AppInner` also applies the saved theme on mount (reads `localStorage.theme` for light/dark and `app-theme` for the color theme, then calls `applyTheme`). All authenticated route components are `React.lazy`-imported (code-split); only auth/landing routes load eagerly.
 
 > Note: only the shadcn `Toaster` (`use-toast`) is mounted; the previously-mounted Sonner toaster has been removed.
 
@@ -103,21 +107,27 @@ All app routes are wrapped in `<ProtectedRoute>` except auth/public ones.
 - Collapsed items show a hover tooltip implemented with `group-hover` utility classes (not the Radix Tooltip).
 
 
-### Page header pattern
-Most pages render their own mobile header (`lg:hidden` sticky bar with a hamburger `Menu` button calling `toggleSidebar`) plus a desktop header. **Exceptions** — `MoneyLedger`, `Subscriptions`, and `Calendar` have no mobile hamburger header, so on mobile (sidebar collapsed) there's no in-page way to open the sidebar. See the audit for impact.
+- **Aurora redesign**: glass rail (`bg-sidebar/85 backdrop-blur-xl`), gradient brand mark, gradient active indicator + glow, a `⌘K` Search trigger. Hovering/focusing a nav link **prefetches that route's code chunk** via `lib/route-prefetch.ts` (instant navigation).
+
+### Page shell (`src/components/PageShell.tsx`)
+Most content pages render through **`<PageShell title icon actions subtitle>`** — it supplies the sidebar, a glassy header with a gradient title, a transparent padded content region (so the ambient backdrop shows), the `lg:hidden` mobile hamburger, and an entrance transition. Bespoke full-height pages (Notes, MediaTracker, Calendar) keep their own layout with a transparent root instead of PageShell.
+
+### Command palette (`src/components/CommandPalette.tsx`)
+`⌘K` / `Ctrl+K` (or `window.dispatchEvent(new Event('open-command-palette'))`, e.g. the sidebar Search button) opens a cmdk launcher to jump to any screen or run quick actions.
 
 ---
 
-## 6. Styling System (`src/index.css` + `tailwind.config.ts` + `lib/themes.ts`)
+## 6. Styling System — "Aurora" (`src/index.css` + `tailwind.config.ts` + `lib/themes.ts`)
 
-- **Design tokens**: HSL CSS variables on `:root` and `.dark`. Tailwind colors map to `hsl(var(--token))`.
-- **Fonts**: Poppins (`font-heading`), Inter (`font-body`), loaded from Google Fonts in `index.html`.
-- **Color themes**: 4 themes in `lib/themes.ts` — `zen-garden` (default), `ocean-breeze`, `sunset-glow`, `forest-mist`. Each defines a full light + dark palette. `applyTheme(name, mode)` writes every token to `document.documentElement` inline styles (temporarily disabling transitions to avoid flash). Saved to `localStorage` key `app-theme`; light/dark saved under `theme`.
-- **Utility classes**: `.zen-card`, `.zen-shadow`, `.zen-shadow-lg`, `.zen-transition`, hover-lift/scale, fade/slide keyframe animations, `.stagger-item` nth-child delays, `.loading-shimmer`.
+- **Aesthetic**: premium-SaaS. Deep charcoal canvas, electric **indigo (`--primary`) → cyan (`--accent-2`) gradient** accents, glassy surfaces with soft glow, gradient headlines, crisp spring motion.
+- **Design tokens**: HSL CSS variables on `:root` (light) and `.dark`. Tailwind colors map to `hsl(var(--token))`. Aurora adds `--accent-2`/`--accent-2-hover`, `--glow`, and gradient/glow vars (`--gradient-brand[-soft]`, `--glow-sm/md/lg`).
+- **Fonts**: Inter for both `font-heading` and `font-body`.
+- **Color themes**: 3 families in `lib/themes.ts` — `aurora` (default, dark-first), `netflix`, `prime` — each a full light+dark palette. `applyTheme(name, mode)` writes every token to `document.documentElement` inline styles (transitions briefly disabled to avoid flash). Persisted to `localStorage` `app-theme`; light/dark under `theme`. The static `:root`/`.dark` blocks in `index.css` are the Aurora first-paint fallback.
+- **Signature utilities**: `.gradient-text`/`.gradient-text-soft` (headlines), `.bg-gradient-brand[-soft]`, `.zen-card` (workhorse card — lit border + glow hover), `.aurora-card` (gradient-bordered hero/stat tile), `.glass`/`.glass-strong` (modals/sidebar/floating), `.glow` + `shadow-glow*`, `.chip-tint`, hover-lift/scale, `.loading-shimmer`, `.animate-glow-pulse`/`.animate-float`, `.stagger-item`.
+- **Ambient backdrop**: `<AuroraBackdrop/>` (rendered once in `App.tsx`) paints two drifting indigo/cyan orbs fixed behind the app at `z-0`; page roots are transparent so it glows through behind cards.
+- **Motion**: shared framer-motion helpers in `components/ui/motion.tsx` — `PageTransition`, `Stagger`/`StaggerItem`, `FadeIn`.
 - **Editor styles**: global `.ProseMirror` (Tiptap) and `#rich-editor`/`.note-preview` list styling.
-- **Accessibility**: `prefers-reduced-motion` block neutralizes animations; focus-visible outlines defined globally.
-
-> Theme application is done two ways: inline CSS vars via `applyTheme` (themes.ts) AND the static `:root`/`.dark` blocks in `index.css`. They can diverge (the static block is the zen-garden palette). Light/dark toggling relies on the `.dark` class plus `applyTheme` re-running with the chosen color theme.
+- **Accessibility**: `prefers-reduced-motion` neutralizes animations (incl. the backdrop); focus-visible outlines defined globally.
 
 ---
 
@@ -192,7 +202,12 @@ Most pages render their own mobile header (`lg:hidden` sticky bar with a hamburg
 
 | Component | Purpose |
 |---|---|
-| `AppSidebar` | Main navigation (see §5) |
+| `AppSidebar` | Main navigation — Aurora glass rail, ⌘K trigger, hover route-prefetch (see §5) |
+| `PageShell` | Shared page frame: sidebar + glassy gradient-title header + transparent content + entrance transition |
+| `CommandPalette` | ⌘K / Ctrl+K launcher (cmdk) — jump to any screen / quick actions |
+| `AuroraBackdrop` | Ambient drifting indigo/cyan orbs (rendered once in `App.tsx`) |
+| `RouteFallback` | Suspense fallback shown while a lazy route chunk loads |
+| `ui/motion` | Shared framer-motion helpers — `PageTransition`, `Stagger`/`StaggerItem`, `FadeIn` |
 | `ProtectedRoute` | Auth gate |
 | `ConfirmDialog` | Reusable destructive-action confirm (AlertDialog) |
 | `CodeEditor` | CodeMirror 6 wrapper (lang extensions, one-dark in dark mode, read-only support) |
@@ -243,7 +258,8 @@ The UI talks to Supabase almost entirely through these modules (and inline `supa
 | `simple-image-fetcher.ts` | Batched cover loading w/ localStorage cache and DB-first strategy |
 | `date-utils.ts` | IST-safe `YYYY-MM-DD` parse/format helpers (avoid `toISOString` UTC drift) |
 | `error-utils.ts` | `getErrorMessage`, `isError` |
-| `themes.ts` | Theme palettes + `applyTheme`/`getCurrentTheme`/`saveTheme` |
+| `themes.ts` | 3 Aurora theme families (`aurora`/`netflix`/`prime`) + `applyTheme`/`getCurrentTheme`/`saveTheme` |
+| `route-prefetch.ts` | Prefetch a route's lazy code chunk on nav hover (instant transitions) |
 | `utils.ts` | `cn`, DOMPurify sanitizers, contrast-color helper |
 
 ---
@@ -276,3 +292,5 @@ npm run preview    # preview built app
 Required env (Vite, `VITE_` prefixed are public/client): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SUPABASE_PROJECT_ID`. Optional: `TMDB_API_KEY`, `OMDB_API_KEY` (note these are read in client code via `import.meta.env` in `media-refresh.ts` but are not `VITE_`-prefixed, so they're effectively undefined at runtime — see audit).
 
 PWA: service worker auto-update; caches Google Fonts (CacheFirst) and Supabase API (NetworkFirst, 5min).
+
+Production build is **code-split**: every authenticated route is `React.lazy` and `vite.config.ts` `manualChunks` groups shared vendors, so heavy libraries (Tiptap, CodeMirror, recharts) download only when their page is opened — no single-bundle chunk-size warning. Nav links warm the next route's chunk on hover (`lib/route-prefetch.ts`).
