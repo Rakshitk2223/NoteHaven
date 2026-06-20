@@ -113,7 +113,7 @@ export async function fetchSnippets(): Promise<CodeSnippet[]> {
       .in('snippet_id', snippetIds);
 
     const tagsBySnippet: Record<number, Tag[]> = {};
-    snippetTagsData?.forEach((item: any) => {
+    snippetTagsData?.forEach((item: { snippet_id: number; tags: Tag }) => {
       if (!tagsBySnippet[item.snippet_id]) tagsBySnippet[item.snippet_id] = [];
       tagsBySnippet[item.snippet_id].push(item.tags);
     });

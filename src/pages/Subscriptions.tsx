@@ -1,16 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, CreditCard, Trash2, Edit2, TrendingUp, Bell, CheckCircle, Menu } from 'lucide-react';
+import { Plus, CreditCard, Trash2, Edit2, TrendingUp, Bell, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
-import AppSidebar from '@/components/AppSidebar';
-import { useSidebar } from '@/contexts/SidebarContext';
-import { 
+import { PageShell } from '@/components/PageShell';
+import { Stagger, StaggerItem } from '@/components/ui/motion';
+import {
   fetchSubscriptions,
   createSubscription,
   updateSubscription,
@@ -31,8 +31,7 @@ import { dateToYMD, parseYMD } from '@/lib/date-utils';
 
 const Subscriptions = () => {
   const { toast } = useToast();
-  const { toggle: toggleSidebar } = useSidebar();
-  
+
   const [loading, setLoading] = useState(true);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [categories, setCategories] = useState<SubscriptionCategory[]>([]);
@@ -221,28 +220,23 @@ const Subscriptions = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
-        
-        <div className="flex-1 lg:ml-0 min-w-0">
-          {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Subscriptions</h1>
-            <div className="w-10" />
-          </div>
-
-          <div className="p-4 sm:p-6">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div>
-              <h1 className="text-2xl font-bold">Subscriptions</h1>
-              <p className="text-muted-foreground">Track your recurring payments</p>
-            </div>
-            
+    <PageShell
+      title="Subscriptions"
+      icon={CreditCard}
+      subtitle="Track your recurring payments"
+      actions={
+        <Button variant="gradient" onClick={() => setIsAddDialogOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Subscription
+        </Button>
+      }
+      mobileActions={
+        <Button variant="gradient" size="icon-sm" onClick={() => setIsAddDialogOpen(true)} aria-label="Add subscription">
+          <Plus className="h-4 w-4" />
+        </Button>
+      }
+    >
+      <div>
             <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               setIsAddDialogOpen(open);
               if (!open) {
@@ -250,12 +244,6 @@ const Subscriptions = () => {
                 resetForm();
               }
             }}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Subscription
-                </Button>
-              </DialogTrigger>
               <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                   <DialogTitle>{editingSubscription ? 'Edit Subscription' : 'Add New Subscription'}</DialogTitle>
@@ -371,14 +359,13 @@ const Subscriptions = () => {
                 </Button>
               </DialogContent>
             </Dialog>
-          </div>
 
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Monthly Cost</CardTitle>
-                <CreditCard className="h-4 w-4 text-muted-foreground" />
+                <CreditCard className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold tabular-nums">
@@ -391,7 +378,7 @@ const Subscriptions = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Yearly Cost</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                <TrendingUp className="h-4 w-4 text-accent-2" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold tabular-nums">
@@ -461,7 +448,7 @@ const Subscriptions = () => {
                   </Button>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <Stagger className="space-y-3">
                   {subscriptions.map((sub) => {
                     const daysUntil = getDaysUntilRenewal(sub.next_renewal_date);
                     const statusColor = getStatusBadgeColor(sub.status);
@@ -472,8 +459,9 @@ const Subscriptions = () => {
                       : 'neutral';
 
                     return (
-                      <div 
-                        key={sub.id} 
+                      <StaggerItem
+                        key={sub.id}
+                        hover={false}
                         className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
                       >
                         <div className="flex items-center gap-4 flex-1">
@@ -544,17 +532,15 @@ const Subscriptions = () => {
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-                      </div>
+                      </StaggerItem>
                     );
                   })}
-                </div>
+                </Stagger>
               )}
             </CardContent>
           </Card>
-          </div>
-        </div>
       </div>
-    </div>
+    </PageShell>
   );
 };
 

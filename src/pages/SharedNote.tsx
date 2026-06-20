@@ -67,7 +67,7 @@ const SharedNote = () => {
   useEffect(() => {
     if (!meta?.allow_edit || !meta.note_id) return; // only if editable
     const channel = supabase.channel(`note-${meta.note_id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notes', filter: `id=eq.${meta.note_id}` }, (payload: any) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notes', filter: `id=eq.${meta.note_id}` }, (payload: { new: NoteRow }) => {
         const newRow = payload.new as NoteRow;
         setNote(prev => prev && prev.id === newRow.id ? { ...prev, ...newRow } : newRow);
         // Update DOM if different from local (avoid overwriting while typing)

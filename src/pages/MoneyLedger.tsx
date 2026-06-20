@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2, Menu, ArrowLeftRight, ChevronDown } from 'lucide-react';
+import { Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2, ArrowLeftRight, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -11,9 +11,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
-import AppSidebar from '@/components/AppSidebar';
-import { useSidebar } from '@/contexts/SidebarContext';
-import { 
+import { PageShell } from '@/components/PageShell';
+import { Stagger, StaggerItem } from '@/components/ui/motion';
+import {
   fetchLedgerEntries, 
   createLedgerEntry,
   updateLedgerEntry,
@@ -38,8 +38,7 @@ import { ensureBucketsExist, fetchBuckets, type LedgerBucket } from '@/lib/bucke
 const MoneyLedger = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { toggle: toggleSidebar } = useSidebar();
-  
+
   // State
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
@@ -296,121 +295,118 @@ const MoneyLedger = () => {
   const bucketsById = useMemo(() => new Map(buckets.map((b) => [b.id, b])), [buckets]);
   const bucketName = (id: number | null | undefined) => (id != null ? bucketsById.get(id)?.name : undefined);
 
+  const exportActions = (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline">
+            <Download className="h-4 w-4 mr-2" />
+            Export
+            <ChevronDown className="h-4 w-4 ml-1 opacity-70" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={handleExportCSV}>Export as CSV</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleExportJSON}>Export as JSON</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="gradient" onClick={() => setIsAddDialogOpen(true)}>
+        <Plus className="h-4 w-4 mr-2" />
+        Add Entry
+      </Button>
+    </>
+  );
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
-        
-        <div className="flex-1 lg:ml-0 min-w-0">
-          {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Money Ledger</h1>
-            <div className="w-10" />
-          </div>
+    <PageShell
+      title="Money Ledger"
+      subtitle="Track your income and expenses"
+      icon={Wallet}
+      actions={exportActions}
+    >
+          {/* Add Dialog */}
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Add New Entry</DialogTitle>
+              </DialogHeader>
+              <LedgerEntryForm
+                value={newEntry}
+                onChange={setNewEntry}
+                categories={categories}
+                buckets={buckets}
+                onCreateCategories={refreshCategories}
+              />
+              <Button onClick={handleAddEntry} className="w-full">Add Entry</Button>
+            </DialogContent>
+          </Dialog>
 
-          <div className="p-4 sm:p-6">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div>
-              <h1 className="text-2xl font-bold">Money Ledger</h1>
-              <p className="text-muted-foreground">Track your income and expenses</p>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    <Download className="h-4 w-4 mr-2" />
-                    Export
-                    <ChevronDown className="h-4 w-4 ml-1 opacity-70" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={handleExportCSV}>Export as CSV</DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleExportJSON}>Export as JSON</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Entry
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-[425px]">
-                  <DialogHeader>
-                    <DialogTitle>Add New Entry</DialogTitle>
-                  </DialogHeader>
-                  <LedgerEntryForm
-                    value={newEntry}
-                    onChange={setNewEntry}
-                    categories={categories}
-                    buckets={buckets}
-                    onCreateCategories={refreshCategories}
-                  />
-                  <Button onClick={handleAddEntry} className="w-full">Add Entry</Button>
-                </DialogContent>
-              </Dialog>
-
-              {/* Edit Dialog */}
-              <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                <DialogContent className="sm:max-w-[425px]">
-                  <DialogHeader>
-                    <DialogTitle>Edit Entry</DialogTitle>
-                  </DialogHeader>
-                  <LedgerEntryForm
-                    value={editFormData}
-                    onChange={setEditFormData}
-                    categories={categories}
-                    buckets={buckets}
-                  />
-                  <Button onClick={handleUpdateEntry} className="w-full">Update Entry</Button>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
+          {/* Edit Dialog */}
+          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Edit Entry</DialogTitle>
+              </DialogHeader>
+              <LedgerEntryForm
+                value={editFormData}
+                onChange={setEditFormData}
+                categories={categories}
+                buckets={buckets}
+              />
+              <Button onClick={handleUpdateEntry} className="w-full">Update Entry</Button>
+            </DialogContent>
+          </Dialog>
 
           {/* Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Income</CardTitle>
-                <TrendingUp className="h-4 w-4 text-success" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tabular-nums text-success">
-                  {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalIncome)}
-                </div>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-                <TrendingDown className="h-4 w-4 text-destructive" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tabular-nums text-destructive">
-                  {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalExpense)}
-                </div>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Net Balance</CardTitle>
-                <Wallet className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className={`text-2xl font-bold tabular-nums ${summary.netBalance >= 0 ? 'text-success' : 'text-destructive'}`}>
-                  {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.netBalance)}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <Stagger className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <StaggerItem hover={false}>
+              <Card className="aurora-card">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Income</CardTitle>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/15 text-success">
+                    <TrendingUp className="h-4 w-4" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold tabular-nums text-success">
+                    {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalIncome)}
+                  </div>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+
+            <StaggerItem hover={false}>
+              <Card className="aurora-card">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+                    <TrendingDown className="h-4 w-4" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold tabular-nums text-destructive">
+                    {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalExpense)}
+                  </div>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+
+            <StaggerItem hover={false}>
+              <Card className="aurora-card">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Net Balance</CardTitle>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/12 text-primary">
+                    <Wallet className="h-4 w-4" />
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className={`text-2xl font-bold tabular-nums ${summary.netBalance >= 0 ? 'text-success' : 'text-destructive'}`}>
+                    {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.netBalance)}
+                  </div>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+          </Stagger>
 
           {/* Buckets — where money is allocated (envelope budgeting) */}
           {!loading && (
@@ -464,7 +460,7 @@ const MoneyLedger = () => {
             
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
-              <Select value={filterType} onValueChange={(v: any) => setFilterType(v)}>
+              <Select value={filterType} onValueChange={(v) => setFilterType(v as 'all' | 'income' | 'expense')}>
                 <SelectTrigger className="w-[130px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -573,10 +569,7 @@ const MoneyLedger = () => {
               )}
             </CardContent>
           </Card>
-          </div>
-        </div>
-      </div>
-    </div>
+    </PageShell>
   );
 };
 

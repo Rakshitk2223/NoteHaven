@@ -32,6 +32,10 @@ export default {
 				faint: 'hsl(var(--text-3))',
 				success: 'hsl(var(--success))',
 				warning: 'hsl(var(--warning))',
+				'accent-2': {
+					DEFAULT: 'hsl(var(--accent-2))',
+					hover: 'hsl(var(--accent-2-hover))'
+				},
 				primary: {
 					DEFAULT: 'hsl(var(--primary))',
 					foreground: 'hsl(var(--primary-foreground))'
@@ -85,6 +89,13 @@ export default {
 				3: 'var(--shadow-3)',
 				cinema: 'var(--shadow-1)',
 				'cinema-lg': 'var(--shadow-2)',
+				glow: 'var(--glow-sm)',
+				'glow-md': 'var(--glow-md)',
+				'glow-lg': 'var(--glow-lg)',
+			},
+			backgroundImage: {
+				'gradient-brand': 'var(--gradient-brand)',
+				'gradient-brand-soft': 'var(--gradient-brand-soft)',
 			},
 			transitionDuration: {
 				fast: 'var(--dur-fast)',

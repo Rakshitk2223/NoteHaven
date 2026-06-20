@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useSidebar } from "@/contexts/SidebarContext";
-import AppSidebar from '@/components/AppSidebar';
+import { PageShell } from "@/components/PageShell";
+import { Stagger, StaggerItem } from "@/components/ui/motion";
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
-import { Menu, ExternalLink, GripVertical, Save, RotateCcw, ChevronDown, ChevronRight, LogOut, Mail, CalendarDays, Download } from 'lucide-react';
+import { Settings as SettingsIcon, ExternalLink, GripVertical, Save, RotateCcw, ChevronDown, ChevronRight, LogOut, Mail, CalendarDays, Download } from 'lucide-react';
 
 interface SidebarItem {
   name: string;
@@ -33,7 +33,6 @@ const DEFAULT_ORDER: SidebarItem[] = [
 const STORAGE_KEY = 'sidebar-order';
 
 const Settings = () => {
-  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const { signOut } = useAuth();
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'light' ? 'light' : 'dark'));
   const [colorTheme, setColorTheme] = useState(() => getCurrentTheme());
@@ -270,26 +269,14 @@ const Settings = () => {
   }, [toast]);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
-        <div className="flex-1 lg:ml-0 min-w-0">
-          {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Settings</h1>
-            <div className="w-10" />
-          </div>
-          
-          <div className="hidden lg:block p-4 sm:p-6 border-b border-border">
-            <h1 className="text-xl sm:text-2xl font-bold font-heading">Settings</h1>
-            <p className="text-sm text-muted-foreground">Manage your account & preferences</p>
-          </div>
-
-          <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 max-w-3xl">
+    <PageShell
+      title="Settings"
+      icon={SettingsIcon}
+      subtitle="Manage your account & preferences"
+    >
+          <Stagger className="space-y-6 sm:space-y-8 max-w-3xl">
             {/* Appearance */}
+            <StaggerItem hover={false}>
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Appearance</h2>
 
@@ -369,8 +356,10 @@ const Settings = () => {
                 </Button>
               </div>
             </Card>
+            </StaggerItem>
 
             {/* Account */}
+            <StaggerItem hover={false}>
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Account</h2>
               <div className="space-y-3">
@@ -392,8 +381,10 @@ const Settings = () => {
                 </Button>
               </div>
             </Card>
+            </StaggerItem>
 
             {/* Sidebar Order */}
+            <StaggerItem hover={false}>
             <Card className="p-6 space-y-4">
               <div
                 className="flex items-center justify-between cursor-pointer"
@@ -447,8 +438,10 @@ const Settings = () => {
                 </>
               )}
             </Card>
+            </StaggerItem>
 
             {/* Profile */}
+            <StaggerItem hover={false}>
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Profile</h2>
               <div className="space-y-2">
@@ -465,8 +458,10 @@ const Settings = () => {
                 <p className="text-xs text-muted-foreground">This name may appear in future collaborative features.</p>
               </div>
             </Card>
+            </StaggerItem>
 
             {/* Security */}
+            <StaggerItem hover={false}>
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Security</h2>
               <div className="space-y-2">
@@ -480,8 +475,10 @@ const Settings = () => {
               <Button onClick={handleUpdatePassword} variant="default">Update Password</Button>
               <p className="text-xs text-muted-foreground">Choose a strong password (8+ characters).</p>
             </Card>
+            </StaggerItem>
 
             {/* Data Management */}
+            <StaggerItem hover={false}>
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">Data Management</h2>
               <div className="space-y-2">
@@ -492,8 +489,10 @@ const Settings = () => {
                 </Button>
               </div>
             </Card>
+            </StaggerItem>
 
             {/* External Links */}
+            <StaggerItem hover={false}>
             <Card className="p-6 space-y-4">
               <h2 className="text-lg font-semibold">External Links</h2>
               <div className="space-y-2">
@@ -509,10 +508,9 @@ const Settings = () => {
                 </a>
               </div>
             </Card>
-          </div>
-        </div>
-      </div>
-    </div>
+            </StaggerItem>
+          </Stagger>
+    </PageShell>
   );
 };
 

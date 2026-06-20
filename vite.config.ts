@@ -81,4 +81,31 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Name the big shared vendors + the heavy page-only leaves. Everything
+        // else is left for Rollup to auto-place: page-specific libs land in the
+        // lazy route chunk that uses them, widely-used libs (radix) become a
+        // shared chunk. react-vendor is kept a self-contained leaf (react + dom
+        // + router + their deps) so no chunk imports back into it — avoids the
+        // circular-chunk warning that aggressive splitting causes.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("@tiptap") || id.includes("prosemirror")) return "editor";
+          if (id.includes("@codemirror") || id.includes("@lezer") || /[\\/]codemirror[\\/]/.test(id)) return "codemirror";
+          if (id.includes("recharts") || id.includes("d3-") || id.includes("victory")) return "charts";
+          if (id.includes("framer-motion")) return "motion";
+          if (id.includes("lucide-react")) return "icons";
+          if (id.includes("@supabase")) return "supabase";
+          if (id.includes("@tanstack")) return "query";
+          if (/[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run|history)[\\/]/.test(id)) {
+            return "react-vendor";
+          }
+          return undefined;
+        },
+      },
+    },
+    chunkSizeWarningLimit: 900,
+  },
 }));

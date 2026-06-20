@@ -102,7 +102,7 @@ export async function fetchNoteTags(noteId: number): Promise<Tag[]> {
     .eq('note_id', noteId);
 
   if (error) throw error;
-  return (data || []).map((item: any) => item.tags);
+  return (data || []).map((item: { tags: Tag }) => item.tags);
 }
 
 /**
@@ -115,7 +115,7 @@ export async function fetchTaskTags(taskId: number): Promise<Tag[]> {
     .eq('task_id', taskId);
 
   if (error) throw error;
-  return (data || []).map((item: any) => item.tags);
+  return (data || []).map((item: { tags: Tag }) => item.tags);
 }
 
 /**
@@ -128,7 +128,7 @@ export async function fetchMediaTags(mediaId: number): Promise<Tag[]> {
     .eq('media_id', mediaId);
 
   if (error) throw error;
-  return (data || []).map((item: any) => item.tags);
+  return (data || []).map((item: { tags: Tag }) => item.tags);
 }
 
 /**
@@ -141,7 +141,7 @@ export async function fetchPromptTags(promptId: number): Promise<Tag[]> {
     .eq('prompt_id', promptId);
 
   if (error) throw error;
-  return (data || []).map((item: any) => item.tags);
+  return (data || []).map((item: { tags: Tag }) => item.tags);
 }
 
 /**
@@ -154,7 +154,7 @@ export async function fetchSnippetTags(snippetId: number): Promise<Tag[]> {
     .eq('snippet_id', snippetId);
 
   if (error) throw error;
-  return (data || []).map((item: any) => item.tags);
+  return (data || []).map((item: { tags: Tag }) => item.tags);
 }
 
 // ============================================
@@ -342,27 +342,27 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
       .from('note_tags')
       .select('notes(*)')
       .eq('tag_id', tag.id)
-      .then(({ data }) => (data || []).map((item: any) => item.notes)),
+      .then(({ data }) => (data || []).map((item: { notes: NoteWithTags }) => item.notes)),
     supabase
       .from('task_tags')
       .select('tasks(*)')
       .eq('tag_id', tag.id)
-      .then(({ data }) => (data || []).map((item: any) => item.tasks)),
+      .then(({ data }) => (data || []).map((item: { tasks: TaskWithTags }) => item.tasks)),
     supabase
       .from('media_tags')
       .select('media_tracker(*)')
       .eq('tag_id', tag.id)
-      .then(({ data }) => (data || []).map((item: any) => item.media_tracker)),
+      .then(({ data }) => (data || []).map((item: { media_tracker: MediaWithTags }) => item.media_tracker)),
     supabase
       .from('prompt_tags')
       .select('prompts(*)')
       .eq('tag_id', tag.id)
-      .then(({ data }) => (data || []).map((item: any) => item.prompts)),
+      .then(({ data }) => (data || []).map((item: { prompts: PromptWithTags }) => item.prompts)),
     supabase
       .from('code_snippet_tags')
       .select('code_snippets(*)')
       .eq('tag_id', tag.id)
-      .then(({ data }) => (data || []).map((item: any) => item.code_snippets))
+      .then(({ data }) => (data || []).map((item: { code_snippets: CodeSnippetWithTags }) => item.code_snippets))
   ]);
 
   return {

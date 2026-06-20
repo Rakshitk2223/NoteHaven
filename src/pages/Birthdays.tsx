@@ -1,21 +1,20 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useSidebar } from "@/contexts/SidebarContext";
-import AppSidebar from '@/components/AppSidebar';
+import { PageShell } from "@/components/PageShell";
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Gift, Edit, Search, Cake, Clock, Menu } from 'lucide-react';
+import { Plus, Trash2, Gift, Edit, Search, Cake, Clock } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { Stagger, StaggerItem } from "@/components/ui/motion";
 import { parseYMD, formatDateForDisplay } from '@/lib/date-utils';
 
 interface Birthday { id: number; name: string; date_of_birth: string; }
 
 const Birthdays = () => {
-  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [birthdays, setBirthdays] = useState<Birthday[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -223,7 +222,7 @@ const Birthdays = () => {
               )}
               <Badge
                 variant={days === 0 ? 'accent' : isPast ? 'neutral' : days <= 7 ? 'warning' : 'neutral'}
-                className={days === 0 ? 'animate-pulse' : undefined}
+                className={days === 0 ? 'animate-pulse bg-primary/15 text-primary' : undefined}
               >
                 {days === 0 ? '🎉 Today!' : isPast ? `Was ${365 - days} days ago` : `In ${days} days`}
               </Badge>
@@ -253,38 +252,30 @@ const Birthdays = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
-        <div className="flex-1 lg:ml-0 min-w-0">
-          {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Birthdays</h1>
-            <Button size="sm" onClick={openAddModal} className="touch-manipulation"><Plus className="h-4 w-4" /></Button>
+    <PageShell
+      title="Birthdays"
+      icon={Cake}
+      subtitle={birthdays.length > 0 ? `${birthdays.length} ${birthdays.length === 1 ? 'birthday' : 'birthdays'} tracked` : undefined}
+      actions={
+        <>
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search birthdays by name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
           </div>
-          
-          {/* Desktop Header */}
-          <div className="hidden lg:flex items-center justify-between p-6 border-b border-border">
-            <h1 className="text-2xl font-bold font-heading text-foreground">Birthdays</h1>
-            <div className="flex items-center gap-4">
-              <div className="relative max-w-md">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Search birthdays by name..." 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Button onClick={openAddModal}><Plus className="h-4 w-4 mr-2" />Add Birthday</Button>
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-6 space-y-6">
-            {loading ? (
+          <Button variant="gradient" onClick={openAddModal}><Plus className="h-4 w-4 mr-2" />Add Birthday</Button>
+        </>
+      }
+      mobileActions={
+        <Button variant="gradient" size="icon-sm" onClick={openAddModal} aria-label="Add birthday"><Plus className="h-4 w-4" /></Button>
+      }
+    >
+      <div className="space-y-6">
+        {loading ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground">Loading birthdays...</p>
               </div>
@@ -308,11 +299,13 @@ const Birthdays = () => {
                 {filteredBirthdays.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8">No birthdays found matching "{searchQuery}"</p>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {filteredBirthdays.map(b => (
-                      <BirthdayCard key={b.id} birthday={b} />
+                      <StaggerItem key={b.id} hover={false}>
+                        <BirthdayCard birthday={b} />
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </Stagger>
                 )}
               </div>
             ) : (
@@ -326,11 +319,13 @@ const Birthdays = () => {
                   {categorizedBirthdays.upcoming.length === 0 ? (
                     <p className="text-muted-foreground text-center py-8">No upcoming birthdays</p>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {categorizedBirthdays.upcoming.map(b => (
-                        <BirthdayCard key={b.id} birthday={b} />
+                        <StaggerItem key={b.id} hover={false}>
+                          <BirthdayCard birthday={b} />
+                        </StaggerItem>
                       ))}
-                    </div>
+                    </Stagger>
                   )}
                 </div>
 
@@ -341,11 +336,13 @@ const Birthdays = () => {
                       <Clock className="h-5 w-5 text-muted-foreground" />
                       Recent Birthdays
                     </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {categorizedBirthdays.past.map(b => (
-                        <BirthdayCard key={b.id} birthday={b} />
+                        <StaggerItem key={b.id} hover={false}>
+                          <BirthdayCard birthday={b} />
+                        </StaggerItem>
                       ))}
-                    </div>
+                    </Stagger>
                   </div>
                 )}
 
@@ -355,7 +352,7 @@ const Birthdays = () => {
                     <Gift className="h-5 w-5 text-muted-foreground" />
                     All Birthdays ({birthdays.length})
                   </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {birthdays
                       .sort((a, b) => {
                         const aDate = parseYMD(a.date_of_birth);
@@ -363,16 +360,16 @@ const Birthdays = () => {
                         return aDate.getMonth() - bDate.getMonth() || aDate.getDate() - bDate.getDate();
                       })
                       .map(b => (
-                        <BirthdayCard key={b.id} birthday={b} showAge={false} />
+                        <StaggerItem key={b.id} hover={false}>
+                          <BirthdayCard birthday={b} showAge={false} />
+                        </StaggerItem>
                       ))}
-                  </div>
+                  </Stagger>
                 </div>
               </>
             )}
-          </div>
-        </div>
       </div>
-      
+
       <Dialog open={showModal} onOpenChange={(open) => {
         setShowModal(open);
         if (!open) { setEditingId(null); setNewName(''); setSelectedYear(null); setSelectedMonth(null); setSelectedDay(null); }
@@ -465,7 +462,7 @@ const Birthdays = () => {
         title="Delete Birthday"
         description="Are you sure you want to delete this birthday? This action cannot be undone."
       />
-    </div>
+    </PageShell>
   );
 };
 

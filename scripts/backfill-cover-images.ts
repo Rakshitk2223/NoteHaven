@@ -50,6 +50,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Minimal shape of a MangaDex relationship object (only the fields we read).
+interface MangaDexRelationship {
+  type?: string;
+  attributes?: { fileName?: string };
+}
+
 // ---- Individual API fetchers ----
 
 async function fetchAniList(title: string, type: string): Promise<string | null> {
@@ -107,7 +113,9 @@ async function fetchMangaDex(title: string): Promise<string | null> {
     const data = await res.json();
     if (data.result !== 'ok' || !data.data?.[0]) return null;
     const manga = data.data[0];
-    const coverRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+    const coverRel = (manga.relationships as MangaDexRelationship[] | undefined)?.find(
+      (r) => r.type === 'cover_art'
+    );
     const coverFileName = coverRel?.attributes?.fileName;
     if (!coverFileName) return null;
     return `https://uploads.mangadex.org/covers/${manga.id}/${coverFileName}.512.jpg`;

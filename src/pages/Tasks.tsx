@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Trash2, Pin, Pencil, Menu, ListTodo } from "lucide-react";
+import { Plus, Trash2, Pin, Pencil, ListTodo } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -10,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/DatePicker";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
-import AppSidebar from "@/components/AppSidebar";
+import { PageShell } from "@/components/PageShell";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -33,7 +32,6 @@ interface Task {
 
 const Tasks = () => {
   const location = useLocation();
-  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [tasks, setTasks] = useState<Task[]>([]);
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -153,7 +151,7 @@ const Tasks = () => {
 
         // Group tags by task_id
         const tagsByTask: Record<number, Tag[]> = {};
-        taskTagsData?.forEach((item: any) => {
+        (taskTagsData as { task_id: number; tags: Tag }[] | null)?.forEach((item) => {
           if (!tagsByTask[item.task_id]) tagsByTask[item.task_id] = [];
           tagsByTask[item.task_id].push(item.tags);
         });
@@ -304,33 +302,7 @@ const Tasks = () => {
   const completedTasks = filterTasksByTags(tasks.filter(task => task.is_completed)).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
-        
-        <div className="flex-1 lg:ml-0 min-w-0">
-          {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleSidebar}
-              className="touch-manipulation"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Tasks</h1>
-            <div className="w-10" />
-          </div>
-          <div className="p-6 border-b border-border">
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold font-heading text-foreground">
-                Tasks
-              </h1>
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-6">
+    <PageShell title="Tasks" icon={ListTodo} subtitle={`${todoTasks.length} to do · ${completedTasks.length} done`}>
             {error && (
               <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
                 {error}
@@ -612,9 +584,6 @@ const Tasks = () => {
                 )}
               </div>
             )}
-          </div>
-        </div>
-      </div>
       <Dialog open={!!editTask} onOpenChange={(o) => { if (!o) { setEditTask(null); setEditTaskTags([]); } }}>
         <DialogContent>
           <DialogHeader>
@@ -690,7 +659,7 @@ const Tasks = () => {
         title="Delete Task"
         description="Are you sure you want to delete this task? This action cannot be undone."
       />
-    </div>
+    </PageShell>
   );
 };
 

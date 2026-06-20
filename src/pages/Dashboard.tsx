@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Menu, Settings2, RotateCcw, LayoutGrid } from 'lucide-react';
+import { Settings2, RotateCcw, LayoutGrid, LayoutDashboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -7,12 +7,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import AppSidebar from '@/components/AppSidebar';
+import { PageShell } from '@/components/PageShell';
+import { Stagger, StaggerItem } from '@/components/ui/motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { useSidebar } from '@/contexts/SidebarContext';
 import { fetchUserTags, type Tag } from '@/lib/tags';
 import { getUpcomingRenewals, type UpcomingRenewal } from '@/lib/subscriptions';
 import { getLedgerSummary, getMonthName } from '@/lib/ledger';
@@ -100,7 +100,6 @@ interface LedgerSummaryData {
 }
 
 const Dashboard = () => {
-  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [widgets, setWidgets] = useState<DashboardWidget[]>(DEFAULT_WIDGETS);
@@ -718,113 +717,59 @@ const Dashboard = () => {
   const completionRate =
     stats.tasks > 0 ? Math.round((stats.completedTasks / stats.tasks) * 100) : 0;
 
-  return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
+  const displayName = (user?.user_metadata as Record<string, unknown>)?.display_name as
+    | string
+    | undefined;
+  const greeting = (() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  })();
+  const pageTitle = displayName ? `${greeting}, ${displayName}` : 'Dashboard';
 
-        <div className="flex-1 lg:ml-0 min-w-0">
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleSidebar}
-              className="touch-manipulation"
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Dashboard</h1>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="touch-manipulation"
-                >
-                  <Settings2 className="h-5 w-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setIsManagerOpen(true)}>
-                  <LayoutGrid className="h-4 w-4 mr-2" />
-                  Customize
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleResetLayout}>
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  Reset to Default
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+  const optionsMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon-sm" title="Dashboard options">
+          <Settings2 className="h-5 w-5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => setIsManagerOpen(true)}>
+          <LayoutGrid className="h-4 w-4 mr-2" />
+          Customize
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={handleResetLayout}>
+          <RotateCcw className="h-4 w-4 mr-2" />
+          Reset to Default
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
-          <div className="hidden lg:flex items-center justify-between p-6 border-b border-border">
-            <div className="flex items-center gap-4">
-              {sidebarCollapsed && (
-                <Button variant="ghost" size="sm" onClick={toggleSidebar}>
-                  <Menu className="h-5 w-5" />
-                </Button>
-              )}
-              <h1 className="text-2xl font-bold font-heading text-foreground">
-                {(() => {
-                  const name = (user?.user_metadata as Record<string, unknown>)?.display_name as
-                    | string
-                    | undefined;
-                  if (!name) return 'Dashboard';
-                  const hour = new Date().getHours();
-                  let greet = 'Hello';
-                  if (hour < 12) greet = 'Good morning';
-                  else if (hour < 18) greet = 'Good afternoon';
-                  else greet = 'Good evening';
-                  return `${greet}, ${name}`;
-                })()}
-              </h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="hidden md:flex items-center gap-3">
-                <CircularProgress value={completionRate} size={44} strokeWidth={5} />
-                <div className="flex flex-col">
-                  <span className="text-sm font-semibold text-foreground tabular-nums">{completionRate}%</span>
-                  <span className="text-xs text-muted-foreground">Tasks Done</span>
-                </div>
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    title="Dashboard options"
-                  >
-                    <Settings2 className="h-5 w-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setIsManagerOpen(true)}>
-                    <LayoutGrid className="h-4 w-4 mr-2" />
-                    Customize
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleResetLayout}>
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Reset to Default
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {visibleWidgets.map((widget) => (
-                <div
-                  key={widget.id}
-                  className={sizeClasses[widget.size]}
-                >
-                  {renderWidget(widget)}
-                </div>
-              ))}
-            </div>
-          </div>
+  const headerActions = (
+    <>
+      <div className="hidden md:flex items-center gap-3 rounded-full border border-border/60 bg-card/40 pl-2 pr-4 py-1.5">
+        <CircularProgress value={completionRate} size={40} strokeWidth={5} />
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-bold text-foreground tabular-nums">{completionRate}%</span>
+          <span className="text-[11px] text-muted-foreground">Tasks done</span>
         </div>
       </div>
+      {optionsMenu}
+    </>
+  );
+
+  return (
+    <PageShell title={pageTitle} icon={LayoutDashboard} actions={headerActions} mobileActions={optionsMenu}>
+      <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        {visibleWidgets.map((widget) => (
+          <StaggerItem key={widget.id} hover={false} className={sizeClasses[widget.size]}>
+            {renderWidget(widget)}
+          </StaggerItem>
+        ))}
+      </Stagger>
 
       <WidgetManager
         isOpen={isManagerOpen}
@@ -843,7 +788,7 @@ const Dashboard = () => {
         title="Delete Countdown"
         description="Are you sure you want to delete this countdown? This action cannot be undone."
       />
-    </div>
+    </PageShell>
   );
 };
 

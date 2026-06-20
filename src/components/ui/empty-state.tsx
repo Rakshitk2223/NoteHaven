@@ -26,8 +26,8 @@ const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
       {...props}
     >
       {Icon && (
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Icon className="h-6 w-6" />
+        <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-brand-soft text-primary ring-1 ring-primary/20 shadow-glow animate-float">
+          <Icon className="h-7 w-7" />
         </div>
       )}
       <h2 className="text-h2 text-foreground">{title}</h2>

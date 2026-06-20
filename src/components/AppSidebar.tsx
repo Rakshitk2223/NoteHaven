@@ -7,6 +7,7 @@ import {
   FileText,
   LogOut,
   X,
+  Search,
   Settings as SettingsIcon,
   Cake,
   ChevronLeft,
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { prefetchRoute } from "@/lib/route-prefetch";
 
 interface NavItem {
   name: string;
@@ -56,28 +58,27 @@ interface SidebarItemProps {
 
 const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal }: SidebarItemProps) => {
   const baseClasses = cn(
-    "flex items-center gap-3 rounded-sm font-body font-medium transition-colors duration-fast relative group",
-    "hover:bg-secondary",
+    "flex items-center gap-3 rounded-lg font-body font-medium transition-all duration-fast relative group",
     isActive
-      ? "bg-secondary text-foreground font-semibold"
-      : "text-muted-foreground hover:text-foreground",
+      ? "bg-primary/12 text-foreground font-semibold"
+      : "text-muted-foreground hover:text-foreground hover:bg-secondary/70",
     isCollapsed
-      ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0"
+      ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0 lg:mx-auto"
       : "px-3 py-2.5"
   );
 
   const content = (
     <>
-      {/* Accent indicator marking the active route — the one place red appears in the rail */}
+      {/* Active indicator — a glowing gradient bar */}
       {isActive && (
         <span className={cn(
-          "absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r-full bg-primary",
+          "absolute left-0 top-1/2 -translate-y-1/2 h-6 w-[3px] rounded-r-full bg-gradient-to-b from-primary to-accent-2 shadow-glow",
           isCollapsed && "lg:left-0"
         )} />
       )}
       <Icon className={cn(
-        "h-5 w-5 flex-shrink-0",
-        isActive ? "text-foreground" : "text-muted-foreground"
+        "h-5 w-5 flex-shrink-0 transition-colors",
+        isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
       )} />
       <span className={cn(
         "whitespace-nowrap",
@@ -87,7 +88,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
       </span>
       {/* Tooltip for collapsed state */}
       {isCollapsed && (
-        <span className="hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
+        <span className="hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-3 lg:px-2.5 lg:py-1.5 glass lg:text-popover-foreground lg:text-sm lg:rounded-lg lg:whitespace-nowrap lg:z-50">
           {name}
         </span>
       )}
@@ -111,6 +112,8 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
     <NavLink
       to={href}
       className={baseClasses}
+      onMouseEnter={() => prefetchRoute(href)}
+      onFocus={() => prefetchRoute(href)}
     >
       {content}
     </NavLink>
@@ -129,14 +132,14 @@ const AppSidebar = () => {
         const parsed = JSON.parse(saved);
         const validNames = new Set(defaultMainNavigation.map(item => item.name));
         const validItems = parsed.filter((item: { name: string }) => validNames.has(item.name));
-        
+
         const orderedNav = validItems
           .map((item: { name: string; href: string }) => {
             const fullItem = defaultMainNavigation.find(nav => nav.name === item.name);
             return fullItem || null;
           })
           .filter(Boolean) as NavItem[];
-        
+
         return orderedNav.length > 0 ? orderedNav : defaultMainNavigation;
       } catch (e) {
         return defaultMainNavigation;
@@ -153,14 +156,14 @@ const AppSidebar = () => {
         const parsed = JSON.parse(saved);
         const validNames = new Set(defaultMainNavigation.map(item => item.name));
         const validItems = parsed.filter((item: { name: string }) => validNames.has(item.name));
-        
+
         const orderedNav = validItems
           .map((item: { name: string; href: string }) => {
             const fullItem = defaultMainNavigation.find(nav => nav.name === item.name);
             return fullItem || null;
           })
           .filter(Boolean) as NavItem[];
-        
+
         if (orderedNav.length > 0) {
           setMainNavigation(orderedNav);
         }
@@ -192,38 +195,46 @@ const AppSidebar = () => {
     }
   };
 
+  const openPalette = () => window.dispatchEvent(new Event('open-command-palette'));
+
   return (
     <>
       {/* Mobile overlay */}
       {!isCollapsed && (
-        <div 
-          className="lg:hidden fixed inset-0 bg-black/20 z-40"
+        <div
+          className="lg:hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
           onClick={toggle}
         />
       )}
-      
-      {/* Sidebar */}
+
+      {/* Sidebar — Aurora glass rail */}
       <div className={cn(
-        "fixed lg:sticky lg:top-0 lg:self-start lg:h-screen inset-y-0 left-0 z-50 bg-background border-r border-border",
-        "flex flex-col h-full lg:h-screen",
-        isCollapsed 
-          ? "-translate-x-full lg:translate-x-0 lg:w-16" 
+        "fixed lg:sticky lg:top-0 lg:self-start lg:h-screen inset-y-0 left-0 z-50",
+        "bg-sidebar/85 backdrop-blur-xl border-r border-sidebar-border",
+        "flex flex-col h-full lg:h-screen transition-[width] duration-base ease-out-soft",
+        isCollapsed
+          ? "-translate-x-full lg:translate-x-0 lg:w-16"
           : "translate-x-0 w-64 lg:w-64"
       )}>
-        {/* Header */}
+        {/* Header / brand */}
         <div className={cn(
-          "flex items-center border-b border-border",
-          isCollapsed ? "lg:justify-center lg:p-2" : "justify-between p-4"
+          "flex items-center border-b border-sidebar-border h-16",
+          isCollapsed ? "lg:justify-center lg:px-2" : "justify-between px-4"
         )}>
-          <h1 className={cn(
-            "font-heading font-bold text-xl text-foreground",
-            isCollapsed && "lg:hidden"
-          )}>
-            NoteHaven
-          </h1>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-brand text-white font-extrabold text-lg shadow-glow">
+              N
+            </div>
+            <span className={cn(
+              "font-heading font-bold text-lg gradient-text-soft truncate",
+              isCollapsed && "lg:hidden"
+            )}>
+              NoteHaven
+            </span>
+          </div>
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             onClick={toggle}
             className="lg:hidden"
           >
@@ -232,23 +243,51 @@ const AppSidebar = () => {
           {/* Desktop toggle button */}
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             onClick={toggle}
-            className="hidden lg:flex"
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className={cn("hidden lg:flex", isCollapsed && "lg:hidden")}
+            title="Collapse sidebar"
           >
-            {isCollapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
+            <ChevronLeft className="h-4 w-4" />
           </Button>
         </div>
 
+        {/* Search / command trigger */}
+        <div className={cn("pt-3", isCollapsed ? "lg:px-2" : "px-3")}>
+          <button
+            onClick={openPalette}
+            title="Search (⌘K)"
+            className={cn(
+              "group flex items-center rounded-lg border border-sidebar-border bg-secondary/40 text-muted-foreground transition-all hover:border-primary/40 hover:text-foreground hover:bg-secondary/70 w-full",
+              isCollapsed ? "lg:justify-center lg:h-10 lg:w-10 lg:mx-auto lg:p-0" : "gap-2 px-3 py-2"
+            )}
+          >
+            <Search className="h-4 w-4 flex-shrink-0" />
+            <span className={cn("text-sm", isCollapsed && "lg:hidden")}>Search…</span>
+            <kbd className={cn(
+              "ml-auto rounded border border-border bg-background/60 px-1.5 py-0.5 text-[10px] font-medium tracking-wider",
+              isCollapsed && "lg:hidden"
+            )}>
+              ⌘K
+            </kbd>
+          </button>
+        </div>
+
+        {/* Expand button (collapsed, desktop) */}
+        {isCollapsed && (
+          <button
+            onClick={toggle}
+            title="Expand sidebar"
+            className="hidden lg:flex items-center justify-center h-8 w-8 mx-auto mt-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        )}
+
         {/* Main Navigation */}
         <nav className={cn(
-          "flex-1 py-4",
-          isCollapsed ? "lg:px-2 lg:space-y-3" : "px-4 space-y-1"
+          "flex-1 py-4 overflow-y-auto",
+          isCollapsed ? "lg:px-2 lg:space-y-2" : "px-3 space-y-1"
         )}>
           {mainNavigation.map((item) => (
             <SidebarItem
@@ -262,14 +301,13 @@ const AppSidebar = () => {
           ))}
         </nav>
 
-        {/* Bottom Actions - Settings & Logout (Fixed at extreme bottom-left) */}
+        {/* Bottom Actions - Settings & Logout */}
         <div className={cn(
-          "border-t border-border mt-auto flex flex-col",
-          isCollapsed 
-            ? "lg:p-2 lg:space-y-2" 
-            : "p-4 space-y-1"
+          "border-t border-sidebar-border mt-auto flex flex-col",
+          isCollapsed
+            ? "lg:p-2 lg:space-y-2"
+            : "p-3 space-y-1"
         )}>
-          {/* Settings */}
           {bottomNavigation.map((item) => (
             <SidebarItem
               key={item.name}
@@ -280,15 +318,15 @@ const AppSidebar = () => {
               isCollapsed={isCollapsed}
             />
           ))}
-          
+
           {/* Logout */}
-          <button 
+          <button
             onClick={handleLogout}
             className={cn(
-              "flex items-center rounded-sm font-body font-medium transition-colors duration-fast w-full relative group",
-              "text-muted-foreground hover:text-foreground hover:bg-secondary",
-              isCollapsed 
-                ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0" 
+              "flex items-center rounded-lg font-body font-medium transition-all duration-fast w-full relative group",
+              "text-muted-foreground hover:text-destructive hover:bg-destructive/10",
+              isCollapsed
+                ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0 lg:mx-auto"
                 : "justify-start gap-3 px-3 py-2.5"
             )}
           >
@@ -302,7 +340,7 @@ const AppSidebar = () => {
             </span>
             {/* Tooltip for collapsed state */}
             {isCollapsed && (
-              <span className="hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-2 lg:px-2 lg:py-1 lg:bg-popover lg:text-popover-foreground lg:text-sm lg:rounded-md lg:whitespace-nowrap lg:z-50 lg:border lg:shadow-md">
+              <span className="hidden lg:group-hover:block lg:absolute lg:left-full lg:ml-3 lg:px-2.5 lg:py-1.5 glass lg:text-popover-foreground lg:text-sm lg:rounded-lg lg:whitespace-nowrap lg:z-50">
                 Logout
               </span>
             )}

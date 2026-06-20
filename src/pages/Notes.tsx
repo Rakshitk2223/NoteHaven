@@ -319,7 +319,9 @@ const Notes = () => {
 
         // Group tags by note_id
         const tagsByNote: Record<number, Tag[]> = {};
-        noteTagsData?.forEach((item: any) => {
+        type NoteTagRow = { note_id: number; tags: Tag | null };
+        (noteTagsData as NoteTagRow[] | null)?.forEach((item) => {
+          if (!item.tags) return;
           if (!tagsByNote[item.note_id]) tagsByNote[item.note_id] = [];
           tagsByNote[item.note_id].push(item.tags);
         });
@@ -785,7 +787,8 @@ const Notes = () => {
   };
 
   // Tiptap toolbar helpers
-  const run = (cb: (e: any) => any) => () => { if (editor) { editor.chain().focus(); cb(editor); } };
+  type ActiveEditor = NonNullable<ReturnType<typeof useEditor>>;
+  const run = (cb: (e: ActiveEditor) => void) => () => { if (editor) { editor.chain().focus(); cb(editor); } };
   // Flush any pending save when the tab is being closed/refreshed (best-effort),
   // and once more on unmount as a safety net. Note-switch flushing is handled by
   // the note-load effect's cleanup above.
@@ -853,7 +856,7 @@ const Notes = () => {
   }, [searchQuery, selectedTags]);
 
   return (
-    <div className="h-screen bg-background overflow-hidden">
+    <div className="h-screen overflow-hidden">
       <div className="flex h-full">
         <AppSidebar />
         
@@ -909,7 +912,7 @@ const Notes = () => {
               {!isMobileView && (
                 <div className="p-3 md:p-4 border-b border-border sticky top-0 bg-card z-10">
                   <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-base md:text-lg font-semibold text-foreground">Notes</h2>
+                    <h2 className="text-base md:text-lg font-semibold text-foreground gradient-text-soft">Notes</h2>
                     <Button
                       size="sm"
                       onClick={createNote}
@@ -1030,7 +1033,7 @@ const Notes = () => {
                           {note.title === 'Inbox' ? (
                             <Lightbulb className="h-3 w-3 text-warning flex-shrink-0" />
                           ) : note.is_pinned ? (
-                            <Pin className="h-3 w-3 text-foreground flex-shrink-0" />
+                            <Pin className="h-3 w-3 text-primary flex-shrink-0" />
                           ) : null}
                           <span className="truncate min-w-0">{truncateText(note.title || 'Untitled', 80)}</span>
                         </div>

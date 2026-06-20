@@ -1,5 +1,5 @@
 // Optimized media search with parallel APIs and proper timeout handling
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // CORS headers
 const corsHeaders = {
@@ -11,17 +11,164 @@ const corsHeaders = {
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
   return Promise.race([
     promise,
-    new Promise<null>((_, reject) => 
+    new Promise<null>((_, reject) =>
       setTimeout(() => reject(new Error(`${label} timeout`)), timeoutMs)
     )
   ]).catch(err => {
-    console.log(`⚠️ ${err.message}`);
+    console.log(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
     return null;
   });
 }
 
+// Normalized per-season structure shared by all sources.
+interface SeasonInfo {
+  season_number: number;
+  episode_count: number;
+  air_date: string | null;
+  name: string;
+}
+
+// Normalized media record returned by every search* function and written to
+// the media_metadata cache table.
+interface MediaResult {
+  title: string;
+  type: string;
+  cover_image: string;
+  banner_image: string | null;
+  description: string;
+  rating: number;
+  status: string;
+  episodes: number | null;
+  chapters: number | null;
+  total_seasons: number | null;
+  seasons: SeasonInfo[] | null;
+  genres: string[] | null;
+  anilist_id: number | null;
+  tmdb_id: number | null;
+  mal_id: number | null;
+  // Internal-only TVmaze id, stripped before returning to the client.
+  _tvmaze_id?: number;
+}
+
+// Partial enrichment payload merged onto the top result of a source.
+type MediaEnrichment = Partial<Pick<MediaResult, 'total_seasons' | 'seasons' | 'episodes' | 'genres' | 'status'>>;
+
+// ---------------------------------------------------------------------------
+// Minimal shapes of the external API responses (only the fields we read).
+// ---------------------------------------------------------------------------
+interface MangaUpdatesHit {
+  hit_title?: string;
+  record?: {
+    title?: string;
+    type?: string;
+    description?: string;
+    image?: { url?: { original?: string; thumb?: string } };
+    genres?: Array<{ genre?: string }>;
+  };
+}
+
+interface MangaDexRelationship {
+  type?: string;
+  attributes?: { fileName?: string };
+}
+interface MangaDexManga {
+  id?: string;
+  relationships?: MangaDexRelationship[];
+  attributes?: {
+    title?: Record<string, string>;
+    description?: { en?: string };
+    status?: string;
+  };
+}
+
+interface TVmazeShow {
+  id?: number;
+  name?: string;
+  language?: string | null;
+  image?: { original?: string; medium?: string };
+  summary?: string;
+  rating?: { average?: number | null };
+  status?: string;
+  genres?: string[];
+  externals?: { thetvdb?: number | null };
+}
+interface TVmazeSearchItem {
+  show: TVmazeShow;
+}
+interface TVmazeEpisode {
+  season?: number | null;
+  airdate?: string | null;
+}
+
+interface AniListMedia {
+  id?: number;
+  title: { romaji?: string; english?: string; native?: string };
+  description?: string;
+  coverImage?: { large?: string; extraLarge?: string };
+  bannerImage?: string | null;
+  episodes?: number | null;
+  chapters?: number | null;
+  averageScore?: number | null;
+  status?: string;
+  genres?: string[];
+}
+
+interface JikanResult {
+  mal_id?: number;
+  title?: string;
+  title_english?: string;
+  title_japanese?: string;
+  synopsis?: string;
+  images?: { jpg?: { large_image_url?: string; image_url?: string } };
+  trailer?: { images?: { maximum_image_url?: string | null } };
+  score?: number | null;
+  status?: string;
+  episodes?: number | null;
+  chapters?: number | null;
+  genres?: Array<{ name?: string }>;
+}
+
+interface TMDBResult {
+  id?: number;
+  title?: string;
+  name?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  overview?: string;
+  vote_average?: number | null;
+  status?: string;
+  number_of_episodes?: number | null;
+  origin_country?: string[];
+}
+interface TMDBSeason {
+  season_number?: number | null;
+  episode_count?: number | null;
+  air_date?: string | null;
+  name?: string | null;
+}
+interface TMDBDetails {
+  genres?: Array<{ name?: string }>;
+  status?: string;
+  seasons?: TMDBSeason[];
+  number_of_seasons?: number | null;
+  number_of_episodes?: number | null;
+}
+
+interface WikidataSearchEntity {
+  id: string;
+  label?: string;
+  description?: string;
+}
+
+// Row shape of the media_metadata cache rows we read back.
+interface MediaMetadataRow {
+  title: string;
+  type: string;
+  cover_image: string;
+}
+
 // MangaUpdates API for manga/manhwa/manhua
-async function searchMangaUpdates(query: string): Promise<any[]> {
+async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
   try {
     const response = await fetch('https://api.mangaupdates.com/v1/series/search', {
       method: 'POST',
@@ -38,7 +185,7 @@ async function searchMangaUpdates(query: string): Promise<any[]> {
     const results = data?.results;
     if (!Array.isArray(results)) return [];
 
-    return results.map((r: any) => {
+    return (results as MangaUpdatesHit[]).map((r): MediaResult => {
       const record = r?.record;
       const image = record?.image?.url?.original || record?.image?.url?.thumb || '';
       return {
@@ -53,12 +200,12 @@ async function searchMangaUpdates(query: string): Promise<any[]> {
         chapters: null,
         total_seasons: null,
         seasons: null,
-        genres: Array.isArray(record?.genres) ? record.genres.map((g: any) => g.genre).filter(Boolean) : null,
+        genres: Array.isArray(record?.genres) ? record.genres.map((g) => g.genre).filter((g): g is string => Boolean(g)) : null,
         anilist_id: null,
         tmdb_id: null,
         mal_id: null,
       };
-    }).filter((x: any) => x.cover_image);
+    }).filter((x) => x.cover_image);
   } catch (error) {
     console.error('MangaUpdates error:', error);
     return [];
@@ -66,7 +213,7 @@ async function searchMangaUpdates(query: string): Promise<any[]> {
 }
 
 // MangaDex API for manga/manhwa/manhua covers
-async function searchMangaDex(query: string): Promise<any[]> {
+async function searchMangaDex(query: string): Promise<MediaResult[]> {
   try {
     const response = await fetch(
       `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=5&includes[]=cover_art`
@@ -77,8 +224,8 @@ async function searchMangaDex(query: string): Promise<any[]> {
     const data = await response.json();
     if (data.result !== 'ok' || !Array.isArray(data.data)) return [];
 
-    return data.data.map((manga: any) => {
-      const coverRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+    return (data.data as MangaDexManga[]).map((manga): MediaResult => {
+      const coverRel = manga.relationships?.find((r) => r.type === 'cover_art');
       const coverFileName = coverRel?.attributes?.fileName;
       const mangaId = manga.id;
       const coverImage = coverFileName
@@ -107,7 +254,7 @@ async function searchMangaDex(query: string): Promise<any[]> {
         tmdb_id: null,
         mal_id: null,
       };
-    }).filter((x: any) => x.cover_image);
+    }).filter((x) => x.cover_image);
   } catch (error) {
     console.error('MangaDex error:', error);
     return [];
@@ -115,7 +262,7 @@ async function searchMangaDex(query: string): Promise<any[]> {
 }
 
 // TVmaze API for TV shows (K-drama, J-drama, series)
-async function searchTVmaze(query: string): Promise<any[]> {
+async function searchTVmaze(query: string): Promise<MediaResult[]> {
   try {
     const response = await fetch(
       `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`
@@ -126,7 +273,7 @@ async function searchTVmaze(query: string): Promise<any[]> {
     const data = await response.json();
     if (!Array.isArray(data)) return [];
 
-    const mapped = data.slice(0, 5).map((item: any) => {
+    const mapped = (data as TVmazeSearchItem[]).slice(0, 5).map((item): MediaResult => {
       const show = item.show;
       const language = show.language || '';
       let determinedType = 'series';
@@ -151,7 +298,7 @@ async function searchTVmaze(query: string): Promise<any[]> {
         _tvmaze_id: show.id,
         mal_id: null,
       };
-    }).filter((x: any) => x.cover_image);
+    }).filter((x) => x.cover_image);
 
     // Enrich the top match with real season structure by grouping its episodes.
     if (mapped[0]?._tvmaze_id) {
@@ -159,7 +306,7 @@ async function searchTVmaze(query: string): Promise<any[]> {
       if (seasonData) Object.assign(mapped[0], seasonData);
     }
     // Strip the internal id so it isn't written to the cache table.
-    mapped.forEach((m: any) => delete m._tvmaze_id);
+    mapped.forEach((m) => delete m._tvmaze_id);
 
     return mapped;
   } catch (error) {
@@ -169,12 +316,12 @@ async function searchTVmaze(query: string): Promise<any[]> {
 }
 
 // Group a TVmaze show's episodes into seasons for the per-season breakdown.
-async function fetchTVmazeSeasons(showId: number): Promise<any | null> {
+async function fetchTVmazeSeasons(showId: number): Promise<MediaEnrichment | null> {
   try {
     const res = await fetch(`https://api.tvmaze.com/shows/${showId}?embed=episodes`);
     if (!res.ok) return null;
     const show = await res.json();
-    const episodes: any[] = show?._embedded?.episodes || [];
+    const episodes: TVmazeEpisode[] = show?._embedded?.episodes || [];
     if (!episodes.length) return null;
 
     const bySeason = new Map<number, { count: number; air_date: string | null }>();
@@ -207,7 +354,7 @@ async function fetchTVmazeSeasons(showId: number): Promise<any | null> {
 }
 
 // AniList GraphQL API - FIXED: Uses Page instead of Media for fast search
-async function searchAniList(query: string, type: string): Promise<any[]> {
+async function searchAniList(query: string, type: string): Promise<MediaResult[]> {
   try {
     const searchType = type === 'anime' ? 'ANIME' : type === 'manga' ? 'MANGA' : null;
     if (!searchType) return [];
@@ -258,14 +405,14 @@ async function searchAniList(query: string, type: string): Promise<any[]> {
     
     if (!media || !Array.isArray(media)) return [];
 
-    return media.map((item: any) => {
+    return (media as AniListMedia[]).map((item): MediaResult => {
       const episodes = item.episodes || null;
       // Anime is modeled as a single "season" with all its episodes; manga has none.
-      const seasons = type === 'anime' && episodes
+      const seasons: SeasonInfo[] | null = type === 'anime' && episodes
         ? [{ season_number: 1, episode_count: episodes, air_date: null, name: 'Season 1' }]
         : null;
       return {
-        title: item.title.english || item.title.romaji || item.title.native,
+        title: item.title.english || item.title.romaji || item.title.native || query,
         type,
         cover_image: item.coverImage?.extraLarge || item.coverImage?.large || '',
         banner_image: item.bannerImage || null,
@@ -277,7 +424,7 @@ async function searchAniList(query: string, type: string): Promise<any[]> {
         total_seasons: seasons ? 1 : null,
         seasons,
         genres: Array.isArray(item.genres) ? item.genres : null,
-        anilist_id: item.id,
+        anilist_id: item.id ?? null,
         tmdb_id: null,
         mal_id: null,
       };
@@ -289,7 +436,7 @@ async function searchAniList(query: string, type: string): Promise<any[]> {
 }
 
 // Jikan API (MyAnimeList)
-async function searchJikan(query: string, type: string): Promise<any[]> {
+async function searchJikan(query: string, type: string): Promise<MediaResult[]> {
   try {
     const typeParam = type === 'anime' ? 'anime' : type === 'manga' ? 'manga' : null;
     if (!typeParam) return [];
@@ -305,13 +452,13 @@ async function searchJikan(query: string, type: string): Promise<any[]> {
     
     if (!Array.isArray(results)) return [];
 
-    return results.map((result: any) => {
+    return (results as JikanResult[]).map((result): MediaResult => {
       const episodes = result.episodes || null;
-      const seasons = type === 'anime' && episodes
+      const seasons: SeasonInfo[] | null = type === 'anime' && episodes
         ? [{ season_number: 1, episode_count: episodes, air_date: null, name: 'Season 1' }]
         : null;
       return {
-        title: result.title || result.title_english || result.title_japanese,
+        title: result.title || result.title_english || result.title_japanese || query,
         type,
         cover_image: result.images?.jpg?.large_image_url || result.images?.jpg?.image_url || '',
         banner_image: result.trailer?.images?.maximum_image_url || null,
@@ -322,10 +469,10 @@ async function searchJikan(query: string, type: string): Promise<any[]> {
         chapters: result.chapters || null,
         total_seasons: seasons ? 1 : null,
         seasons,
-        genres: Array.isArray(result.genres) ? result.genres.map((g: any) => g.name).filter(Boolean) : null,
+        genres: Array.isArray(result.genres) ? result.genres.map((g) => g.name).filter((n): n is string => Boolean(n)) : null,
         anilist_id: null,
         tmdb_id: null,
-        mal_id: result.mal_id,
+        mal_id: result.mal_id ?? null,
       };
     });
   } catch (error) {
@@ -335,7 +482,7 @@ async function searchJikan(query: string, type: string): Promise<any[]> {
 }
 
 // TMDB API for movies/series
-async function searchTMDB(query: string, type: string, apiKey: string): Promise<any[]> {
+async function searchTMDB(query: string, type: string, apiKey: string): Promise<MediaResult[]> {
   try {
     if (!apiKey) return [];
 
@@ -352,8 +499,8 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
     if (!Array.isArray(results)) return [];
 
     // Get top 10 results
-    const mapped = results.slice(0, 10).map((result: any) => ({
-      title: result.title || result.name,
+    const mapped = (results as TMDBResult[]).slice(0, 10).map((result): MediaResult => ({
+      title: result.title || result.name || query,
       type: determineType(result, type),
       cover_image: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : '',
       banner_image: result.backdrop_path ? `https://image.tmdb.org/t/p/original${result.backdrop_path}` : null,
@@ -366,13 +513,13 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
       seasons: null,
       genres: null,
       anilist_id: null,
-      tmdb_id: result.id,
+      tmdb_id: result.id ?? null,
       mal_id: null,
     }));
 
     // The search endpoint omits season/episode structure and genres — enrich the
     // top result via the details endpoint (one extra call, only for the primary match).
-    const top = results[0];
+    const top = (results as TMDBResult[])[0];
     if (top?.id && mapped[0]) {
       const details = await fetchTMDBDetails(top.id, searchType === 'movie', apiKey);
       if (details) Object.assign(mapped[0], details);
@@ -387,26 +534,26 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
 
 // Fetch full details for a single TMDB title to obtain real season structure + genres.
 // TV → number_of_seasons + per-season episode counts; Movie → genres only.
-async function fetchTMDBDetails(id: number, isMovie: boolean, apiKey: string): Promise<any | null> {
+async function fetchTMDBDetails(id: number, isMovie: boolean, apiKey: string): Promise<MediaEnrichment | null> {
   try {
     if (!apiKey) return null;
     const endpoint = isMovie ? 'movie' : 'tv';
     const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${apiKey}`);
     if (!res.ok) return null;
-    const d = await res.json();
+    const d: TMDBDetails = await res.json();
 
-    const genres = Array.isArray(d.genres) ? d.genres.map((g: any) => g.name).filter(Boolean) : null;
+    const genres = Array.isArray(d.genres) ? d.genres.map((g) => g.name).filter((n): n is string => Boolean(n)) : null;
     if (isMovie) {
       return { genres, status: mapTMDBStatus(d.status) };
     }
 
     // Drop "Season 0" (specials) so counts reflect real seasons.
-    const seasons = Array.isArray(d.seasons)
+    const seasons: SeasonInfo[] | null = Array.isArray(d.seasons)
       ? d.seasons
-          .filter((s: any) => (s.season_number ?? 0) > 0 && (s.episode_count ?? 0) > 0)
-          .map((s: any) => ({
-            season_number: s.season_number,
-            episode_count: s.episode_count,
+          .filter((s) => (s.season_number ?? 0) > 0 && (s.episode_count ?? 0) > 0)
+          .map((s) => ({
+            season_number: s.season_number ?? 0,
+            episode_count: s.episode_count ?? 0,
             air_date: s.air_date || null,
             name: s.name || `Season ${s.season_number}`,
           }))
@@ -428,7 +575,7 @@ async function fetchTMDBDetails(id: number, isMovie: boolean, apiKey: string): P
 // Wikidata + Wikimedia Commons — fully keyless poster fallback for live-action.
 // Good for Bollywood / regional / obscure films TMDB sometimes misses.
 // Resolves an entity via wbsearchentities, then reads its image (P18) from Commons.
-async function searchWikidata(query: string, type: string): Promise<any[]> {
+async function searchWikidata(query: string, type: string): Promise<MediaResult[]> {
   try {
     const searchRes = await fetch(
       `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=5&type=item&origin=*`,
@@ -437,7 +584,7 @@ async function searchWikidata(query: string, type: string): Promise<any[]> {
     if (!searchRes.ok) return [];
 
     const searchData = await searchRes.json();
-    const candidates: any[] = Array.isArray(searchData?.search) ? searchData.search : [];
+    const candidates: WikidataSearchEntity[] = Array.isArray(searchData?.search) ? searchData.search : [];
     if (candidates.length === 0) return [];
 
     // Walk top candidates until one has a P18 image claim.
@@ -484,7 +631,7 @@ async function searchWikidata(query: string, type: string): Promise<any[]> {
 // Fanart.tv — high-quality posters; useful when TMDB is unreachable (e.g. blocked by some ISPs).
 // Requires a free personal key (FANART_API_KEY). Fanart is keyed by TMDB id, so we resolve the
 // id via TMDB first. No key (or no TMDB key to resolve the id) → no-op fallback.
-async function searchFanart(query: string, type: string, tmdbKey: string, fanartKey: string): Promise<any[]> {
+async function searchFanart(query: string, type: string, tmdbKey: string, fanartKey: string): Promise<MediaResult[]> {
   try {
     if (!fanartKey || !tmdbKey) return [];
 
@@ -541,7 +688,7 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
 
 // Dispatch to a single named API source (used by the client's cover-refresh cycling).
 // Lets the browser reach key-protected APIs (TMDB/Fanart) and CORS-less ones server-side.
-function searchBySource(source: string, query: string, type: string, tmdbKey: string, fanartKey: string): Promise<any[]> {
+function searchBySource(source: string, query: string, type: string, tmdbKey: string, fanartKey: string): Promise<MediaResult[]> {
   const t = (type || '').toLowerCase();
   switch (source) {
     case 'anilist':      return searchAniList(query, t === 'anime' ? 'anime' : 'manga');
@@ -557,7 +704,7 @@ function searchBySource(source: string, query: string, type: string, tmdbKey: st
 }
 
 // Helper functions
-function mapStatus(status: string): string {
+function mapStatus(status: string | null | undefined): string {
   const statusMap: Record<string, string> = {
     'FINISHED': 'completed',
     'RELEASING': 'ongoing',
@@ -568,10 +715,10 @@ function mapStatus(status: string): string {
     'Currently Airing': 'ongoing',
     'Not yet aired': 'upcoming',
   };
-  return statusMap[status] || 'upcoming';
+  return (status ? statusMap[status] : undefined) || 'upcoming';
 }
 
-function mapTMDBStatus(status: string): string {
+function mapTMDBStatus(status: string | null | undefined): string {
   const statusMap: Record<string, string> = {
     'Released': 'completed',
     'Post Production': 'upcoming',
@@ -581,10 +728,10 @@ function mapTMDBStatus(status: string): string {
     'Returning Series': 'ongoing',
     'Planned': 'upcoming',
   };
-  return statusMap[status] || 'upcoming';
+  return (status ? statusMap[status] : undefined) || 'upcoming';
 }
 
-function determineType(item: any, searchType: string): string {
+function determineType(item: TMDBResult, searchType: string): string {
   const originCountry = item.origin_country || [];
   if (originCountry.includes('KR')) return 'kdrama';
   if (originCountry.includes('JP')) return 'jdrama';
@@ -593,7 +740,7 @@ function determineType(item: any, searchType: string): string {
 }
 
 // Batch search: accept POST with { items: [{id, title, type}] }
-async function handleBatchSearch(req: Request, supabase: any): Promise<Response> {
+async function handleBatchSearch(req: Request, supabase: SupabaseClient): Promise<Response> {
   const body = await req.json();
   const items: Array<{ id: number; title: string; type: string }> = body.items;
 
@@ -612,7 +759,7 @@ async function handleBatchSearch(req: Request, supabase: any): Promise<Response>
     .in('title', titles);
 
   const cacheMap = new Map<string, string>();
-  cached?.forEach((row: any) => {
+  cached?.forEach((row: MediaMetadataRow) => {
     const key = `${row.title.toLowerCase()}_${row.type.toLowerCase()}`;
     cacheMap.set(key, row.cover_image);
   });
@@ -636,7 +783,7 @@ async function handleBatchSearch(req: Request, supabase: any): Promise<Response>
 
   const apiPromises = fetchBatch.map(async (item) => {
     const normalizedType = item.type.toLowerCase();
-    let apis: Promise<any[]>[] = [];
+    let apis: Promise<MediaResult[] | null>[] = [];
 
     if (normalizedType === 'anime') {
       apis = [
@@ -803,7 +950,7 @@ Deno.serve(async (req) => {
     const tmdbKey = Deno.env.get('TMDB_API_KEY');
 
     // Run all applicable APIs in parallel with 3-second timeout
-    let apiPromises: Promise<any[]>[] = [];
+    let apiPromises: Promise<MediaResult[] | null>[] = [];
     
     if (normalizedType === 'anime' || !type) {
       apiPromises = [
@@ -842,9 +989,9 @@ Deno.serve(async (req) => {
     const apiResults = await Promise.allSettled(apiPromises);
     
     // Merge all successful results
-    let allResults: any[] = [];
-    let sources: string[] = [];
-    
+    let allResults: MediaResult[] = [];
+    const sources: string[] = [];
+
     apiResults.forEach((result, index) => {
       if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
         allResults = [...allResults, ...result.value];

@@ -35,9 +35,9 @@ const SignUp = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <motion.div 
-        className="zen-card zen-shadow-lg w-full max-w-md p-8"
+    <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
+      <motion.div
+        className="glass w-full max-w-md p-8"
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
@@ -48,7 +48,10 @@ const SignUp = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1, ease: [0.4, 0, 0.2, 1] }}
         >
-          <h1 className="text-3xl font-bold font-heading text-foreground mb-2">
+          <div className="mb-5 mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-brand text-xl font-extrabold text-white shadow-glow-md">
+            N
+          </div>
+          <h1 className="text-3xl font-extrabold font-heading mb-2 gradient-text">
             NoteHaven
           </h1>
           <p className="text-muted-foreground font-body">
@@ -105,9 +108,10 @@ const SignUp = () => {
             />
           </div>
 
-          <Button 
-            type="submit" 
-            className="w-full zen-transition hover:shadow-md"
+          <Button
+            type="submit"
+            variant="gradient"
+            className="w-full"
             size="lg"
             disabled={loading || !email || !password}
           >

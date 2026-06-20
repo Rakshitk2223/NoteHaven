@@ -3,112 +3,128 @@
 @tailwind utilities;
 
 /* ============================================================================
-   NoteHaven Design System — streaming-platform aesthetic (Netflix / Prime)
+   NoteHaven Design System — "AURORA" (premium-SaaS aesthetic)
+   Deep charcoal canvas, electric indigo→cyan gradient accents, glassy surfaces
+   with soft glow, gradient headlines, crisp spring motion.
    Token-driven. Per-theme color VALUES are written at runtime by applyTheme()
    in lib/themes.ts. The :root / .dark blocks below are first-paint fallbacks
-   (= Netflix light / Netflix dark, the default family).
-   All colors are HSL triplets so Tailwind opacity modifiers keep working.
+   (= Aurora light / Aurora dark, the default family). All colors are HSL
+   triplets so Tailwind opacity modifiers keep working.
    ============================================================================ */
 
 @layer base {
   :root {
     /* ---- Rhythm tokens: identical across all themes ---- */
-    /* 8-pt spacing scale */
     --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
     --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
 
-    /* Radius scale */
-    --radius-sm: 8px;    /* buttons, inputs, chips */
-    --radius-md: 12px;   /* cards, list items */
-    --radius-lg: 16px;   /* large panels, sheets */
-    --radius-xl: 20px;   /* modals */
+    /* Radius scale — softened for a premium feel */
+    --radius-sm: 9px;    /* buttons, inputs, chips */
+    --radius-md: 14px;   /* cards, list items */
+    --radius-lg: 18px;   /* large panels, sheets */
+    --radius-xl: 24px;   /* modals */
     --radius-full: 999px;
-    --radius: 12px;      /* legacy alias */
+    --radius: 14px;      /* legacy alias */
 
-    /* Elevation (flat surfaces 0–2; floating glass 3) */
-    --shadow-1: 0 1px 2px rgba(0,0,0,0.20);
-    --shadow-2: 0 4px 12px rgba(0,0,0,0.28);
-    --shadow-3: 0 16px 48px rgba(0,0,0,0.45);
-    /* legacy aliases */
+    /* Elevation — soft, diffuse */
+    --shadow-1: 0 1px 2px rgba(8,10,18,0.20), 0 1px 3px rgba(8,10,18,0.12);
+    --shadow-2: 0 4px 16px -2px rgba(8,10,18,0.28), 0 2px 6px rgba(8,10,18,0.16);
+    --shadow-3: 0 24px 64px -12px rgba(8,10,18,0.55), 0 8px 24px rgba(8,10,18,0.30);
     --shadow-cinema: var(--shadow-1);
     --shadow-cinema-lg: var(--shadow-2);
 
-    /* Motion — iOS spring feel */
-    --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+    /* Brand gradient + glow — resolve per-theme via the vars below */
+    --gradient-brand: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--accent-2)) 100%);
+    --gradient-brand-soft: linear-gradient(135deg, hsl(var(--primary) / 0.16) 0%, hsl(var(--accent-2) / 0.16) 100%);
+    --glow-sm: 0 0 18px -6px hsl(var(--glow) / 0.45);
+    --glow-md: 0 10px 38px -10px hsl(var(--glow) / 0.45);
+    --glow-lg: 0 18px 60px -12px hsl(var(--glow) / 0.50);
+
+    /* Motion — crisp spring feel */
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-smooth: cubic-bezier(0.32, 0.72, 0, 1);
     --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
-    --dur-fast: 140ms; --dur-base: 220ms; --dur-slow: 320ms;
+    --dur-fast: 130ms; --dur-base: 220ms; --dur-slow: 340ms;
 
-    /* ---- Color fallback: NETFLIX LIGHT ---- */
-    --background: 0 0% 96%;
-    --foreground: 0 0% 8%;
+    /* ---- Color fallback: AURORA LIGHT ---- */
+    --background: 228 39% 97%;
+    --foreground: 222 40% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 8%;
+    --card-foreground: 222 40% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 8%;
-    --primary: 357 92% 47%;
+    --popover-foreground: 222 40% 11%;
+    --primary: 250 80% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 98%;
-    --secondary-foreground: 0 0% 8%;
-    --muted: 0 0% 93%;
-    --muted-foreground: 0 0% 30%;
-    --accent: 0 0% 98%;
-    --accent-foreground: 0 0% 8%;
-    --destructive: 357 92% 47%;
+    --secondary: 225 40% 96%;
+    --secondary-foreground: 222 40% 11%;
+    --muted: 222 28% 92%;
+    --muted-foreground: 220 16% 40%;
+    --accent: 225 40% 96%;
+    --accent-foreground: 222 40% 11%;
+    --destructive: 351 83% 56%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 92%;
-    --input: 0 0% 93%;
-    --ring: 357 92% 47%;
-    --border-strong: 0 0% 86%;
-    --accent-hover: 357 92% 40%;
-    --text-3: 0 0% 54%;
-    --success: 141 68% 37%;
-    --warning: 43 89% 38%;
+    --border: 222 24% 89%;
+    --input: 222 24% 91%;
+    --ring: 250 80% 60%;
+    --border-strong: 222 20% 80%;
+    --accent-hover: 250 78% 54%;
+    --text-3: 220 12% 52%;
+    --success: 158 68% 40%;
+    --warning: 36 92% 45%;
+    /* Aurora-specific */
+    --accent-2: 190 92% 42%;
+    --accent-2-hover: 190 95% 36%;
+    --glow: 250 80% 60%;
 
-    --sidebar-background: 0 0% 96%;
-    --sidebar-foreground: 0 0% 8%;
-    --sidebar-primary: 357 92% 47%;
+    --sidebar-background: 228 42% 98%;
+    --sidebar-foreground: 222 40% 11%;
+    --sidebar-primary: 250 80% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 98%;
-    --sidebar-accent-foreground: 0 0% 8%;
-    --sidebar-border: 0 0% 92%;
-    --sidebar-ring: 357 92% 47%;
+    --sidebar-accent: 225 40% 95%;
+    --sidebar-accent-foreground: 222 40% 11%;
+    --sidebar-border: 222 24% 90%;
+    --sidebar-ring: 250 80% 60%;
   }
 
   .dark {
-    /* ---- Color fallback: NETFLIX DARK (default) ---- */
-    --background: 0 0% 8%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 11%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 11%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 357 92% 47%;
+    /* ---- Color fallback: AURORA DARK (default) ---- */
+    --background: 222 32% 7%;       /* #0B0E14 deep charcoal-blue */
+    --foreground: 213 31% 95%;
+    --card: 222 28% 10%;            /* surface-1 */
+    --card-foreground: 213 31% 95%;
+    --popover: 223 30% 11%;
+    --popover-foreground: 213 31% 95%;
+    --primary: 250 89% 66%;         /* electric indigo */
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 14%;
-    --secondary-foreground: 0 0% 100%;
-    --muted: 0 0% 17%;
-    --muted-foreground: 0 0% 70%;
-    --accent: 0 0% 14%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 357 92% 47%;
+    --secondary: 222 24% 14%;       /* surface-2 */
+    --secondary-foreground: 213 31% 95%;
+    --muted: 222 22% 17%;           /* surface-3 */
+    --muted-foreground: 217 18% 65%;/* text-2 */
+    --accent: 222 24% 14%;
+    --accent-foreground: 213 31% 95%;
+    --destructive: 351 89% 62%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 16%;
-    --input: 0 0% 17%;
-    --ring: 357 92% 47%;
-    --border-strong: 0 0% 21%;
-    --accent-hover: 357 93% 52%;
-    --text-3: 0 0% 43%;
-    --success: 135 62% 55%;
-    --warning: 44 82% 50%;
+    --border: 220 22% 16%;
+    --input: 222 22% 17%;
+    --ring: 250 89% 66%;
+    --border-strong: 220 18% 27%;
+    --accent-hover: 250 90% 72%;
+    --text-3: 218 14% 46%;
+    --success: 158 72% 52%;
+    --warning: 38 95% 62%;
+    /* Aurora-specific */
+    --accent-2: 189 94% 55%;        /* cyan end of gradient */
+    --accent-2-hover: 189 95% 64%;
+    --glow: 250 89% 66%;
 
-    --sidebar-background: 0 0% 8%;
-    --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 357 92% 47%;
+    --sidebar-background: 223 34% 6%;
+    --sidebar-foreground: 213 31% 95%;
+    --sidebar-primary: 250 89% 66%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 14%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 16%;
-    --sidebar-ring: 357 92% 47%;
+    --sidebar-accent: 222 24% 13%;
+    --sidebar-accent-foreground: 213 31% 95%;
+    --sidebar-border: 220 22% 13%;
+    --sidebar-ring: 250 89% 66%;
   }
 }
 
@@ -126,27 +142,45 @@
     transition: background-color var(--dur-slow) var(--ease-out), color var(--dur-slow) var(--ease-out);
   }
 
-  /* ---- Type scale (§3) ---- */
+  /* ---- Type scale ---- */
   h1, h2, h3, h4, h5, h6 {
     @apply font-heading text-foreground;
   }
-  h1 { font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; }
-  h2 { font-size: 18px; line-height: 1.3; font-weight: 600; letter-spacing: -0.005em; }
+  h1 { font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; }
+  h2 { font-size: 18px; line-height: 1.3; font-weight: 650; letter-spacing: -0.01em; }
 
-  /* Tabular numerals for all stat/number displays */
   .tabular-nums, .text-display, .stat-number { font-variant-numeric: tabular-nums; }
 }
 
 @layer components {
   /* Type-scale utility classes */
-  .text-display { font-size: 32px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
-  .text-h1      { font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; }
-  .text-h2      { font-size: 18px; line-height: 1.3; font-weight: 600; letter-spacing: -0.005em; }
+  .text-display { font-size: 32px; line-height: 1.08; font-weight: 800; letter-spacing: -0.03em; }
+  .text-h1      { font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; }
+  .text-h2      { font-size: 18px; line-height: 1.3; font-weight: 650; letter-spacing: -0.01em; }
   .text-label   { font-size: 13px; line-height: 1.4; font-weight: 500; }
   .text-caption { font-size: 12px; line-height: 1.4; font-weight: 500; }
 
-  /* Card surface — flat, subtle border + low elevation, springy hover lift. */
+  /* Gradient text — the signature Aurora headline treatment */
+  .gradient-text {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  .gradient-text-soft {
+    background: linear-gradient(135deg, hsl(var(--foreground)) 30%, hsl(var(--primary)) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  /* ---- Card surfaces ----
+     .zen-card is the workhorse (used app-wide). Aurora restyle: a lifted,
+     lit surface with a hairline gradient top-edge and a springy glow hover. */
   .zen-card {
+    position: relative;
     @apply bg-card border border-border rounded-md;
     box-shadow: var(--shadow-1);
     transition: transform var(--dur-base) var(--ease-spring),
@@ -155,33 +189,83 @@
                 background-color var(--dur-fast) var(--ease-out);
   }
   .zen-card:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-2);
-    background-color: hsl(var(--secondary));
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-2), var(--glow-sm);
+    border-color: hsl(var(--border-strong));
   }
+
+  /* .aurora-card — premium glass tile with a lit gradient border. Use for
+     hero panels / stat tiles where extra richness is wanted. */
+  .aurora-card {
+    position: relative;
+    border-radius: var(--radius-lg);
+    background:
+      linear-gradient(180deg, hsl(var(--card) / 0.92), hsl(var(--card) / 0.82));
+    border: 1px solid hsl(var(--border));
+    box-shadow: var(--shadow-2);
+    transition: transform var(--dur-base) var(--ease-spring),
+                box-shadow var(--dur-base) var(--ease-out),
+                border-color var(--dur-fast) var(--ease-out);
+    overflow: hidden;
+  }
+  .aurora-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: var(--gradient-brand);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.22;
+    transition: opacity var(--dur-base) var(--ease-out);
+    pointer-events: none;
+  }
+  .aurora-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-3), var(--glow-md);
+  }
+  .aurora-card:hover::before { opacity: 0.6; }
+
+  /* Glow helpers */
+  .glow      { box-shadow: var(--glow-sm); }
+  .glow-md   { box-shadow: var(--glow-md); }
+  .hover-glow { transition: box-shadow var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-spring); }
+  .hover-glow:hover { box-shadow: var(--glow-md); }
 
   .zen-shadow    { box-shadow: var(--shadow-1); }
   .zen-shadow-lg { box-shadow: var(--shadow-2); }
+  .zen-transition { transition: all var(--dur-base) var(--ease-out); }
 
-  .zen-transition { @apply transition-all duration-300 ease-in-out; }
+  /* Brand gradient fills */
+  .bg-gradient-brand { background: var(--gradient-brand); }
+  .bg-gradient-brand-soft { background: var(--gradient-brand-soft); }
+  .border-gradient-brand { border-color: hsl(var(--primary) / 0.5); }
 
-  /* ---- Glass recipe (§4): floating layers ONLY ---- */
+  /* Subtle tinted "chip" surface for icon badges, pills */
+  .chip-tint {
+    background: hsl(var(--primary) / 0.12);
+    color: hsl(var(--primary));
+    border: 1px solid hsl(var(--primary) / 0.20);
+  }
+
+  /* ---- Glass recipe: floating layers ONLY (modals, sidebar, popovers) ---- */
   .glass {
-    background: color-mix(in srgb, hsl(var(--popover)) 72%, transparent);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: color-mix(in srgb, hsl(var(--popover)) 78%, transparent);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
     border: 1px solid hsl(var(--border-strong));
-    box-shadow: var(--shadow-3), inset 0 1px 0 rgba(255,255,255,0.06);
+    box-shadow: var(--shadow-3), inset 0 1px 0 hsl(0 0% 100% / 0.06);
     border-radius: var(--radius-xl);
   }
-  .glass-strong { /* legacy alias */
-    background: color-mix(in srgb, hsl(var(--popover)) 80%, transparent);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
+  .glass-strong {
+    background: color-mix(in srgb, hsl(var(--popover)) 86%, transparent);
+    backdrop-filter: blur(26px) saturate(180%);
+    -webkit-backdrop-filter: blur(26px) saturate(180%);
     border: 1px solid hsl(var(--border-strong));
-    box-shadow: var(--shadow-3), inset 0 1px 0 rgba(255,255,255,0.06);
+    box-shadow: var(--shadow-3), inset 0 1px 0 hsl(0 0% 100% / 0.06);
   }
-  /* Legibility guard: solid surface when backdrop-filter is unsupported. */
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .glass, .glass-strong { background: hsl(var(--popover)); }
   }
@@ -196,6 +280,53 @@
   #rich-editor li, .note-preview li {
     @apply leading-relaxed;
   }
+}
+
+/* ---- Aurora ambient backdrop: drifting indigo/cyan orbs behind the app ---- */
+.aurora-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.aurora-backdrop::before,
+.aurora-backdrop::after {
+  content: "";
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  max-width: 820px;
+  max-height: 820px;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.40;
+  will-change: transform;
+}
+.aurora-backdrop::before {
+  top: -22vw;
+  left: -12vw;
+  background: radial-gradient(circle at center, hsl(var(--primary) / 0.55), transparent 62%);
+  animation: auroraDriftA 26s var(--ease-out) infinite alternate;
+}
+.aurora-backdrop::after {
+  bottom: -26vw;
+  right: -14vw;
+  background: radial-gradient(circle at center, hsl(var(--accent-2) / 0.42), transparent 62%);
+  animation: auroraDriftB 32s var(--ease-out) infinite alternate;
+}
+:root .aurora-backdrop::before,
+:root .aurora-backdrop::after { opacity: 0.30; }
+.dark .aurora-backdrop::before,
+.dark .aurora-backdrop::after { opacity: 0.42; }
+
+@keyframes auroraDriftA {
+  0%   { transform: translate3d(0,0,0) scale(1); }
+  100% { transform: translate3d(8vw,6vh,0) scale(1.12); }
+}
+@keyframes auroraDriftB {
+  0%   { transform: translate3d(0,0,0) scale(1.05); }
+  100% { transform: translate3d(-7vw,-5vh,0) scale(0.95); }
 }
 
 /* Unified Tiptap / ProseMirror editor base styles */
@@ -218,26 +349,34 @@
 .ProseMirror ol { list-style-type: decimal; padding-left: 1.5rem; }
 .ProseMirror li { margin-bottom: 0.25rem; }
 
-/* ---- Animations (spring/out-soft eased, fast + subtle) ---- */
+/* ---- Animations (spring/out eased, fast + intentional) ---- */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes fadeInScale {
-  from { opacity: 0; transform: scale(0.98); }
+  from { opacity: 0; transform: scale(0.97); }
   to   { opacity: 1; transform: scale(1); }
 }
 @keyframes slideInFromLeft {
-  from { opacity: 0; transform: translateX(-16px); }
+  from { opacity: 0; transform: translateX(-18px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes slideInFromRight {
-  from { opacity: 0; transform: translateX(16px); }
+  from { opacity: 0; transform: translateX(18px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--glow) / 0.0); }
+  50%      { box-shadow: var(--glow-md); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
 }
 
 .animate-fade-in       { animation: fadeIn var(--dur-base) var(--ease-out) forwards; }
@@ -245,8 +384,10 @@
 .animate-slide-in-left { animation: slideInFromLeft var(--dur-base) var(--ease-out) forwards; }
 .animate-slide-in-right{ animation: slideInFromRight var(--dur-base) var(--ease-out) forwards; }
 .animate-route         { animation: fadeIn var(--dur-base) var(--ease-out) forwards; }
+.animate-glow-pulse    { animation: glowPulse 2.4s ease-in-out infinite; }
+.animate-float         { animation: float 5s ease-in-out infinite; }
 
-/* Stagger animations for lists (cap ~8 + tail) */
+/* Stagger animations for lists (cap ~10 + tail) */
 .stagger-item { opacity: 0; animation: fadeIn var(--dur-base) var(--ease-out) forwards; }
 .stagger-item:nth-child(1) { animation-delay: 0.03s; }
 .stagger-item:nth-child(2) { animation-delay: 0.06s; }
@@ -256,11 +397,13 @@
 .stagger-item:nth-child(6) { animation-delay: 0.18s; }
 .stagger-item:nth-child(7) { animation-delay: 0.21s; }
 .stagger-item:nth-child(8) { animation-delay: 0.24s; }
-.stagger-item:nth-child(n+9) { animation-delay: 0.24s; }
+.stagger-item:nth-child(9) { animation-delay: 0.27s; }
+.stagger-item:nth-child(10){ animation-delay: 0.30s; }
+.stagger-item:nth-child(n+11) { animation-delay: 0.30s; }
 
 /* Hover helpers */
 .hover-lift  { transition: transform var(--dur-base) var(--ease-spring), box-shadow var(--dur-base) var(--ease-out); }
-.hover-lift:hover  { transform: translateY(-1px); }
+.hover-lift:hover  { transform: translateY(-2px); box-shadow: var(--shadow-2); }
 .hover-scale { transition: transform var(--dur-fast) var(--ease-spring); }
 .hover-scale:hover { transform: scale(1.02); }
 
@@ -269,7 +412,7 @@
   background: linear-gradient(
     90deg,
     hsl(var(--muted)) 0%,
-    hsl(var(--muted-foreground) / 0.1) 50%,
+    hsl(var(--muted-foreground) / 0.12) 50%,
     hsl(var(--muted)) 100%
   );
   background-size: 200% 100%;
@@ -327,4 +470,5 @@ html { scroll-behavior: smooth; }
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  .aurora-backdrop::before, .aurora-backdrop::after { animation: none !important; }
 }

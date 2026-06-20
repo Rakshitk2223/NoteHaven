@@ -15,9 +15,9 @@ const FloatingShapes = () => {
           key={i}
           className="absolute rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-xl opacity-30 dark:opacity-40"
           style={{
-            background: i % 2 === 0 
-              ? 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.5) 100%)'
-              : 'linear-gradient(135deg, hsl(var(--secondary)) 0%, hsl(var(--secondary) / 0.5) 100%)',
+            background: i % 2 === 0
+              ? 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.4) 100%)'
+              : 'linear-gradient(135deg, hsl(var(--accent-2)) 0%, hsl(var(--accent-2) / 0.4) 100%)',
             width: `${200 + i * 50}px`,
             height: `${200 + i * 50}px`,
           }}
@@ -78,9 +78,9 @@ const Login = () => {
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       >
         {/* Glassmorphism Card */}
-        <div className="backdrop-blur-xl bg-background/80 border border-border/50 rounded-2xl shadow-2xl overflow-hidden">
+        <div className="glass rounded-2xl overflow-hidden">
           {/* Top gradient bar */}
-          <div className="h-2 bg-gradient-to-r from-primary via-primary/80 to-secondary" />
+          <div className="h-1.5 bg-gradient-brand" />
           
           <div className="p-8 sm:p-10">
             {/* Logo and Title Section */}
@@ -96,9 +96,9 @@ const Login = () => {
                 whileHover={{ scale: 1.05, rotate: 5 }}
                 transition={{ type: "spring", stiffness: 300 }}
               >
-                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
-                  <svg 
-                    className="w-10 h-10 text-primary-foreground" 
+                <div className="w-20 h-20 rounded-2xl bg-gradient-brand flex items-center justify-center shadow-glow-md">
+                  <svg
+                    className="w-10 h-10 text-white"
                     fill="none" 
                     stroke="currentColor" 
                     viewBox="0 0 24 24"
@@ -114,12 +114,10 @@ const Login = () => {
               </motion.div>
 
               {/* Title */}
-              <h1 className="text-4xl sm:text-5xl font-bold tracking-tight mb-3">
-                <span className="bg-gradient-to-r from-primary via-primary/90 to-secondary bg-clip-text text-transparent">
-                  Note Haven
-                </span>
+              <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-3">
+                <span className="gradient-text">NoteHaven</span>
               </h1>
-              
+
               <p className="text-muted-foreground text-base sm:text-lg max-w-xs mx-auto leading-relaxed">
                 Your digital sanctuary for thoughts, ideas, and inspiration
               </p>
@@ -175,9 +173,10 @@ const Login = () => {
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
               >
-                <Button 
-                  type="submit" 
-                  className="w-full h-12 text-base font-semibold bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary transition-all duration-300 shadow-lg hover:shadow-xl"
+                <Button
+                  type="submit"
+                  variant="gradient"
+                  className="w-full h-12 text-base font-semibold"
                   size="lg"
                   disabled={loading || !email || !password}
                 >

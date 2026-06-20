@@ -1584,10 +1584,10 @@ const MediaTracker = () => {
   }, [location.search, mediaItems, viewMode]);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <div className="flex">
         <AppSidebar />
-        
+
         <div className="flex-1 lg:ml-0 min-w-0">
           <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
             <SheetContent side="right" className="w-full sm:max-w-lg p-0">
@@ -2008,7 +2008,7 @@ const MediaTracker = () => {
 
           <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
             <div className="flex items-center justify-between">
-              <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
+              <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground gradient-text-soft">
                 Media Tracker
               </h1>
               <div className="flex items-center gap-2">

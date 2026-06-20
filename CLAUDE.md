@@ -56,13 +56,16 @@ Env vars (`.env`, gitignored): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `V
 src/
   App.tsx                 # providers + routes
   main.tsx                # entry
-  index.css               # design tokens + global styles + animations
+  index.css               # Aurora design tokens + utilities + animations
   pages/                  # one file per route (some are 1000–1900 lines)
   components/
-    ui/                   # shadcn primitives (~50)
+    ui/                   # shadcn primitives (~50) + motion.tsx (shared motion), command.tsx
     dashboard/widgets/    # 12 dashboard widgets
     calendar/             # calendar views/modals
     media/                # MediaCard, CustomGroupBuilder
+    PageShell.tsx         # shared page frame (sidebar + gradient header + transition)
+    AppSidebar.tsx        # Aurora glass rail (⌘K trigger, hover route-prefetch)
+    CommandPalette.tsx    # ⌘K launcher  · AuroraBackdrop.tsx · RouteFallback.tsx
     Tag*.tsx              # tag UI components
   contexts/SidebarContext.tsx
   hooks/                  # useAuth, useCalendar, use-mobile, use-media-query, use-toast
@@ -81,11 +84,17 @@ The `supabase/` folder is git-tracked and present: `config.toml`, the `media-sea
 
 - **Data access**: prefer the `lib/*` modules. Many pages also call `supabase.from(...)` inline — match the local pattern of the file you're editing.
 - **Auth gating**: wrap protected routes in `<ProtectedRoute>`; get the user from `useAuth()`.
-- **Server state**: MediaTracker uses React Query (`useInfiniteQuery`, optimistic cache updates). Most other pages use manual `useState` + `useEffect` + `Promise.all`. Keep consistency within a page.
+- **Server state**: MediaTracker uses React Query (`useInfiniteQuery`, optimistic cache updates). Most other pages use manual `useState` + `useEffect` + `Promise.all`. Keep consistency within a page. The app-wide `QueryClient` (in `App.tsx`) now has caching defaults: `staleTime` 5m, `gcTime` 30m, `refetchOnWindowFocus: false`. (Migrating high-traffic pages to React Query for instant cross-navigation caching is a worthwhile follow-up.)
 - **Dates**: use `lib/date-utils.ts` (`dateToYMD`, `parseYMD`) to avoid UTC drift. Avoid `new Date(isoString)` / `toISOString().split('T')[0]` for local dates.
 - **Toasts**: use `useToast()` from `@/components/ui/use-toast` (the Sonner instance is mounted but unused by features).
 - **HTML content**: sanitize with `sanitizeHtml`/`sanitizePreview` (`lib/utils.ts`) before rendering stored note HTML.
-- **Styling**: use design tokens (`bg-background`, `text-foreground`, `border-border`, `text-primary`, etc.) and the `.zen-*` utility classes. Don't hard-code raw colors when a token exists. Themes are applied by writing CSS vars in `lib/themes.ts`.
+- **Styling**: use design tokens (`bg-background`, `text-foreground`, `border-border`, `text-primary`, `text-accent-2`, `text-success`, `text-warning`, etc.) and the utility classes in `index.css`. Don't hard-code raw colors when a token exists. Themes are applied by writing CSS vars in `lib/themes.ts`.
+- **Design system = "Aurora"** (premium-SaaS): deep charcoal canvas, electric **indigo (`--primary`) → cyan (`--accent-2`) gradient** accents, glassy surfaces with soft glow. Default theme is `aurora` (dark-first); `netflix` + `prime` remain selectable in Settings. Key utilities in `src/index.css`: `.gradient-text` / `.gradient-text-soft` (headlines), `.bg-gradient-brand[-soft]`, `.zen-card` (workhorse card — lit border + glow hover), `.aurora-card` (hero/stat tile w/ gradient border), `.glass` (modals/sidebar/floating), `.glow` + `shadow-glow*`, `.chip-tint`. The ambient drifting orbs come from `<AuroraBackdrop/>` (rendered once in `App.tsx`); **page roots must be transparent** (no `bg-background`) for them to show through.
+- **Page shell**: most content pages render through `<PageShell title icon actions subtitle ...>` (`src/components/PageShell.tsx`) — it supplies the sidebar, a glassy gradient-title header, transparent padded content, and an entrance transition. Bespoke full-height pages (Notes, MediaTracker, Calendar) keep their own layout but use a transparent root. Don't reintroduce per-page sidebar/hamburger markup.
+- **Motion**: use the shared helpers in `src/components/ui/motion.tsx` — `<PageTransition>`, `<Stagger>`+`<StaggerItem>`, `<FadeIn>` (one springy language). CSS classes `.animate-fade-in`, `.stagger-item`, `.hover-lift`, `.animate-glow-pulse`, `.animate-float` are also available.
+- **Command palette**: `⌘K` / `Ctrl+K` opens `<CommandPalette/>` (cmdk; mounted in `App.tsx`). Open it programmatically with `window.dispatchEvent(new Event('open-command-palette'))`.
+- **Buttons**: `<Button variant="gradient">` is the brand-gradient hero CTA (one per screen); `default` is solid indigo + glow.
+- **Performance**: authenticated routes are `React.lazy` code-split in `App.tsx` (heavy libs — tiptap / codemirror / recharts — download only with their page); `vite.config.ts` `manualChunks` groups shared vendors (no more single 2.4 MB bundle / chunk-size warning). Nav links prefetch their route chunk on hover via `lib/route-prefetch.ts`. Skeletons use `.loading-shimmer`.
 - **Tags**: tag IDs that are negative are unsaved/temporary; persist via `createTag` then the entity-specific `set<Entity>Tags` helpers.
 - **localStorage** is used widely for UI prefs (see frontend.md §11). Guard access in try/catch (existing code does).
 
@@ -97,7 +106,7 @@ These are documented more fully in the audit / context files. Be aware when touc
 
 1. **Dashboard ledger widget** — now fixed: `fetchLedgerSummary` uses the RPC-backed `getLedgerSummary(year, month)` from `lib/ledger.ts` (previously an inline query with a `toISOString()` UTC-drift bug). Prefer the `lib/ledger.ts` helpers over re-querying `ledger_entries`.
 2. **`/prompts` is a working alias** that renders `Library` (same as `/library`); the old dead `pages/Prompts.tsx` has been removed.
-3. **Responsive/mobile**: all content pages now render an `lg:hidden` hamburger header (calling `toggleSidebar`). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` (`w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto`, `p-4 sm:p-6`) and `ui/sheet.tsx` (`overflow-y-auto`, `p-4 sm:p-6`) are mobile-safe, so prefer those defaults over per-dialog width hacks. Use responsive padding (`p-4 sm:p-6`) and text (`text-2xl sm:text-3xl`) on new pages.
+3. **Responsive/mobile**: `PageShell` renders the `lg:hidden` hamburger header for migrated content pages (bespoke full-height pages — Notes/MediaTracker/Calendar — keep their own). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` (`w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto`, `p-4 sm:p-6`) and `ui/sheet.tsx` (`overflow-y-auto`, `p-4 sm:p-6`) are mobile-safe, so prefer those defaults over per-dialog width hacks. Use responsive padding (`p-4 sm:p-6`) and text (`text-2xl sm:text-3xl`) on new pages.
 4. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components. (The old unused `TagInput.tsx`, `QuickTagButtons.tsx`, and `iconMap` in `AppSidebar.tsx` have been removed.)
 5. **Toasts**: only the shadcn `Toaster` (`use-toast`) is mounted. (The unused Sonner toaster has been removed.)
 6. *(resolved)* The Birthdays add/edit Dialog is now a single shared `<Dialog>` (both headers call `openAddModal`), and the duplicate Subscriptions summary card is gone (cards are Monthly Cost / Yearly Cost / Active / Renews Soon).

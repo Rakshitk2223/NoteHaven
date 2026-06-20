@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useSidebar } from "@/contexts/SidebarContext";
-import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Menu, Code, MessageSquare, Search, ChevronDown, ChevronRight, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil } from "lucide-react";
+import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Code, MessageSquare, Search, ChevronDown, ChevronRight, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil, Library as LibraryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,7 +30,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
-import AppSidebar from "@/components/AppSidebar";
+import { PageShell } from "@/components/PageShell";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -78,11 +77,9 @@ interface Prompt {
 const TAB_STORAGE_KEY = 'library-active-tab';
 
 const Library = () => {
-  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [activeTab, setActiveTab] = useState<string>(() => {
     return localStorage.getItem(TAB_STORAGE_KEY) || 'prompts';
   });
-  const { toast } = useToast();
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);
@@ -90,56 +87,38 @@ const Library = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
+    <PageShell
+      title="Library"
+      subtitle={activeTab === 'snippets' ? 'Your code snippets, organised into project folders' : 'Your reusable AI prompts'}
+      icon={LibraryIcon}
+    >
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <TabsList className="mb-6 inline-flex h-auto gap-1 rounded-lg bg-muted p-1">
+          <TabsTrigger
+            value="prompts"
+            className="gap-2 rounded-md text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow"
+          >
+            <MessageSquare className="h-4 w-4 text-primary" />
+            Prompts
+          </TabsTrigger>
+          <TabsTrigger
+            value="snippets"
+            className="gap-2 rounded-md text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow"
+          >
+            <Code className="h-4 w-4 text-accent-2" />
+            Code Snippets
+          </TabsTrigger>
+        </TabsList>
 
-        <div className="flex-1 lg:ml-0 min-w-0">
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Library</h1>
-            <div className="w-9" />
-          </div>
+        <TabsContent value="prompts">
+          <PromptsTab />
+        </TabsContent>
 
-          <div className="hidden lg:block p-4 sm:p-6 border-b border-border">
-            <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground">
-              Library
-            </h1>
-          </div>
-
-          <div className="p-4 sm:p-6">
-            <Tabs value={activeTab} onValueChange={handleTabChange}>
-              <TabsList className="mb-6 inline-flex h-auto gap-1 rounded-lg bg-muted p-1">
-                <TabsTrigger
-                  value="prompts"
-                  className="gap-2 rounded-md text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow"
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  Prompts
-                </TabsTrigger>
-                <TabsTrigger
-                  value="snippets"
-                  className="gap-2 rounded-md text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow"
-                >
-                  <Code className="h-4 w-4" />
-                  Code Snippets
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="prompts">
-                <PromptsTab />
-              </TabsContent>
-
-              <TabsContent value="snippets">
-                <SnippetsTab />
-              </TabsContent>
-            </Tabs>
-          </div>
-        </div>
-      </div>
-    </div>
+        <TabsContent value="snippets">
+          <SnippetsTab />
+        </TabsContent>
+      </Tabs>
+    </PageShell>
   );
 };
 
@@ -217,7 +196,8 @@ const PromptsTab = () => {
           .in('prompt_id', promptIds);
 
         const tagsByPrompt: Record<number, Tag[]> = {};
-        promptTagsData?.forEach((item: any) => {
+        (promptTagsData as { prompt_id: number; tags: Tag | null }[] | null)?.forEach((item) => {
+          if (!item.tags) return;
           if (!tagsByPrompt[item.prompt_id]) tagsByPrompt[item.prompt_id] = [];
           tagsByPrompt[item.prompt_id].push(item.tags);
         });
@@ -442,7 +422,7 @@ const PromptsTab = () => {
         <div />
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogTrigger asChild>
-            <Button className="zen-transition hover:shadow-md touch-manipulation">
+            <Button variant="gradient" className="zen-transition touch-manipulation">
               <Plus className="h-4 w-4 mr-2" />
               Add Prompt
             </Button>
@@ -1441,7 +1421,9 @@ const SnippetsTab = () => {
           ) : (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
-                <Code className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+                <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-2/15 text-accent-2">
+                  <Code className="h-7 w-7" />
+                </div>
                 <p className="text-muted-foreground mb-4">
                   {snippets.length === 0
                     ? "No files yet. Create a folder for a project, then add files to it."

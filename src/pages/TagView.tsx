@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, CheckSquare, Play, MessageSquare } from 'lucide-react';
+import { ArrowLeft, FileText, CheckSquare, Play, MessageSquare, Tag as TagIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import AppSidebar from '@/components/AppSidebar';
+import { PageShell } from '@/components/PageShell';
+import { Stagger, StaggerItem } from '@/components/ui/motion';
 import { TagBadge } from '@/components/TagBadge';
 import { searchByTag, type TaggedItems, type Tag } from '@/lib/tags';
 import { useToast } from '@/components/ui/use-toast';
@@ -69,24 +70,22 @@ export default function TagView() {
   const totalItems = items.notes.length + items.tasks.length + items.media.length + items.prompts.length;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <AppSidebar />
-        
-        <div className="flex-1 min-w-0 p-4 sm:p-6">
-          {/* Header */}
-          <div className="flex items-center gap-4 mb-8">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate(-1)}
-              className="gap-2"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </Button>
-          </div>
-
+    <PageShell
+      title={tagName ? `#${decodeURIComponent(tagName)}` : 'Tag'}
+      icon={TagIcon}
+      subtitle={!loading && totalItems > 0 ? `${totalItems} tagged item${totalItems !== 1 ? 's' : ''}` : undefined}
+      actions={
+        <Button variant="outline" size="sm" onClick={() => navigate(-1)} className="gap-2">
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </Button>
+      }
+      mobileActions={
+        <Button variant="ghost" size="icon-sm" onClick={() => navigate(-1)} aria-label="Go back">
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+      }
+    >
           {/* Tag Info */}
           <div className="mb-8">
             {loading ? (
@@ -140,25 +139,26 @@ export default function TagView() {
               {items.notes.length > 0 && (
                 <section>
                   <div className="flex items-center gap-2 mb-4">
-                    <FileText className="h-5 w-5 text-muted-foreground" />
+                    <FileText className="h-5 w-5 text-primary" />
                     <h2 className="text-lg font-semibold">Notes ({items.notes.length})</h2>
                   </div>
-                  <div className="grid gap-2">
+                  <Stagger className="grid gap-2">
                     {items.notes.map(note => (
-                      <button
-                        key={note.id}
-                        onClick={() => navigate(`/notes?note=${note.id}`)}
-                        className="text-left p-3 rounded-lg border hover:bg-accent transition-colors"
-                      >
-                        <p className="font-medium truncate">
-                          {note.title || 'Untitled Note'}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Updated {new Date(note.updated_at).toLocaleDateString()}
-                        </p>
-                      </button>
+                      <StaggerItem key={note.id} hover={false}>
+                        <button
+                          onClick={() => navigate(`/notes?note=${note.id}`)}
+                          className="w-full text-left p-3 rounded-lg border hover:bg-accent transition-colors"
+                        >
+                          <p className="font-medium truncate">
+                            {note.title || 'Untitled Note'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Updated {new Date(note.updated_at).toLocaleDateString()}
+                          </p>
+                        </button>
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </Stagger>
                 </section>
               )}
 
@@ -166,25 +166,26 @@ export default function TagView() {
               {items.tasks.length > 0 && (
                 <section>
                   <div className="flex items-center gap-2 mb-4">
-                    <CheckSquare className="h-5 w-5 text-muted-foreground" />
+                    <CheckSquare className="h-5 w-5 text-accent-2" />
                     <h2 className="text-lg font-semibold">Tasks ({items.tasks.length})</h2>
                   </div>
-                  <div className="grid gap-2">
+                  <Stagger className="grid gap-2">
                     {items.tasks.map(task => (
-                      <button
-                        key={task.id}
-                        onClick={() => navigate(`/tasks?task=${task.id}`)}
-                        className="text-left p-3 rounded-lg border hover:bg-accent transition-colors"
-                      >
-                        <p className={task.is_completed ? 'line-through text-muted-foreground' : ''}>
-                          {task.task_text}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {task.is_completed ? 'Completed' : 'Pending'}
-                        </p>
-                      </button>
+                      <StaggerItem key={task.id} hover={false}>
+                        <button
+                          onClick={() => navigate(`/tasks?task=${task.id}`)}
+                          className="w-full text-left p-3 rounded-lg border hover:bg-accent transition-colors"
+                        >
+                          <p className={task.is_completed ? 'line-through text-muted-foreground' : ''}>
+                            {task.task_text}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {task.is_completed ? 'Completed' : 'Pending'}
+                          </p>
+                        </button>
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </Stagger>
                 </section>
               )}
 
@@ -192,23 +193,24 @@ export default function TagView() {
               {items.media.length > 0 && (
                 <section>
                   <div className="flex items-center gap-2 mb-4">
-                    <Play className="h-5 w-5 text-muted-foreground" />
+                    <Play className="h-5 w-5 text-success" />
                     <h2 className="text-lg font-semibold">Media ({items.media.length})</h2>
                   </div>
-                  <div className="grid gap-2">
+                  <Stagger className="grid gap-2">
                     {items.media.map(media => (
-                      <button
-                        key={media.id}
-                        onClick={() => navigate(`/media?media=${media.id}`)}
-                        className="text-left p-3 rounded-lg border hover:bg-accent transition-colors"
-                      >
-                        <p className="font-medium">{media.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {media.type} • {media.status}
-                        </p>
-                      </button>
+                      <StaggerItem key={media.id} hover={false}>
+                        <button
+                          onClick={() => navigate(`/media?media=${media.id}`)}
+                          className="w-full text-left p-3 rounded-lg border hover:bg-accent transition-colors"
+                        >
+                          <p className="font-medium">{media.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {media.type} • {media.status}
+                          </p>
+                        </button>
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </Stagger>
                 </section>
               )}
 
@@ -216,29 +218,28 @@ export default function TagView() {
               {items.prompts.length > 0 && (
                 <section>
                   <div className="flex items-center gap-2 mb-4">
-                    <MessageSquare className="h-5 w-5 text-muted-foreground" />
+                    <MessageSquare className="h-5 w-5 text-warning" />
                     <h2 className="text-lg font-semibold">Prompts ({items.prompts.length})</h2>
                   </div>
-                  <div className="grid gap-2">
+                  <Stagger className="grid gap-2">
                     {items.prompts.map(prompt => (
-                      <button
-                        key={prompt.id}
-                        onClick={() => navigate('/library')}
-                        className="text-left p-3 rounded-lg border hover:bg-accent transition-colors"
-                      >
-                        <p className="font-medium">{prompt.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {prompt.is_favorited && '★ Favorite'}
-                        </p>
-                      </button>
+                      <StaggerItem key={prompt.id} hover={false}>
+                        <button
+                          onClick={() => navigate('/library')}
+                          className="w-full text-left p-3 rounded-lg border hover:bg-accent transition-colors"
+                        >
+                          <p className="font-medium">{prompt.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {prompt.is_favorited && '★ Favorite'}
+                          </p>
+                        </button>
+                      </StaggerItem>
                     ))}
-                  </div>
+                  </Stagger>
                 </section>
               )}
             </div>
           )}
-        </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }

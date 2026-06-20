@@ -10,10 +10,13 @@ const Index = () => {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="relative z-10 min-h-screen flex items-center justify-center">
       <div className="text-center">
-        <h1 className="text-4xl font-bold font-heading mb-4">NoteHaven</h1>
-        <p className="text-xl text-muted-foreground font-body">Loading your sanctuary...</p>
+        <div className="mb-5 mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-brand text-2xl font-extrabold text-white shadow-glow-md animate-glow-pulse">
+          N
+        </div>
+        <h1 className="text-4xl font-extrabold font-heading mb-2 gradient-text">NoteHaven</h1>
+        <p className="text-base text-muted-foreground font-body">Loading your sanctuary…</p>
       </div>
     </div>
   );

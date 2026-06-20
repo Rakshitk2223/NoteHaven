@@ -28,6 +28,12 @@ interface RefreshResult {
   id?: number;
 }
 
+// Minimal shape of a MangaDex relationship object (only the fields we read).
+interface MangaDexRelationship {
+  type?: string;
+  attributes?: { fileName?: string };
+}
+
 // Fetch from specific API
 async function fetchFromApi(api: string, title: string, type: string): Promise<RefreshResult | null> {
   const normalizedType = type.toLowerCase();
@@ -195,7 +201,9 @@ async function fetchFromMangaDex(title: string, type: string): Promise<RefreshRe
     if (data.result !== 'ok' || !data.data?.[0]) return null;
 
     const manga = data.data[0];
-    const coverRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+    const coverRel = (manga.relationships as MangaDexRelationship[] | undefined)?.find(
+      (r) => r.type === 'cover_art'
+    );
     const coverFileName = coverRel?.attributes?.fileName;
     if (!coverFileName) return null;
 

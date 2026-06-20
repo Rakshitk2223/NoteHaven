@@ -81,14 +81,14 @@ async function fetchFromMediaTracker(
 
   try {
     const { data, error } = await supabase
-      .from('media_tracker' as any)
+      .from('media_tracker')
       .select('id, cover_image')
       .in('id', items.map(i => i.id))
       .not('cover_image', 'is', null);
 
     if (error) return { images, found };
 
-    data?.forEach((row: any) => {
+    data?.forEach((row) => {
       if (row.cover_image) {
         images.set(row.id, row.cover_image);
         found.add(row.id);
@@ -111,15 +111,15 @@ async function fetchFromMediaMetadata(
 
   try {
     const { data, error } = await supabase
-      .from('media_metadata' as any)
+      .from('media_metadata')
       .select('title, type, cover_image')
       .in('title', items.map(i => i.title));
 
     if (error) return { images, sources };
 
     const dbMap = new Map<string, string>();
-    data?.forEach((item: any) => {
-      const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
+    data?.forEach((item) => {
+      const key = `${item.title.toLowerCase()}_${item.type!.toLowerCase()}`;
       dbMap.set(key, item.cover_image);
     });
 

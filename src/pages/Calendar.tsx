@@ -45,7 +45,7 @@ const Calendar = () => {
   const hasMatchingEvents = events.length > 0;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <div className="flex">
         <AppSidebar />
 
@@ -55,7 +55,7 @@ const Calendar = () => {
             <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
               <Menu className="h-5 w-5" />
             </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Calendar</h1>
+            <h1 className="font-heading font-bold text-base sm:text-lg gradient-text-soft">Calendar</h1>
             <div className="w-10" />
           </div>
 

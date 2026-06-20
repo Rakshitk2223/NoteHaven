@@ -12,9 +12,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // primary — the single accent-filled action per screen.
+        // primary — the single accent-filled action per screen. Indigo + glow.
         default:
-          "bg-primary text-primary-foreground hover:bg-[hsl(var(--accent-hover))] hover:shadow-[0_4px_16px_-2px_hsl(var(--primary)/0.45)]",
+          "bg-primary text-primary-foreground shadow-[0_2px_12px_-3px_hsl(var(--glow)/0.45)] hover:bg-[hsl(var(--accent-hover))] hover:shadow-glow-md",
+        // gradient — hero / marquee CTA (the brand indigo→cyan gradient + glow).
+        gradient:
+          "bg-gradient-brand text-white shadow-glow hover:shadow-glow-md hover:brightness-[1.08]",
         // destructive — delete / cancel confirmations only.
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:shadow-[0_4px_16px_-2px_hsl(var(--destructive)/0.45)]",

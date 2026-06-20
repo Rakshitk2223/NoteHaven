@@ -137,7 +137,7 @@ export function calculateNextRenewalDate(refDate: string, billingCycle: 'monthly
   const ref = parseYMD(refDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  let nextDate = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
+  const nextDate = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
 
   if (billingCycle === 'monthly') {
     // Add months until we get a date in the future

@@ -21,11 +21,12 @@ export function WidgetWrapper({
 }: WidgetWrapperProps) {
   if (isLoading) {
     return (
-      <div className={cn('zen-card p-5', className)}>
-        <div className="flex items-center justify-between mb-4">
-          <Skeleton className="h-6 w-32" />
+      <div className={cn('zen-card flex flex-col overflow-hidden', className)}>
+        <div className="flex items-center gap-2.5 p-5 border-b border-border/60">
+          <span className="h-4 w-1 rounded-full bg-gradient-to-b from-primary to-accent-2" />
+          <Skeleton className="h-5 w-32" />
         </div>
-        <div className="space-y-3">
+        <div className="p-5 space-y-3">
           <Skeleton className="h-4 w-full" />
           <Skeleton className="h-4 w-3/4" />
           <Skeleton className="h-4 w-1/2" />
@@ -36,8 +37,9 @@ export function WidgetWrapper({
 
   return (
     <div className={cn('zen-card flex flex-col overflow-hidden', className)}>
-      <div className="flex items-center justify-between p-5 border-b border-border/50 bg-muted/30">
-        <h3 className="font-bold text-lg text-foreground truncate">{widget.title}</h3>
+      <div className="flex items-center gap-2.5 p-5 border-b border-border/60">
+        <span className="h-4 w-1 rounded-full bg-gradient-to-b from-primary to-accent-2" />
+        <h3 className="font-bold text-[15px] text-foreground truncate">{widget.title}</h3>
       </div>
 
       <div className="p-5 overflow-auto">
