@@ -45,6 +45,11 @@ if (!supabaseUrl || !serviceKey) {
 const supabase = createClient(supabaseUrl, serviceKey);
 const EDGE_URL = `${supabaseUrl}/functions/v1/media-search`;
 const FORCE = process.argv.includes('--force');
+const LIMIT = (() => {
+  const i = process.argv.indexOf('--limit');
+  const n = i !== -1 ? parseInt(process.argv[i + 1] ?? '', 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+})();
 
 const BATCH_SIZE = 5;
 // Jikan is strict (~3 req/s) and the anime path now makes several Jikan calls
@@ -76,11 +81,20 @@ interface TrackerItem {
 // The fields of the edge function's top result that we inspect for reporting.
 interface EdgeTopResult {
   description?: string | null;
+  banner_image?: string | null;
+  rating?: number | null;
+  status?: string | null;
   episodes?: number | null;
+  chapters?: number | null;
   total_seasons?: number | null;
   seasons?: unknown[] | null;
+  genres?: string[] | null;
+  anilist_id?: number | null;
+  tmdb_id?: number | null;
+  mal_id?: number | null;
   episodes_detail?: unknown[] | null;
   cast_members?: unknown[] | null;
+  runtime?: number | null;
 }
 interface EdgeResponse {
   results?: EdgeTopResult[];
@@ -137,8 +151,9 @@ async function backfill() {
     return Boolean(m.description) && hasEpisodeList;
   };
 
-  const todo = FORCE ? items : items.filter((it) => !isComplete(it));
-  console.log(`To process: ${todo.length}${FORCE ? '' : ` (${items.length - todo.length} already complete)`}`);
+  let todo = FORCE ? items : items.filter((it) => !isComplete(it));
+  if (LIMIT > 0) todo = todo.slice(0, LIMIT);
+  console.log(`To process: ${todo.length}${LIMIT ? ` (capped at --limit ${LIMIT})` : !FORCE ? ` (${items.length - todo.length} already complete)` : ''}`);
   if (todo.length === 0) { console.log('Nothing to do.'); return; }
 
   let processed = 0, missed = 0, failed = 0;
@@ -161,6 +176,37 @@ async function backfill() {
       const data = (await res.json()) as EdgeResponse;
       const top = data?.results?.[0];
       if (!top) { missed++; console.log(`  [MISS] ${item.title} (${item.type}) - no match from ${source}`); continue; }
+
+      // Cache the metadata under the TRACKER's own title+type. The edge stores
+      // each row under the SOURCE's canonical title (e.g. "Shingeki no Kyojin"
+      // for a search of "Attack on Titan"), but the app looks metadata up by the
+      // tracker title — that mismatch is why most titles showed no synopsis. We
+      // write a correctly-keyed row here. Never touches cover_image.
+      const meta: Record<string, unknown> = {
+        title: item.title,
+        type: item.type.toLowerCase(),
+        last_updated: new Date().toISOString(),
+      };
+      if (top.description) meta.description = top.description;
+      if (top.banner_image) meta.banner_image = top.banner_image;
+      if (typeof top.rating === 'number') meta.rating = top.rating;
+      if (top.status) meta.status = top.status;
+      if (typeof top.episodes === 'number') meta.episodes = top.episodes;
+      if (typeof top.chapters === 'number') meta.chapters = top.chapters;
+      if (typeof top.total_seasons === 'number') meta.total_seasons = top.total_seasons;
+      if (Array.isArray(top.seasons) && top.seasons.length) meta.seasons = top.seasons;
+      if (Array.isArray(top.genres) && top.genres.length) meta.genres = top.genres;
+      if (typeof top.anilist_id === 'number') meta.anilist_id = top.anilist_id;
+      if (typeof top.tmdb_id === 'number') meta.tmdb_id = top.tmdb_id;
+      if (typeof top.mal_id === 'number') meta.mal_id = top.mal_id;
+      if (Array.isArray(top.episodes_detail) && top.episodes_detail.length) meta.episodes_detail = top.episodes_detail;
+      if (Array.isArray(top.cast_members) && top.cast_members.length) meta.cast_members = top.cast_members;
+      if (typeof top.runtime === 'number') meta.runtime = top.runtime;
+      try {
+        await supabase.from('media_metadata').upsert(meta, { onConflict: 'title,type' });
+      } catch (e) {
+        console.log(`  [warn] cache write failed for ${item.title}: ${e instanceof Error ? e.message : String(e)}`);
+      }
 
       // Stamp the per-user baseline so the next app refresh won't false-flag "new".
       const patch: Record<string, number> = {};
