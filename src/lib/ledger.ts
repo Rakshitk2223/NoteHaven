@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { getCachedPrefs } from '@/lib/preferences';
+import { dateToYMD, parseYMD } from '@/lib/date-utils';
 import type { LedgerEntry, LedgerCategory, LedgerSummary } from '@/integrations/supabase/types';
 
 export type { LedgerEntry, LedgerCategory, LedgerSummary };
@@ -285,4 +286,77 @@ export function groupEntriesByCategory(
   return Object.entries(grouped)
     .map(([category, data]) => ({ category, ...data }))
     .sort((a, b) => b.amount - a.amount);
+}
+
+// ============================================
+// SUBSCRIPTIONS → LEDGER (derived on each renewal date, never materialised)
+// ============================================
+
+export interface SubscriptionLike {
+  id: number;
+  name: string;
+  amount: number;
+  billing_cycle: string;          // 'monthly' | 'yearly' | 'weekly' | 'quarterly' | 'daily'
+  start_date: string;             // YYYY-MM-DD (first charge)
+  end_date: string | null;        // YYYY-MM-DD or null (open-ended)
+  status?: string | null;         // skip cancelled / paused
+  ledger_category_id?: number | null;
+}
+
+export interface SubscriptionCharge {
+  subscription_id: number;
+  name: string;
+  amount: number;
+  date: string;                   // YYYY-MM-DD of the charge
+  ledger_category_id: number | null;
+}
+
+const INACTIVE_SUB_STATUSES = new Set(['cancelled', 'canceled', 'paused', 'inactive', 'ended']);
+
+function stepBillingCycle(ymdStr: string, cycle: string): string {
+  const d = parseYMD(ymdStr);
+  const c = (cycle || 'monthly').toLowerCase();
+  if (c.includes('year') || c.includes('annual')) d.setFullYear(d.getFullYear() + 1);
+  else if (c.includes('quarter')) d.setMonth(d.getMonth() + 3);
+  else if (c.includes('week')) d.setDate(d.getDate() + 7);
+  else if (c.includes('day')) d.setDate(d.getDate() + 1);
+  else d.setMonth(d.getMonth() + 1); // monthly default
+  return dateToYMD(d);
+}
+
+/**
+ * Every subscription charge that has fallen due on/before `asOf`, walking from
+ * each subscription's start date by its billing cycle (bounded by end_date).
+ * Deriving (instead of inserting rows) means the balance drops exactly on the
+ * renewal day with no background job, and editing/cancelling a sub self-corrects.
+ */
+export function deriveSubscriptionCharges(
+  subs: SubscriptionLike[],
+  asOf: Date = new Date()
+): SubscriptionCharge[] {
+  const asOfYMD = dateToYMD(asOf);
+  const out: SubscriptionCharge[] = [];
+  for (const s of subs) {
+    if (!s.start_date) continue;
+    if (s.status && INACTIVE_SUB_STATUSES.has(s.status.toLowerCase())) continue;
+    const end = s.end_date && s.end_date < asOfYMD ? s.end_date : asOfYMD;
+    let cursor = s.start_date;
+    let guard = 0;
+    while (cursor <= end && guard < 1000) {
+      out.push({
+        subscription_id: s.id,
+        name: s.name,
+        amount: Number(s.amount) || 0,
+        date: cursor,
+        ledger_category_id: s.ledger_category_id ?? null,
+      });
+      cursor = stepBillingCycle(cursor, s.billing_cycle);
+      guard++;
+    }
+  }
+  return out;
+}
+
+export function sumSubscriptionCharges(charges: SubscriptionCharge[]): number {
+  return charges.reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 }

@@ -3,21 +3,21 @@ import type { LedgerCategory, SubscriptionCategory } from '@/integrations/supaba
 
 // Default categories for Money Ledger
 const DEFAULT_LEDGER_CATEGORIES = [
-  // Income categories
+  // Income sources
   { name: 'Salary', type: 'income' as const, color: '#10B981' },
-  { name: 'Freelance', type: 'income' as const, color: '#3B82F6' },
-  { name: 'Investments', type: 'income' as const, color: '#8B5CF6' },
-  { name: 'Other Income', type: 'income' as const, color: '#6B7280' },
-  // Expense categories
-  { name: 'Food & Dining', type: 'expense' as const, color: '#EF4444' },
-  { name: 'Transportation', type: 'expense' as const, color: '#F59E0B' },
-  { name: 'Entertainment', type: 'expense' as const, color: '#EC4899' },
-  { name: 'Shopping', type: 'expense' as const, color: '#8B5CF6' },
-  { name: 'Bills & Utilities', type: 'expense' as const, color: '#6366F1' },
-  { name: 'Healthcare', type: 'expense' as const, color: '#14B8A6' },
-  { name: 'Education', type: 'expense' as const, color: '#10B981' },
-  { name: 'Savings', type: 'expense' as const, color: '#FCD34D' },
-  { name: 'Other Expense', type: 'expense' as const, color: '#6B7280' }
+  { name: 'Pocket money', type: 'income' as const, color: '#3B82F6' },
+  { name: 'Friends', type: 'income' as const, color: '#8B5CF6' },
+  { name: 'Cash', type: 'income' as const, color: '#14B8A6' },
+  { name: 'Other income', type: 'income' as const, color: '#6B7280' },
+  // Expense categories (investments count as expense — money leaving your hand)
+  { name: 'Mom', type: 'expense' as const, color: '#EC4899' },
+  { name: 'Food', type: 'expense' as const, color: '#EF4444' },
+  { name: 'Movie', type: 'expense' as const, color: '#F59E0B' },
+  { name: 'Petrol', type: 'expense' as const, color: '#6366F1' },
+  { name: 'Games', type: 'expense' as const, color: '#8B5CF6' },
+  { name: 'Loan to friend', type: 'expense' as const, color: '#0EA5E9' },
+  { name: 'Investments', type: 'expense' as const, color: '#F97316' },
+  { name: 'Misc', type: 'expense' as const, color: '#6B7280' }
 ];
 
 // Default categories for Subscriptions
@@ -31,11 +31,12 @@ const DEFAULT_SUBSCRIPTION_CATEGORIES = [
  * Ensures user has default ledger categories, creates them if missing
  * Returns all categories (existing + newly created)
  */
+const LEDGER_CATEGORIES_SEED_FLAG = 'ledger_categories_v2_seeded';
+
 export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // First, try to fetch existing categories
   const { data: existingCategories, error: fetchError } = await supabase
     .from('ledger_categories')
     .select('*')
@@ -46,29 +47,36 @@ export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
     throw fetchError;
   }
 
-  // If categories exist, return them
-  if (existingCategories && existingCategories.length > 0) {
-    return existingCategories as LedgerCategory[];
-  }
+  const existing = (existingCategories || []) as LedgerCategory[];
 
-  // No categories found, create defaults
-  
-  const categoriesToCreate = DEFAULT_LEDGER_CATEGORIES.map(cat => ({
-    user_id: user.id,
-    ...cat
-  }));
+  // One-time ADDITIVE seed of the v2 category set: existing users get the new
+  // categories (Mom / Food / Pocket money / …) added once, without re-adding any
+  // they later delete; new users get the full set. Guarded by a localStorage flag.
+  let seeded = false;
+  try { seeded = localStorage.getItem(LEDGER_CATEGORIES_SEED_FLAG) === '1'; } catch { /* ignore */ }
+  if (existing.length > 0 && seeded) return existing;
+
+  const have = new Set(existing.map((c) => `${c.name.toLowerCase()}|${c.type}`));
+  const missing = DEFAULT_LEDGER_CATEGORIES.filter((c) => !have.has(`${c.name.toLowerCase()}|${c.type}`));
+
+  if (missing.length === 0) {
+    try { localStorage.setItem(LEDGER_CATEGORIES_SEED_FLAG, '1'); } catch { /* ignore */ }
+    return existing;
+  }
 
   const { data: newCategories, error: insertError } = await supabase
     .from('ledger_categories')
-    .insert(categoriesToCreate)
+    .insert(missing.map((cat) => ({ user_id: user.id, ...cat })))
     .select();
 
   if (insertError) {
     console.error('Error creating default ledger categories:', insertError);
+    if (existing.length > 0) return existing; // don't hard-fail a working library
     throw insertError;
   }
 
-  return (newCategories || []) as LedgerCategory[];
+  try { localStorage.setItem(LEDGER_CATEGORIES_SEED_FLAG, '1'); } catch { /* ignore */ }
+  return [...existing, ...((newCategories || []) as LedgerCategory[])];
 }
 
 /**
