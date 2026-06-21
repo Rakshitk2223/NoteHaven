@@ -203,7 +203,7 @@ Results merged and re-cached. Returns `{found, notFound, fetchedFromAPI, results
 ## 9. Deployment / Ops
 
 - **Edge function**: `deploy-edge-function.sh` (or README's manual steps) — `supabase link --project-ref …`, `supabase functions deploy media-search --no-verify-jwt`, `supabase secrets set TMDB_API_KEY=…`.
-- **DB**: run the migration files in `supabase/migrations/` (01→05) in order, via the Supabase SQL editor or `supabase db push`.
+- **DB**: run the migration files in `supabase/migrations/` (01→10) in order, via the Supabase SQL editor or `supabase db push`. Migration `10` (Vault) creates a Storage bucket + `storage.objects` policies, so it must be run in the **SQL Editor** (elevated role), not `db push` alone.
 - **Hosting**: static SPA (Netlify-style `_redirects` present in `public/`), PWA enabled.
 
 ---
@@ -215,3 +215,16 @@ Results merged and re-cached. Returns `{found, notFound, fetchedFromAPI, results
 - ⚠️ `deploy-edge-function.sh` contains a hard-coded `TMDB_API_KEY` value committed to the repo — should be removed/rotated.
 - Edge function is intentionally unauthenticated (`--no-verify-jwt`) for public cover search; it should not expose user data (it only reads `media_metadata` and external APIs).
 - Note content is HTML; the client sanitizes with DOMPurify on render (`sanitizePreview`). `SharedNote` renders into `contentEditable` via `innerHTML` of stored content — sanitization there should be verified (see audit).
+
+---
+
+## 11. Vault & Supabase Storage (`vault_folders`, `vault_files`, `vault` bucket)
+
+The Vault (`/vault`, `src/pages/Vault.tsx`) is the **only feature that uses Supabase Storage**; everything else stores text in Postgres. Data access lives in `src/lib/vault.ts`. Schema: `supabase/migrations/10_create_vault.sql`.
+
+- **`vault_folders`** — self-referencing tree: `parent_id` NULL = root, `ON DELETE CASCADE` removes sub-folders. `UNIQUE NULLS NOT DISTINCT (user_id, parent_id, name)` (PG15+) blocks duplicate names per parent, root included.
+- **`vault_files`** — metadata only (`name`, `storage_path`, `mime_type`, `size_bytes`, `is_starred`, `folder_id`). The folder hierarchy lives in the DB, so moving a file between folders is a one-row `UPDATE` — the storage path never changes.
+- **`vault` Storage bucket** — **private** (`public = false`), 25 MB/file (`MAX_FILE_BYTES`). Objects are stored at `{user_id}/{uuid}.{ext}`. Storage RLS on `storage.objects` scopes access to the owner via `(storage.foldername(name))[1] = auth.uid()::text`; the tables use the usual `auth.uid() = user_id` policy.
+- **No share links.** Preview/download mint short-lived **signed URLs** (`createSignedUrl`, 2–10 min) on demand for the current session only — never surfaced as shareable links. Whole-folder download is zipped client-side via `jszip` (lazy-imported), preserving sub-folder structure.
+- **Folder delete** (`lib/vault.ts → deleteFolder`) gathers descendant files and removes their Storage objects first (the DB cascade only clears rows, not bytes), then deletes the folder.
+- ⚠️ Migration `10` creates `storage.buckets` / `storage.objects` policies, so it **must be run in the Supabase SQL Editor** (elevated role). Alternatively create the bucket via Dashboard → Storage (uncheck Public) and run only the policy statements.

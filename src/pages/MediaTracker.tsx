@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,7 +46,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useInView } from "react-intersection-observer";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
@@ -186,6 +185,7 @@ const SECTION_DOT: Record<string, string> = {
 interface MediaListRowProps {
   item: MediaItem;
   cover?: string | null;
+  meta?: MediaMeta | null;
   isUpdating: boolean;
   onScheduleLoad: (id: number, visible: boolean) => void;
   onOpenDetails: (item: MediaItem, mode: 'view' | 'edit') => void;
@@ -193,9 +193,13 @@ interface MediaListRowProps {
   onRequestDelete: (id: number) => void;
 }
 
+// Dense, scannable "media row" for list view — surfaces the source metadata
+// (real size, year, genres, synopsis, community rating) alongside your own
+// rating + progress, with inline quick steppers. Columns drop off responsively.
 const MediaListRow = ({
   item,
   cover,
+  meta,
   isUpdating,
   onScheduleLoad,
   onOpenDetails,
@@ -207,74 +211,154 @@ const MediaListRow = ({
     onScheduleLoad(item.id, inView);
   }, [item.id, inView, onScheduleLoad]);
 
+  const isReadable = READABLE_TYPES.includes(item.type);
+  const isWatchable = WATCHABLE_TYPES.includes(item.type);
+  const prog = computeProgress(item, meta ?? null);
+  const epTotal = meta?.episodes && meta.episodes > 0 ? meta.episodes : null;
+  const chTotal = meta?.chapters && meta.chapters > 0 ? meta.chapters : null;
+
+  const progressField: 'current_episode' | 'current_chapter' | null = isReadable
+    ? 'current_chapter'
+    : isWatchable
+    ? 'current_episode'
+    : null;
+  const curValue = (isReadable ? item.current_chapter : item.current_episode) ?? 0;
+  const progressText = isReadable
+    ? `Ch. ${item.current_chapter ?? 0}${chTotal ? ` / ${chTotal}` : ''}`
+    : isWatchable
+    ? `S${item.current_season || 1} · E${item.current_episode ?? 0}${epTotal ? ` / ${epTotal}` : ''}`
+    : '—';
+
+  const sizeLine = isReadable
+    ? (meta?.chapters ? `${meta.chapters} ch` : null)
+    : isWatchable
+    ? ([
+        meta?.total_seasons ? `${meta.total_seasons} season${meta.total_seasons === 1 ? '' : 's'}` : null,
+        meta?.episodes ? `${meta.episodes} eps` : null,
+      ].filter(Boolean).join(' · ') || null)
+    : null;
+
+  const seasonYears = (meta?.seasons ?? [])
+    .map((s) => (s.air_date ? parseInt(s.air_date.slice(0, 4), 10) : NaN))
+    .filter((y) => Number.isFinite(y));
+  const yearRange = seasonYears.length
+    ? (Math.min(...seasonYears) === Math.max(...seasonYears)
+      ? `${Math.min(...seasonYears)}`
+      : `${Math.min(...seasonYears)}–${Math.max(...seasonYears)}`)
+    : null;
+
+  const genreLine = meta?.genres?.slice(0, 3).join(' · ') || null;
+  const sourceRating = meta?.rating && meta.rating > 0 ? meta.rating.toFixed(1) : null;
+  const airing = meta?.status ? AIRING_LABEL[meta.status] : null;
+
   return (
-    <TableRow ref={ref as React.Ref<HTMLTableRowElement>}>
-      <TableCell id={`media-${item.id}`} className="font-medium">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-14 flex-shrink-0 rounded overflow-hidden bg-muted flex items-center justify-center">
-            {cover ? (
-              <img src={cover} alt={item.title} loading="lazy" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-lg font-bold text-muted-foreground">
-                {item.title.charAt(0).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <button type="button" className="truncate text-left hover:underline" onClick={() => onOpenDetails(item, 'view')}>
+    <div
+      ref={ref}
+      className="group flex items-center gap-3 rounded-xl border border-border/60 bg-card/40 px-3 py-2.5 transition-all hover:border-border-strong hover:bg-card/70 sm:gap-4"
+    >
+      {/* Poster */}
+      <button
+        type="button"
+        onClick={() => onOpenDetails(item, 'view')}
+        className="relative h-[68px] w-[46px] flex-shrink-0 overflow-hidden rounded-md bg-muted shadow-sm ring-1 ring-border/50"
+        aria-label={`Open ${item.title}`}
+      >
+        {cover ? (
+          <img src={cover} alt={item.title} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center text-lg font-bold text-muted-foreground">
+            {item.title.charAt(0).toUpperCase()}
+          </span>
+        )}
+        {item.has_new_content && (
+          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[hsl(var(--success))] ring-2 ring-background" aria-hidden="true" />
+        )}
+      </button>
+
+      {/* Title + source meta + synopsis */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenDetails(item, 'view')}
+            className="truncate text-left text-sm font-semibold transition-colors hover:text-primary"
+            title={item.title}
+          >
             {item.title}
           </button>
-        </div>
-      </TableCell>
-      <TableCell><Badge className={cn('border-0', typeBadgeSoft(item.type))}>{item.type}</Badge></TableCell>
-      <TableCell><Badge className={getStatusColor(item.status)}>{item.status}</Badge></TableCell>
-      <TableCell>{item.rating ? `${item.rating}/10` : '-'}</TableCell>
-      <TableCell>
-        <div className="flex items-center gap-2">
-          {READABLE_TYPES.includes(item.type) && item.current_chapter ? (
-            <>
-              <span className="min-w-[60px]">Ch. {item.current_chapter}</span>
-              <div className="flex gap-1">
-                <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_chapter', -1)} aria-label="Decrease chapter">
-                  <Minus className="h-3 w-3" />
-                </Button>
-                <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_chapter', 1)} aria-label="Increase chapter">
-                  <PlusIcon className="h-3 w-3" />
-                </Button>
-              </div>
-            </>
-          ) : WATCHABLE_TYPES.includes(item.type) && (item.current_season || item.current_episode) ? (
-            <>
-              <span className="min-w-[80px]">
-                {item.current_season ? `S${item.current_season} • ` : ''}
-                {item.current_episode ? `E${item.current_episode}` : ''}
-              </span>
-              {item.current_episode && (
-                <div className="flex gap-1">
-                  <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_episode', -1)} aria-label="Decrease episode">
-                    <Minus className="h-3 w-3" />
-                  </Button>
-                  <Button size="icon" variant="outline" className="h-7 w-7 sm:h-6 sm:w-6 touch-manipulation" disabled={isUpdating} onClick={() => onQuickUpdate(item, 'current_episode', 1)} aria-label="Increase episode">
-                    <PlusIcon className="h-3 w-3" />
-                  </Button>
-                </div>
-              )}
-            </>
-          ) : (
-            <span>-</span>
+          {airing && (
+            <Badge className={cn('hidden border-0 text-[10px] sm:inline-flex', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>
           )}
         </div>
-      </TableCell>
-      <TableCell className="text-right">
-        <div className="flex justify-end gap-2">
-          <Button size="sm" variant="outline" onClick={() => onOpenDetails(item, 'edit')}>
-            <Edit className="h-4 w-4 mr-1" /> Edit
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onRequestDelete(item.id)} className="text-destructive hover:text-destructive" aria-label={`Delete ${item.title}`} title="Delete">
-            <Trash2 className="h-4 w-4" />
-          </Button>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+          <Badge className={cn('border-0 text-[10px]', typeBadgeSoft(item.type))}>{item.type}</Badge>
+          {sizeLine && <span className="tabular-nums">{sizeLine}</span>}
+          {yearRange && <><span aria-hidden="true">·</span><span className="tabular-nums">{yearRange}</span></>}
+          {genreLine && <><span className="hidden md:inline" aria-hidden="true">·</span><span className="hidden md:inline">{genreLine}</span></>}
         </div>
-      </TableCell>
-    </TableRow>
+        {meta?.description && (
+          <div className="mt-1 hidden lg:block">
+            <p className="line-clamp-1 text-xs text-muted-foreground/70">{meta.description}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Ratings — source vs yours */}
+      <div className="hidden w-[88px] flex-shrink-0 flex-col items-end gap-0.5 text-xs xl:flex">
+        {sourceRating ? (
+          <span className="inline-flex items-center gap-1" title="Source / community rating">
+            <Star className="h-3.5 w-3.5 fill-warning text-warning" />
+            <span className="font-semibold tabular-nums">{sourceRating}</span>
+            <span className="text-[10px] text-muted-foreground">src</span>
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground/50">no source</span>
+        )}
+        {item.rating ? (
+          <span className="inline-flex items-center gap-1" title="My rating">
+            <Star className="h-3.5 w-3.5 fill-primary text-primary" />
+            <span className="font-semibold tabular-nums">{item.rating}</span>
+            <span className="text-[10px] text-muted-foreground">you</span>
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground/50">unrated</span>
+        )}
+      </div>
+
+      {/* Progress + inline quick steppers */}
+      <div className="hidden w-[150px] flex-shrink-0 flex-col gap-1.5 sm:flex">
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="truncate tabular-nums">{progressText}</span>
+          {prog.total > 0 && <span className="tabular-nums text-muted-foreground">{prog.pct}%</span>}
+        </div>
+        {prog.total > 0 && <Progress value={prog.pct} className="h-1.5" />}
+        {progressField && (
+          <div className="flex items-center gap-1">
+            <Button size="icon" variant="outline" className="h-6 w-6" disabled={isUpdating || curValue <= 0} onClick={() => onQuickUpdate(item, progressField, -1)} aria-label="Decrease progress">
+              <Minus className="h-3 w-3" />
+            </Button>
+            <Button size="icon" variant="outline" className="h-6 w-6" disabled={isUpdating} onClick={() => onQuickUpdate(item, progressField, 1)} aria-label="Increase progress">
+              <PlusIcon className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Status */}
+      <div className="hidden w-[104px] flex-shrink-0 justify-center md:flex">
+        <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
+      </div>
+
+      {/* Actions */}
+      <div className="flex flex-shrink-0 items-center gap-1 transition-opacity sm:opacity-60 sm:group-hover:opacity-100">
+        <Button size="icon-sm" variant="ghost" className="h-8 w-8" onClick={() => onOpenDetails(item, 'edit')} aria-label={`Edit ${item.title}`} title="Edit">
+          <Edit className="h-4 w-4" />
+        </Button>
+        <Button size="icon-sm" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => onRequestDelete(item.id)} aria-label={`Delete ${item.title}`} title="Delete">
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
   );
 };
 
@@ -1674,6 +1758,15 @@ const MediaTracker = () => {
                   const prog = computeProgress(editingItem, meta);
                   const airing = meta?.status ? AIRING_LABEL[meta.status] : null;
                   const seasons = meta?.seasons ?? null;
+                  // Year range from season air-dates (e.g. "2021–2024"), mirroring the source.
+                  const seasonYears = (seasons ?? [])
+                    .map((s) => (s.air_date ? parseInt(s.air_date.slice(0, 4), 10) : NaN))
+                    .filter((y) => Number.isFinite(y));
+                  const yearRange = seasonYears.length
+                    ? (Math.min(...seasonYears) === Math.max(...seasonYears)
+                      ? `${Math.min(...seasonYears)}`
+                      : `${Math.min(...seasonYears)}–${Math.max(...seasonYears)}`)
+                    : null;
                   const coverUrl = imageUrls.get(editingItem.id);
                   const bannerUrl = meta?.banner_image || coverUrl;
                   const isWatchableItem = WATCHABLE_TYPES.includes(editingItem.type);
@@ -1717,32 +1810,52 @@ const MediaTracker = () => {
                           />
                         </div>
                         <div className="space-y-3">
-                          {(airing || (meta?.rating ?? 0) > 0) && (
-                            <div className="flex flex-wrap items-center gap-2">
+                          {/* Source meta line: airing · real size · year range */}
+                          {(airing || totalsLine || yearRange) && (
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                               {airing && (
                                 <Badge className={cn('border-0', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>
                               )}
-                              {meta?.rating ? (
-                                <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                                  <Star className="h-3.5 w-3.5 fill-warning text-warning" />
-                                  {meta.rating.toFixed(1)}
-                                </span>
-                              ) : null}
+                              {totalsLine && <span className="font-medium text-foreground/80">{totalsLine}</span>}
+                              {totalsLine && yearRange && <span aria-hidden="true">·</span>}
+                              {yearRange && <span className="tabular-nums">{yearRange}</span>}
                             </div>
                           )}
+
+                          {/* Ratings — source (community) vs yours, clearly separated */}
+                          <div className="flex flex-wrap gap-2">
+                            <div className="flex-1 min-w-[116px] rounded-lg border border-border/60 bg-background/40 px-3 py-2">
+                              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Source rating</div>
+                              {meta?.rating ? (
+                                <div className="mt-0.5 flex items-baseline gap-1">
+                                  <Star className="h-4 w-4 self-center fill-warning text-warning" />
+                                  <span className="text-lg font-bold tabular-nums leading-none">{meta.rating.toFixed(1)}</span>
+                                  <span className="text-xs text-muted-foreground">/ 10</span>
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-sm text-muted-foreground">Not rated</div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-[116px] rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2">
+                              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">My rating</div>
+                              {editingItem.rating ? (
+                                <div className="mt-0.5 flex items-baseline gap-1">
+                                  <Star className="h-4 w-4 self-center fill-primary text-primary" />
+                                  <span className="text-lg font-bold tabular-nums leading-none">{editingItem.rating}</span>
+                                  <span className="text-xs text-muted-foreground">/ 10</span>
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-sm text-muted-foreground">Rate it below ↓</div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* My status + progress vs the source's real total */}
                           <div className="grid grid-cols-2 gap-y-1.5 text-sm">
                             <div className="text-muted-foreground">Status</div>
                             <div className="font-medium">{editingItem.status}</div>
-                            <div className="text-muted-foreground">My rating</div>
-                            <div className="font-medium">{editingItem.rating ? `${editingItem.rating}/10` : '—'}</div>
                             <div className="text-muted-foreground">My progress</div>
-                            <div className="font-medium">{myProgress}</div>
-                            {totalsLine ? (
-                              <>
-                                <div className="text-muted-foreground">Total</div>
-                                <div className="font-medium">{totalsLine}</div>
-                              </>
-                            ) : null}
+                            <div className="font-medium tabular-nums">{myProgress}</div>
                           </div>
                           <div className="flex flex-wrap gap-2 pt-1">
                             <Button
@@ -2172,45 +2285,75 @@ const MediaTracker = () => {
 
 
 
-          <div className="hidden lg:block p-4 sm:p-6 border-b border-border bg-card">
-            <div className="flex items-center justify-between">
-              <h1 className="text-xl sm:text-2xl font-bold font-heading text-foreground gradient-text-soft">
-                Media Tracker
-              </h1>
+          <div className="hidden lg:block px-4 sm:px-6 py-3.5 border-b border-border/60 bg-card/70 backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-4">
+              {/* Identity + library size */}
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold font-heading gradient-text-soft leading-tight">
+                  Media
+                </h1>
+                {categoryCounts['all'] > 0 && (
+                  <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                    {categoryCounts['all'].toLocaleString()} titles in your library
+                  </p>
+                )}
+              </div>
+
+              {/* Controls: search · view · filter · add · more */}
               <div className="flex items-center gap-2">
-                {/* View toggle — glassy segmented control */}
-                <div className="hidden sm:flex items-center gap-0.5 rounded-md border border-foreground/10 bg-background/40 backdrop-blur-md p-0.5 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.10)]">
-                  <Button size="icon-sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
+                <div className="relative w-56 xl:w-72">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search titles…"
+                    value={typedSearchTerm}
+                    onChange={handleSearchChange}
+                    className="h-9 rounded-full border-border/60 bg-background/50 pl-9 pr-8"
+                    aria-label="Search media titles"
+                  />
+                  {typedSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTypedSearchTerm('');
+                        setSearchTerm('');
+                        if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label="Clear search"
+                      title="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-0.5 rounded-full border border-border/60 bg-background/40 backdrop-blur-md p-0.5">
+                  <Button size="icon-sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 rounded-full" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
                     <LayoutGrid className="h-4 w-4" />
                   </Button>
-                  <Button size="icon-sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
+                  <Button size="icon-sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 rounded-full" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
                     <ListIcon className="h-4 w-4" />
                   </Button>
                 </div>
 
-                <Button variant="default" size="sm" onClick={() => setQuickAddOpen(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add
-                </Button>
-
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setFiltersOpen(true)}
-                  aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'}
-                >
+                <Button variant="outline" size="sm" className="h-9 rounded-full" onClick={() => setFiltersOpen(true)} aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'}>
                   <Filter className="h-4 w-4 mr-2" />
-                  Filters
+                  Filter
                   {activeFilterCount > 0 && (
-                    <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[11px] font-medium">
+                    <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold tabular-nums">
                       {activeFilterCount}
                     </span>
                   )}
                 </Button>
 
+                <Button variant="gradient" size="sm" className="h-9 rounded-full" onClick={() => setQuickAddOpen(true)}>
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Add
+                </Button>
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon-sm" aria-label="More actions" title="More actions">
+                    <Button variant="ghost" size="icon-sm" className="h-9 w-9 rounded-full" aria-label="More actions" title="More actions">
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -2455,7 +2598,7 @@ const MediaTracker = () => {
                       <SelectContent>
                         <SelectItem value="title">Title</SelectItem>
                         <SelectItem value="rating">My rating</SelectItem>
-                        <SelectItem value="ext_rating">Community rating</SelectItem>
+                        <SelectItem value="ext_rating">Source rating</SelectItem>
                         <SelectItem value="pct_complete">% complete</SelectItem>
                         <SelectItem value="updated_at">Recently updated</SelectItem>
                         <SelectItem value="created_at">Date added</SelectItem>
@@ -2521,38 +2664,8 @@ const MediaTracker = () => {
           </Sheet>
 
           <div className="p-4 sm:p-6">
-            {/* Overview strip — at-a-glance totals; cards filter by status when clicked */}
-            <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-              {([
-                { key: 'all', label: 'Total', value: currentStats.all, status: 'All', dot: 'bg-foreground/40' },
-                { key: 'inProgress', label: 'In progress', value: currentStats.inProgress, status: 'Active', dot: 'bg-success' },
-                { key: 'planned', label: 'Planned', value: currentStats.planned, status: 'Planned', dot: 'bg-warning' },
-                { key: 'completed', label: 'Completed', value: currentStats.completed, status: 'Completed', dot: 'bg-muted-foreground' },
-              ] as const).map((stat) => {
-                const active = filterStatus === stat.status;
-                return (
-                  <button
-                    key={stat.key}
-                    type="button"
-                    onClick={() => setFilterStatus(stat.status)}
-                    aria-pressed={active}
-                    className={cn(
-                      'group rounded-xl border p-3.5 text-left transition-all duration-base hover:-translate-y-0.5',
-                      active ? 'border-primary/40 bg-primary/[0.07] shadow-glow' : 'border-border bg-card hover:border-border-strong'
-                    )}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className={cn('h-2 w-2 rounded-full', stat.dot)} aria-hidden="true" />
-                      <span className="text-xs font-medium text-muted-foreground">{stat.label}</span>
-                    </div>
-                    <div className={cn('mt-1.5 text-3xl font-extrabold tabular-nums leading-none', active && 'gradient-text')}>{stat.value}</div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Search */}
-            <div className="mb-3 flex items-center gap-2">
+            {/* Search — mobile/tablet only (desktop search lives in the command bar) */}
+            <div className="mb-3 flex items-center gap-2 lg:hidden">
               <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
               <div className="relative flex-1">
                 <Input
@@ -2580,7 +2693,7 @@ const MediaTracker = () => {
               </div>
             </div>
 
-            {/* Unified category bar (All / type pills / custom groups) */}
+            {/* Category nav (All / type pills / custom groups) */}
             <div className="mb-3">
               <CustomGroupBuilder
                 groups={customGroups}
@@ -2591,6 +2704,67 @@ const MediaTracker = () => {
                 typePills={visibleTypeTabs}
                 onManageTypes={() => setTabsManageOpen(true)}
               />
+            </div>
+
+            {/* Control rail — status segment (doubles as the status filter) + inline sort */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="-mx-1 max-w-full overflow-x-auto scrollbar-hide px-1">
+                <div className="inline-flex items-center gap-0.5 rounded-full border border-border/60 bg-background/40 backdrop-blur-md p-0.5">
+                  {([
+                    { label: 'All', value: currentStats.all, status: 'All', dot: 'bg-foreground/40' },
+                    { label: 'In progress', value: currentStats.inProgress, status: 'Active', dot: 'bg-success' },
+                    { label: 'Planned', value: currentStats.planned, status: 'Planned', dot: 'bg-warning' },
+                    { label: 'Completed', value: currentStats.completed, status: 'Completed', dot: 'bg-muted-foreground' },
+                  ] as const).map((s) => {
+                    const active = filterStatus === s.status;
+                    return (
+                      <button
+                        key={s.status}
+                        type="button"
+                        onClick={() => setFilterStatus(s.status)}
+                        aria-pressed={active}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium transition-all',
+                          active
+                            ? 'bg-primary/15 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.35)]'
+                            : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
+                        )}
+                      >
+                        <span className={cn('h-1.5 w-1.5 rounded-full', s.dot)} aria-hidden="true" />
+                        <span>{s.label}</span>
+                        <span className={cn('text-xs tabular-nums', active ? 'text-foreground/70' : 'text-muted-foreground/60')}>{s.value}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="hidden text-xs text-muted-foreground sm:inline">Sort</span>
+                <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+                  <SelectTrigger className="h-9 w-[150px] rounded-full border-border/60 bg-background/40 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="title">Title</SelectItem>
+                    <SelectItem value="rating">My rating</SelectItem>
+                    <SelectItem value="ext_rating">Source rating</SelectItem>
+                    <SelectItem value="pct_complete">% complete</SelectItem>
+                    <SelectItem value="updated_at">Recently updated</SelectItem>
+                    <SelectItem value="created_at">Date added</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="h-9 w-9 rounded-full border-border/60 bg-background/40"
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  aria-label={`Sort ${sortOrder === 'asc' ? 'ascending' : 'descending'} — click to toggle`}
+                  title={sortOrder === 'asc' ? (sortBy === 'title' ? 'A → Z' : 'Ascending') : (sortBy === 'title' ? 'Z → A' : 'Descending')}
+                >
+                  <ArrowDownUp className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
 
             {/* Active filter chips — show what's narrowing the view, each removable */}
@@ -2809,33 +2983,20 @@ const MediaTracker = () => {
                     ))}
                   </div>
                 ) : (
-                  <div className="zen-card p-0 overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-1/3">Title</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Rating</TableHead>
-                          <TableHead>Progress</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {finalItems.map((item) => (
-                          <MediaListRow
-                            key={item.id}
-                            item={item}
-                            cover={imageUrls.get(item.id)}
-                            isUpdating={updatingIds.has(item.id)}
-                            onScheduleLoad={scheduleImageLoad}
-                            onOpenDetails={openDetails}
-                            onQuickUpdate={handleQuickUpdate}
-                            onRequestDelete={(id) => setDeleteConfirm({ open: true, id })}
-                          />
-                        ))}
-                      </TableBody>
-                    </Table>
+                  <div className="space-y-2">
+                    {finalItems.map((item) => (
+                      <MediaListRow
+                        key={item.id}
+                        item={item}
+                        cover={imageUrls.get(item.id)}
+                        meta={metadataMap.get(item.id) ?? null}
+                        isUpdating={updatingIds.has(item.id)}
+                        onScheduleLoad={scheduleImageLoad}
+                        onOpenDetails={openDetails}
+                        onQuickUpdate={handleQuickUpdate}
+                        onRequestDelete={(id) => setDeleteConfirm({ open: true, id })}
+                      />
+                    ))}
                   </div>
                 )}
                 {/* Infinite scroll sentinel */}

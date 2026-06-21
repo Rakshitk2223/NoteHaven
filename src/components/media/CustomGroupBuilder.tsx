@@ -41,7 +41,7 @@ interface CustomGroupBuilderProps {
 }
 
 const pillBase =
-  'flex items-center gap-2 px-4 py-2 rounded-full whitespace-nowrap transition-all duration-200 font-medium text-sm border-2';
+  'flex items-center gap-1.5 px-3.5 py-1.5 rounded-full whitespace-nowrap transition-all duration-200 font-medium text-sm border';
 
 const COUNT_TOOLTIP = "Total items of this category's types (not affected by status/search filters)";
 
@@ -124,8 +124,8 @@ export const CustomGroupBuilder = ({
     itemCounts[key] > 0 ? (
       <span
         className={cn(
-          'text-xs px-2 py-0.5 rounded-full',
-          active ? 'bg-primary-foreground/20' : 'bg-muted text-muted-foreground'
+          'text-[11px] tabular-nums px-1.5 py-0.5 rounded-full',
+          active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-foreground/10 text-muted-foreground'
         )}
         title={COUNT_TOOLTIP}
       >
@@ -133,9 +133,9 @@ export const CustomGroupBuilder = ({
       </span>
     ) : null;
 
-  const activeClasses = 'bg-primary text-primary-foreground border-primary shadow-md';
+  const activeClasses = 'bg-primary text-primary-foreground border-primary shadow-glow';
   const inactiveClasses =
-    'bg-background text-muted-foreground border-border hover:border-border-strong hover:text-foreground';
+    'bg-foreground/[0.04] text-muted-foreground border-transparent hover:bg-foreground/[0.08] hover:text-foreground';
 
   return (
     <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide items-center">

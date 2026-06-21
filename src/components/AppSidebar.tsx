@@ -15,7 +15,8 @@ import {
   Wallet,
   CreditCard,
   Calendar,
-  Library
+  Library,
+  FolderLock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ const defaultMainNavigation: NavItem[] = [
   { name: "Media", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },
+  { name: "Vault", href: "/vault", icon: FolderLock },
   { name: "Birthdays", href: "/birthdays", icon: Cake },
   { name: "Money Ledger", href: "/ledger", icon: Wallet },
   { name: "Subscriptions", href: "/subscriptions", icon: CreditCard },
@@ -140,7 +142,14 @@ const AppSidebar = () => {
           })
           .filter(Boolean) as NavItem[];
 
-        return orderedNav.length > 0 ? orderedNav : defaultMainNavigation;
+        // Append any nav items added since this order was saved (e.g. new tabs)
+        // so they still appear for users who already have a saved order.
+        const merged = [
+          ...orderedNav,
+          ...defaultMainNavigation.filter(d => !orderedNav.some(o => o.name === d.name)),
+        ];
+
+        return merged.length > 0 ? merged : defaultMainNavigation;
       } catch (e) {
         return defaultMainNavigation;
       }
@@ -164,8 +173,13 @@ const AppSidebar = () => {
           })
           .filter(Boolean) as NavItem[];
 
-        if (orderedNav.length > 0) {
-          setMainNavigation(orderedNav);
+        const merged = [
+          ...orderedNav,
+          ...defaultMainNavigation.filter(d => !orderedNav.some(o => o.name === d.name)),
+        ];
+
+        if (merged.length > 0) {
+          setMainNavigation(merged);
         }
       } catch (e) {
         console.error('Failed to parse sidebar order:', e);

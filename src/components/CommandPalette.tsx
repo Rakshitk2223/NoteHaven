@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Calendar, Library, Monitor, CheckSquare, FileText,
   Cake, Wallet, CreditCard, Settings as SettingsIcon, Plus, Sparkles,
-  SunMedium, Moon,
+  SunMedium, Moon, FolderLock,
 } from "lucide-react";
 import {
   CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup,
@@ -62,6 +62,7 @@ export function CommandPalette() {
     { icon: Monitor, label: "Media Tracker", perform: () => go("/media"), keywords: "anime manga movies series" },
     { icon: CheckSquare, label: "Tasks", perform: () => go("/tasks"), keywords: "todo" },
     { icon: FileText, label: "Notes", perform: () => go("/notes") },
+    { icon: FolderLock, label: "Vault", perform: () => go("/vault"), keywords: "files documents storage drive aadhaar passport" },
     { icon: Cake, label: "Birthdays", perform: () => go("/birthdays") },
     { icon: Wallet, label: "Money Ledger", perform: () => go("/ledger"), keywords: "budget expenses income" },
     { icon: CreditCard, label: "Subscriptions", perform: () => go("/subscriptions") },

@@ -110,10 +110,13 @@ const MediaCardComponent = ({
     ? 'current_episode'
     : null;
   const progressValue = isReadable ? current_chapter : isWatchable ? current_episode : undefined;
+  // Show progress against the source's real total when known (e.g. "E7 / 18").
+  const epTotal = isWatchable && metadata?.episodes && metadata.episodes > 0 ? metadata.episodes : null;
+  const chTotal = isReadable && metadata?.chapters && metadata.chapters > 0 ? metadata.chapters : null;
   const progressLabel = isReadable
-    ? `Ch. ${current_chapter ?? 0}`
+    ? `Ch. ${current_chapter ?? 0}${chTotal ? ` / ${chTotal}` : ''}`
     : isWatchable
-    ? `S${current_season || 1} · E${current_episode ?? 0}`
+    ? `S${current_season || 1} · E${current_episode ?? 0}${epTotal ? ` / ${epTotal}` : ''}`
     : '';
 
   const progress = computeProgress({ type, current_season, current_episode, current_chapter }, metadata);
@@ -361,7 +364,7 @@ const MediaCardComponent = ({
               >
                 <Minus className="h-3 w-3" />
               </Button>
-              <span className="text-xs tabular-nums min-w-[44px] text-center" title={progressLabel}>{progressLabel}</span>
+              <span className="text-xs tabular-nums min-w-[44px] whitespace-nowrap text-center" title={progressLabel}>{progressLabel}</span>
               <Button
                 size="icon"
                 variant="outline"

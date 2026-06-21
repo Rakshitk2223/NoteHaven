@@ -6,9 +6,9 @@ Guidance for AI assistants (and humans) working in the NoteHaven codebase. For d
 
 ## What this project is
 
-NoteHaven is a personal productivity & media companion: a React 18 + TypeScript + Vite single-page app backed entirely by Supabase (PostgreSQL + RLS, Auth, Realtime, RPC, one Edge Function). There is **no custom server** — the client talks to Supabase directly.
+NoteHaven is a personal productivity & media companion: a React 18 + TypeScript + Vite single-page app backed entirely by Supabase (PostgreSQL + RLS, Auth, Storage, Realtime, RPC, one Edge Function). There is **no custom server** — the client talks to Supabase directly.
 
-Features: Notes (rich text, auto-save, sharing), Tasks, AI Prompt library, Code Snippets, Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger, Subscriptions, Birthdays, Countdowns, a unified Calendar, a cross-cutting Tags system, and a customizable widget Dashboard.
+Features: Notes (rich text, auto-save, sharing), Tasks, AI Prompt library, Code Snippets, Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger, Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a cross-cutting Tags system, and a customizable widget Dashboard.
 
 ---
 
@@ -76,7 +76,7 @@ deploy-edge-function.sh
 context/                  # frontend.md, backend.md (architecture docs)
 ```
 
-The `supabase/` folder is git-tracked and present: `config.toml`, the `media-search` edge function, and seven SQL migrations (`migrations/01`→`07`; `06` adds `ledger_buckets` + `bucket_id`/`from_bucket_id`/`transfer` for envelope budgeting; `07` adds `snippet_folders` + `folder_id`/`filename`/`description` on `code_snippets` so snippets organise into project folders). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
+The `supabase/` folder is git-tracked and present: `config.toml`, the `media-search` edge function, and ten SQL migrations (`migrations/01`→`10`; `06` adds `ledger_buckets` + `bucket_id`/`from_bucket_id`/`transfer` for envelope budgeting; `07` adds `snippet_folders` + `folder_id`/`filename`/`description` on `code_snippets` so snippets organise into project folders; `08`/`09` extend media metadata with seasons + per-episode/cast data; `10` adds `vault_folders` + `vault_files` plus a **private `vault` Supabase Storage bucket** with per-user RLS for the file Vault). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
 
 ---
 
