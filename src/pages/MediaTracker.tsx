@@ -1876,10 +1876,10 @@ const MediaTracker = () => {
                         </div>
                       )}
 
-                      {/* Season-by-season breakdown with your position highlighted */}
+                      {/* Seasons & episodes — each season expands to its episode list */}
                       {seasons && seasons.length > 0 && (
                         <div className="space-y-2">
-                          <h4 className="text-sm font-semibold">Seasons & episodes</h4>
+                          <h4 className="text-sm font-semibold">Seasons &amp; episodes</h4>
                           <div className="space-y-2">
                             {seasons.map((s) => {
                               const curSeason = editingItem.current_season || 1;
@@ -1890,38 +1890,89 @@ const MediaTracker = () => {
                                 ? s.episode_count
                                 : 0;
                               const spct = s.episode_count ? Math.round((epWatched / s.episode_count) * 100) : 0;
+                              const eps = (meta?.episodes_detail || [])
+                                .filter((e) => e.season === s.season_number)
+                                .sort((a, b) => a.number - b.number);
                               return (
-                                <div
+                                <details
                                   key={s.season_number}
-                                  className={cn(
-                                    'rounded-lg border p-3',
-                                    isCurrent ? 'border-border-strong bg-secondary' : 'border-border'
-                                  )}
+                                  open={isCurrent}
+                                  className={cn('group rounded-lg border', isCurrent ? 'border-border-strong bg-secondary/60' : 'border-border')}
                                 >
-                                  <div className="flex items-center justify-between text-sm">
-                                    <span className="font-medium">
+                                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-sm">
+                                    <span className="flex items-center gap-2 font-medium">
+                                      <span className="text-muted-foreground transition-transform group-open:rotate-90">▸</span>
                                       {s.name}
-                                      {isCurrent && <span className="ml-2 text-xs font-normal text-primary">● You're here</span>}
+                                      {isCurrent && <span className="text-xs font-normal text-primary">● You're here</span>}
                                     </span>
                                     <span className="text-xs text-muted-foreground tabular-nums">
                                       {epWatched}/{s.episode_count} eps{s.air_date ? ` · ${s.air_date.slice(0, 4)}` : ''}
                                     </span>
+                                  </summary>
+                                  <div className="px-3 pb-3">
+                                    <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                                      <div className="h-full rounded-full bg-gradient-brand" style={{ width: `${spct}%` }} />
+                                    </div>
+                                    {eps.length > 0 ? (
+                                      <ul className="divide-y divide-border/60">
+                                        {eps.map((e) => {
+                                          const watched = isCurrent
+                                            ? (editingItem.current_episode || 0) >= e.number
+                                            : curSeason > s.season_number;
+                                          return (
+                                            <li key={e.number} className="flex items-start gap-3 py-2">
+                                              <span className={cn('mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold tabular-nums', watched ? 'bg-[hsl(var(--success)/0.2)] text-[hsl(var(--success))]' : 'bg-muted text-muted-foreground')}>
+                                                {watched ? '✓' : e.number}
+                                              </span>
+                                              <div className="min-w-0 flex-1">
+                                                <div className="flex items-center justify-between gap-2">
+                                                  <span className={cn('truncate text-[13px] font-medium', watched && 'text-muted-foreground')}>{e.name || `Episode ${e.number}`}</span>
+                                                  <span className="flex-shrink-0 text-[11px] text-muted-foreground tabular-nums">{e.runtime ? `${e.runtime}m` : e.air_date ? e.air_date.slice(0, 10) : ''}</span>
+                                                </div>
+                                                {e.overview && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{e.overview}</p>}
+                                              </div>
+                                            </li>
+                                          );
+                                        })}
+                                      </ul>
+                                    ) : (
+                                      <p className="py-1 text-xs text-muted-foreground">{s.episode_count} episodes · titles not cached yet</p>
+                                    )}
                                   </div>
-                                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                                    <div className="h-full rounded-full bg-primary/70" style={{ width: `${spct}%` }} />
-                                  </div>
-                                </div>
+                                </details>
                               );
                             })}
                           </div>
                         </div>
                       )}
 
-                      {/* Hint when a watchable item has no cached season structure yet */}
+                      {/* Cast */}
+                      {meta?.cast_members && meta.cast_members.length > 0 && (
+                        <div className="space-y-2">
+                          <h4 className="text-sm font-semibold">Cast</h4>
+                          <div className="flex gap-3 overflow-x-auto pb-1">
+                            {meta.cast_members.map((c, i) => (
+                              <div key={i} className="flex w-16 flex-shrink-0 flex-col items-center gap-1.5 text-center">
+                                {c.image ? (
+                                  <img src={c.image} alt={c.name} referrerPolicy="no-referrer" className="h-14 w-14 rounded-full object-cover ring-1 ring-border" />
+                                ) : (
+                                  <div className="grid h-14 w-14 place-items-center rounded-full bg-gradient-brand-soft text-sm font-bold text-primary ring-1 ring-primary/20">
+                                    {c.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}
+                                  </div>
+                                )}
+                                <span className="line-clamp-2 text-[11px] font-medium leading-tight">{c.name}</span>
+                                {c.character && <span className="line-clamp-1 text-[10px] text-muted-foreground">{c.character}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Graceful state when episode data isn't cached yet */}
                       {isWatchableItem && (!seasons || seasons.length === 0) && (
-                        <p className="text-xs text-muted-foreground">
-                          Season &amp; episode data not loaded yet — run <span className="font-medium text-foreground">Refresh Library</span> (or the backfill script) to fetch it.
-                        </p>
+                        <div className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
+                          Episode details for this title aren't cached yet — they'll fill in automatically.
+                        </div>
                       )}
                     </div>
                   );
@@ -2486,15 +2537,15 @@ const MediaTracker = () => {
                     onClick={() => setFilterStatus(stat.status)}
                     aria-pressed={active}
                     className={cn(
-                      'rounded-lg border p-3 text-left transition-colors',
-                      active ? 'border-border-strong bg-secondary' : 'border-border bg-card hover:bg-muted/50'
+                      'group rounded-xl border p-3.5 text-left transition-all duration-base hover:-translate-y-0.5',
+                      active ? 'border-primary/40 bg-primary/[0.07] shadow-glow' : 'border-border bg-card hover:border-border-strong'
                     )}
                   >
                     <div className="flex items-center gap-1.5">
                       <span className={cn('h-2 w-2 rounded-full', stat.dot)} aria-hidden="true" />
-                      <span className="text-xs text-muted-foreground">{stat.label}</span>
+                      <span className="text-xs font-medium text-muted-foreground">{stat.label}</span>
                     </div>
-                    <div className="mt-1 text-2xl font-semibold tabular-nums leading-none">{stat.value}</div>
+                    <div className={cn('mt-1.5 text-3xl font-extrabold tabular-nums leading-none', active && 'gradient-text')}>{stat.value}</div>
                   </button>
                 );
               })}
@@ -2619,34 +2670,39 @@ const MediaTracker = () => {
               </div>
             )}
 
-            {/* Selection toolbar — appears only in selection mode */}
+            {/* Selection toolbar — floating glass action bar (Gmail/Photos-style) */}
             {selectedIds.size > 0 && (
-              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-2">
-                <Badge variant="secondary">{selectedIds.size} selected</Badge>
-                <Button size="sm" variant="outline" onClick={selectAllVisible}>
-                  Select all ({finalItems.length})
-                </Button>
-                <Separator orientation="vertical" className="h-6" />
-                <Select onValueChange={(v) => bulkSetStatus(v)}>
-                  <SelectTrigger className="h-8 w-[150px]">
-                    <SelectValue placeholder="Set status…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Watching">Watching</SelectItem>
-                    <SelectItem value="Reading">Reading</SelectItem>
-                    <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
-                    <SelectItem value="Plan to Read">Plan to Read</SelectItem>
-                    <SelectItem value="Completed">Completed</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button size="sm" variant="outline" onClick={refreshSelectedCovers} disabled={isRefreshingCovers}>
-                  <RefreshCw className={isRefreshingCovers ? 'h-4 w-4 mr-1 animate-spin' : 'h-4 w-4 mr-1'} />
-                  {isRefreshingCovers ? 'Refreshing…' : 'Refresh covers'}
-                </Button>
-                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={() => setBulkDeleteOpen(true)}>
-                  <Trash2 className="h-4 w-4 mr-1" /> Delete
-                </Button>
-                <Button size="sm" variant="ghost" onClick={clearSelection}>Cancel</Button>
+              <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 animate-fade-in-scale">
+                <div className="glass pointer-events-auto flex flex-wrap items-center gap-2 px-3 py-2">
+                  <span className="px-2 text-sm font-bold tabular-nums text-foreground">
+                    {selectedIds.size} <span className="font-normal text-muted-foreground">selected</span>
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={selectAllVisible}>
+                    Select all ({finalItems.length})
+                  </Button>
+                  <Separator orientation="vertical" className="h-6" />
+                  <Select onValueChange={(v) => bulkSetStatus(v)}>
+                    <SelectTrigger className="h-8 w-[140px] border-border-strong">
+                      <SelectValue placeholder="Set status…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Watching">Watching</SelectItem>
+                      <SelectItem value="Reading">Reading</SelectItem>
+                      <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
+                      <SelectItem value="Plan to Read">Plan to Read</SelectItem>
+                      <SelectItem value="Completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" variant="ghost" onClick={refreshSelectedCovers} disabled={isRefreshingCovers}>
+                    <RefreshCw className={isRefreshingCovers ? 'h-4 w-4 mr-1 animate-spin' : 'h-4 w-4 mr-1'} />
+                    {isRefreshingCovers ? 'Refreshing…' : 'Refresh covers'}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setBulkDeleteOpen(true)}>
+                    <Trash2 className="h-4 w-4 mr-1" /> Delete
+                  </Button>
+                  <Separator orientation="vertical" className="h-6" />
+                  <Button size="sm" variant="gradient" onClick={clearSelection}>Done</Button>
+                </div>
               </div>
             )}
 

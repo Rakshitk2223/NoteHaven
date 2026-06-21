@@ -21,6 +21,21 @@ export interface SeasonInfo {
   name: string;
 }
 
+export interface EpisodeDetail {
+  season: number;
+  number: number;
+  name: string;
+  air_date: string | null;
+  runtime: number | null;
+  overview: string | null;
+}
+
+export interface CastMember {
+  name: string;
+  character: string | null;
+  image: string | null;
+}
+
 export interface MediaMeta {
   description: string | null;
   episodes: number | null;
@@ -31,6 +46,10 @@ export interface MediaMeta {
   rating: number | null;        // external/community rating (0-10)
   status: string | null;        // 'ongoing' | 'completed' | 'upcoming' | 'hiatus'
   genres: string[] | null;
+  // V2: full per-episode list + cast (populated by the backfill / Refresh Library).
+  episodes_detail?: EpisodeDetail[] | null;
+  cast_members?: CastMember[] | null;
+  runtime?: number | null;       // typical episode/movie runtime in minutes
 }
 
 // Minimal shape of the tracker fields these helpers depend on.
@@ -62,6 +81,16 @@ const parseSeasons = (raw: unknown): SeasonInfo[] | null => {
   }
 };
 
+const parseJsonArray = <T>(raw: unknown): T[] | null => {
+  if (!raw) return null;
+  try {
+    const arr = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(arr) && arr.length ? (arr as T[]) : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Fetch cached metadata for a set of tracker items in a single query.
  * Returns a Map keyed by the item id (only ids with a cache hit are present).
@@ -73,10 +102,16 @@ export async function fetchMediaMetadataBatch(
   if (items.length === 0) return out;
 
   try {
-    const { data, error } = await supabase
-      .from('media_metadata')
-      .select('title, type, description, episodes, chapters, total_seasons, seasons, banner_image, rating, status, genres')
-      .in('title', items.map((i) => i.title));
+    // Passing a runtime string to .select() keeps this resilient: if the V2
+    // columns don't exist yet (migration 09 not applied), the full select errors
+    // and we transparently fall back to the base columns.
+    const FULL = 'title, type, description, episodes, chapters, total_seasons, seasons, banner_image, rating, status, genres, episodes_detail, cast_members, runtime';
+    const BASE = 'title, type, description, episodes, chapters, total_seasons, seasons, banner_image, rating, status, genres';
+    const titles = items.map((i) => i.title);
+    const sel = (cols: string) => supabase.from('media_metadata').select(cols).in('title', titles);
+    let resp = await sel(FULL);
+    if (resp.error) resp = await sel(BASE);
+    const { data, error } = resp;
 
     if (error || !data) return out;
 
@@ -92,6 +127,9 @@ export async function fetchMediaMetadataBatch(
         rating: (row.rating as number) ?? null,
         status: (row.status as string) ?? null,
         genres: Array.isArray(row.genres) ? (row.genres as string[]) : null,
+        episodes_detail: parseJsonArray<EpisodeDetail>(row.episodes_detail),
+        cast_members: parseJsonArray<CastMember>(row.cast_members),
+        runtime: (row.runtime as number) ?? null,
       });
     });
 

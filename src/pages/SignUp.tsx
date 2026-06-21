@@ -48,9 +48,7 @@ const SignUp = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.1, ease: [0.4, 0, 0.2, 1] }}
         >
-          <div className="mb-5 mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-brand text-xl font-extrabold text-white shadow-glow-md">
-            N
-          </div>
+          <img src="/icon-512.png" alt="NoteHaven" className="mb-5 mx-auto h-14 w-14 rounded-2xl object-cover shadow-glow-md" />
           <h1 className="text-3xl font-extrabold font-heading mb-2 gradient-text">
             NoteHaven
           </h1>

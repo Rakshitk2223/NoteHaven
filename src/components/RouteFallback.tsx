@@ -7,10 +7,8 @@ export function RouteFallback() {
   return (
     <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-5">
       <div className="relative h-14 w-14">
-        <div className="absolute inset-0 rounded-2xl bg-gradient-brand opacity-90 blur-[2px] animate-glow-pulse" />
-        <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-gradient-brand text-xl font-extrabold text-white shadow-glow-md">
-          N
-        </div>
+        <div className="absolute inset-0 rounded-2xl bg-gradient-brand opacity-70 blur-[6px] animate-glow-pulse" />
+        <img src="/icon-512.png" alt="NoteHaven" className="absolute inset-0 h-14 w-14 rounded-2xl object-cover shadow-glow-md" />
       </div>
       <div className="h-1.5 w-40 overflow-hidden rounded-full bg-muted">
         <div className="h-full w-1/2 loading-shimmer rounded-full" />

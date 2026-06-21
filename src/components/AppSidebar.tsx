@@ -222,9 +222,7 @@ const AppSidebar = () => {
           isCollapsed ? "lg:justify-center lg:px-2" : "justify-between px-4"
         )}>
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-brand text-white font-extrabold text-lg shadow-glow">
-              N
-            </div>
+            <img src="/icon-512.png" alt="NoteHaven" className="h-9 w-9 flex-shrink-0 rounded-xl object-cover shadow-glow ring-1 ring-white/10" />
             <span className={cn(
               "font-heading font-bold text-lg gradient-text-soft truncate",
               isCollapsed && "lg:hidden"

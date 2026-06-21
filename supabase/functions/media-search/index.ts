@@ -28,6 +28,23 @@ interface SeasonInfo {
   name: string;
 }
 
+// V2: a single episode in the full per-episode list (capped to ~500 stored).
+interface EpisodeDetail {
+  season: number;
+  number: number;
+  name: string;
+  air_date: string | null;
+  runtime: number | null;
+  overview: string | null;
+}
+
+// V2: a single cast entry (top ~12 stored).
+interface CastMember {
+  name: string;
+  character: string | null;
+  image: string | null;
+}
+
 // Normalized media record returned by every search* function and written to
 // the media_metadata cache table.
 interface MediaResult {
@@ -46,12 +63,16 @@ interface MediaResult {
   anilist_id: number | null;
   tmdb_id: number | null;
   mal_id: number | null;
+  // V2 per-episode detail + cast + typical runtime (all keyless sources).
+  episodes_detail: EpisodeDetail[] | null;
+  cast_members: CastMember[] | null;
+  runtime: number | null;
   // Internal-only TVmaze id, stripped before returning to the client.
   _tvmaze_id?: number;
 }
 
 // Partial enrichment payload merged onto the top result of a source.
-type MediaEnrichment = Partial<Pick<MediaResult, 'total_seasons' | 'seasons' | 'episodes' | 'genres' | 'status'>>;
+type MediaEnrichment = Partial<Pick<MediaResult, 'total_seasons' | 'seasons' | 'episodes' | 'genres' | 'status' | 'episodes_detail' | 'cast_members' | 'runtime'>>;
 
 // ---------------------------------------------------------------------------
 // Minimal shapes of the external API responses (only the fields we read).
@@ -90,6 +111,7 @@ interface TVmazeShow {
   rating?: { average?: number | null };
   status?: string;
   genres?: string[];
+  averageRuntime?: number | null;
   externals?: { thetvdb?: number | null };
 }
 interface TVmazeSearchItem {
@@ -97,7 +119,15 @@ interface TVmazeSearchItem {
 }
 interface TVmazeEpisode {
   season?: number | null;
+  number?: number | null;
+  name?: string | null;
   airdate?: string | null;
+  runtime?: number | null;
+  summary?: string | null;
+}
+interface TVmazeCastItem {
+  person?: { name?: string; image?: { medium?: string | null; original?: string | null } | null };
+  character?: { name?: string } | null;
 }
 
 interface AniListMedia {
@@ -125,7 +155,26 @@ interface JikanResult {
   status?: string;
   episodes?: number | null;
   chapters?: number | null;
+  duration?: string;
   genres?: Array<{ name?: string }>;
+}
+// Jikan /anime/{id}/episodes — one entry per episode.
+interface JikanEpisode {
+  mal_id?: number | null;
+  title?: string | null;
+  aired?: string | null;
+}
+interface JikanEpisodesResponse {
+  data?: JikanEpisode[];
+  pagination?: { has_next_page?: boolean };
+}
+// Jikan /anime/{id}/characters — one entry per character.
+interface JikanCharacterEntry {
+  character?: { name?: string; images?: { jpg?: { image_url?: string | null } } };
+  role?: string | null;
+}
+interface JikanCharactersResponse {
+  data?: JikanCharacterEntry[];
 }
 
 interface TMDBResult {
@@ -204,6 +253,9 @@ async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
         anilist_id: null,
         tmdb_id: null,
         mal_id: null,
+        episodes_detail: null,
+        cast_members: null,
+        runtime: null,
       };
     }).filter((x) => x.cover_image);
   } catch (error) {
@@ -253,6 +305,9 @@ async function searchMangaDex(query: string): Promise<MediaResult[]> {
         anilist_id: null,
         tmdb_id: null,
         mal_id: null,
+        episodes_detail: null,
+        cast_members: null,
+        runtime: null,
       };
     }).filter((x) => x.cover_image);
   } catch (error) {
@@ -297,6 +352,9 @@ async function searchTVmaze(query: string): Promise<MediaResult[]> {
         tmdb_id: show.externals?.thetvdb || null,
         _tvmaze_id: show.id,
         mal_id: null,
+        episodes_detail: null,
+        cast_members: null,
+        runtime: null,
       };
     }).filter((x) => x.cover_image);
 
@@ -315,10 +373,19 @@ async function searchTVmaze(query: string): Promise<MediaResult[]> {
   }
 }
 
-// Group a TVmaze show's episodes into seasons for the per-season breakdown.
+// Strip HTML tags and collapse whitespace, then cap to `max` chars.
+function stripHtml(html: string | null | undefined, max: number): string | null {
+  if (!html) return null;
+  const text = html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  return text ? text.substring(0, max) : null;
+}
+
+// Group a TVmaze show's episodes into seasons for the per-season breakdown, and
+// (V2) build the full per-episode list + top cast + typical runtime in the same
+// fetch (`embed[]=episodes&embed[]=cast`).
 async function fetchTVmazeSeasons(showId: number): Promise<MediaEnrichment | null> {
   try {
-    const res = await fetch(`https://api.tvmaze.com/shows/${showId}?embed=episodes`);
+    const res = await fetch(`https://api.tvmaze.com/shows/${showId}?embed[]=episodes&embed[]=cast`);
     if (!res.ok) return null;
     const show = await res.json();
     const episodes: TVmazeEpisode[] = show?._embedded?.episodes || [];
@@ -342,10 +409,39 @@ async function fetchTVmazeSeasons(showId: number): Promise<MediaEnrichment | nul
         name: `Season ${season_number}`,
       }));
 
+    // V2: full per-episode detail (cap to first 500, overview stripped + capped 300).
+    const episodes_detail: EpisodeDetail[] = episodes.slice(0, 500).map((ep, idx) => ({
+      season: ep.season ?? 1,
+      number: ep.number ?? idx + 1,
+      name: ep.name || `Episode ${ep.number ?? idx + 1}`,
+      air_date: ep.airdate || null,
+      runtime: typeof ep.runtime === 'number' ? ep.runtime : null,
+      overview: stripHtml(ep.summary, 300),
+    }));
+
+    // V2: top 12 cast members from the embedded cast.
+    const castRaw: TVmazeCastItem[] = show?._embedded?.cast || [];
+    const cast_members: CastMember[] = castRaw.slice(0, 12).map((c) => ({
+      name: c.person?.name || '',
+      character: c.character?.name || null,
+      image: c.person?.image?.medium || null,
+    })).filter((c) => c.name);
+
+    // V2: typical runtime — show average, else first episode with a runtime.
+    const avgRuntime: unknown = show?.averageRuntime;
+    const firstEpRuntime = episodes.find((e) => typeof e.runtime === 'number')?.runtime;
+    const runtime: number | null =
+      typeof avgRuntime === 'number' ? avgRuntime :
+      typeof firstEpRuntime === 'number' ? firstEpRuntime :
+      null;
+
     return {
       total_seasons: seasons.length,
       seasons,
       episodes: episodes.length,
+      episodes_detail: episodes_detail.length ? episodes_detail : null,
+      cast_members: cast_members.length ? cast_members : null,
+      runtime,
     };
   } catch (error) {
     console.error('TVmaze seasons error:', error);
@@ -427,11 +523,69 @@ async function searchAniList(query: string, type: string): Promise<MediaResult[]
         anilist_id: item.id ?? null,
         tmdb_id: null,
         mal_id: null,
+        episodes_detail: null,
+        cast_members: null,
+        runtime: null,
       };
     });
   } catch (error) {
     console.error('AniList error:', error);
     return [];
+  }
+}
+
+// Polite delay between Jikan calls (Jikan rate-limits ~3 req/s).
+const jikanSleep = () => new Promise<void>((r) => setTimeout(r, 350));
+
+// V2: per-episode names for an anime via Jikan /anime/{mal_id}/episodes.
+// Walks up to 3 pages (Jikan paginates ~100/page), pausing between calls.
+// Any failure → null (never throws).
+async function fetchJikanEpisodes(malId: number): Promise<EpisodeDetail[] | null> {
+  try {
+    const all: EpisodeDetail[] = [];
+    for (let page = 1; page <= 3; page++) {
+      if (page > 1) await jikanSleep();
+      const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`);
+      if (!res.ok) break;
+      const json: JikanEpisodesResponse = await res.json();
+      const list = Array.isArray(json?.data) ? json.data : [];
+      if (!list.length) break;
+      list.forEach((ep, idx) => {
+        all.push({
+          season: 1,
+          number: ep.mal_id ?? all.length + idx + 1,
+          name: ep.title || `Episode ${ep.mal_id ?? all.length + idx + 1}`,
+          air_date: ep.aired || null,
+          runtime: null,
+          overview: null,
+        });
+      });
+      if (!json?.pagination?.has_next_page) break;
+    }
+    return all.length ? all.slice(0, 500) : null;
+  } catch (error) {
+    console.error('Jikan episodes error:', error);
+    return null;
+  }
+}
+
+// V2: top 12 cast (characters) for an anime via Jikan /anime/{mal_id}/characters.
+// Any failure → null (never throws).
+async function fetchJikanCast(malId: number): Promise<CastMember[] | null> {
+  try {
+    const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/characters`);
+    if (!res.ok) return null;
+    const json: JikanCharactersResponse = await res.json();
+    const list = Array.isArray(json?.data) ? json.data : [];
+    const cast: CastMember[] = list.slice(0, 12).map((entry) => ({
+      name: entry.character?.name || '',
+      character: entry.role || null,
+      image: entry.character?.images?.jpg?.image_url || null,
+    })).filter((c) => c.name);
+    return cast.length ? cast : null;
+  } catch (error) {
+    console.error('Jikan cast error:', error);
+    return null;
   }
 }
 
@@ -449,10 +603,10 @@ async function searchJikan(query: string, type: string): Promise<MediaResult[]> 
 
     const data = await response.json();
     const results = data?.data;
-    
+
     if (!Array.isArray(results)) return [];
 
-    return (results as JikanResult[]).map((result): MediaResult => {
+    const mapped = (results as JikanResult[]).map((result): MediaResult => {
       const episodes = result.episodes || null;
       const seasons: SeasonInfo[] | null = type === 'anime' && episodes
         ? [{ season_number: 1, episode_count: episodes, air_date: null, name: 'Season 1' }]
@@ -473,8 +627,25 @@ async function searchJikan(query: string, type: string): Promise<MediaResult[]> 
         anilist_id: null,
         tmdb_id: null,
         mal_id: result.mal_id ?? null,
+        episodes_detail: null,
+        cast_members: null,
+        runtime: null,
       };
     });
+
+    // V2: enrich the top anime match with per-episode names + cast via Jikan
+    // (sequential + paused so we stay under Jikan's rate limit). Failures leave
+    // the fields null and never break the base result.
+    if (type === 'anime' && mapped[0]?.mal_id) {
+      const malId = mapped[0].mal_id;
+      const episodes_detail = await fetchJikanEpisodes(malId);
+      await jikanSleep();
+      const cast_members = await fetchJikanCast(malId);
+      if (episodes_detail) mapped[0].episodes_detail = episodes_detail;
+      if (cast_members) mapped[0].cast_members = cast_members;
+    }
+
+    return mapped;
   } catch (error) {
     console.error('Jikan error:', error);
     return [];
@@ -515,6 +686,9 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
       anilist_id: null,
       tmdb_id: result.id ?? null,
       mal_id: null,
+      episodes_detail: null,
+      cast_members: null,
+      runtime: null,
     }));
 
     // The search endpoint omits season/episode structure and genres — enrich the
@@ -619,6 +793,9 @@ async function searchWikidata(query: string, type: string): Promise<MediaResult[
         anilist_id: null,
         tmdb_id: null,
         mal_id: null,
+        episodes_detail: null,
+        cast_members: null,
+        runtime: null,
       }];
     }
     return [];
@@ -679,6 +856,9 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
       anilist_id: null,
       tmdb_id: tmdbId,
       mal_id: null,
+      episodes_detail: null,
+      cast_members: null,
+      runtime: null,
     }];
   } catch (error) {
     console.error('Fanart error:', error);
@@ -892,7 +1072,9 @@ Deno.serve(async (req) => {
         source
       ) || [];
 
-      // Cache freshly fetched covers for future lookups (fire and forget).
+      // Cache freshly fetched results for future lookups (fire and forget).
+      // The full MediaResult objects carry the V2 columns (episodes_detail,
+      // cast_members, runtime) when a source populated them, so they persist here.
       if (sourceResults.length > 0) {
         supabase.from('media_metadata')
           .upsert(sourceResults.slice(0, 10), { onConflict: 'title,type' })

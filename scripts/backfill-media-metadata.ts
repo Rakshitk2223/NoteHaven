@@ -47,14 +47,21 @@ const EDGE_URL = `${supabaseUrl}/functions/v1/media-search`;
 const FORCE = process.argv.includes('--force');
 
 const BATCH_SIZE = 5;
-const DELAY_MS = 1200; // be kind to AniList (~90 req/min) etc.
+// Jikan is strict (~3 req/s) and the anime path now makes several Jikan calls
+// per item (search + up to 3 episode pages + cast), so keep the between-batch
+// pause generous.
+const DELAY_MS = 1500;
 
-// Richest single source per media type (matches metadataSourceFor in the app).
+// Keyless source that returns the richest episode/cast data per media type.
+// TVmaze → live-action TV per-episode list + cast; Jikan → anime episode NAMES
+// + cast (AniList only has counts); AniList → manga; TMDB → movies (fine if it
+// returns nothing, since it's paywalled for this user).
 function sourceFor(type: string): string {
   const t = (type || '').toLowerCase();
-  if (t === 'anime' || t === 'manga' || t === 'manhwa' || t === 'manhua') return 'anilist';
-  if (t === 'kdrama' || t === 'jdrama') return 'tvmaze';
-  return 'tmdb'; // movie, series
+  if (t === 'series' || t === 'kdrama' || t === 'jdrama') return 'tvmaze';
+  if (t === 'anime') return 'jikan'; // best for per-episode names; anilist also acceptable
+  if (t === 'manga' || t === 'manhwa' || t === 'manhua') return 'anilist';
+  return 'tmdb'; // movie
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -64,6 +71,19 @@ interface TrackerItem {
   id: number;
   title: string;
   type: string;
+}
+
+// The fields of the edge function's top result that we inspect for reporting.
+interface EdgeTopResult {
+  description?: string | null;
+  episodes?: number | null;
+  total_seasons?: number | null;
+  seasons?: unknown[] | null;
+  episodes_detail?: unknown[] | null;
+  cast_members?: unknown[] | null;
+}
+interface EdgeResponse {
+  results?: EdgeTopResult[];
 }
 
 async function fetchAll<T>(table: string, columns: string): Promise<T[]> {
@@ -88,30 +108,47 @@ async function backfill() {
   console.log(`Tracker items: ${items.length}`);
 
   // What metadata already exists (so we can skip complete rows unless --force).
-  const existing = await fetchAll<{ title: string; type: string; description: string | null; episodes: number | null; chapters: number | null; total_seasons: number | null }>(
+  const existing = await fetchAll<{
+    title: string;
+    type: string;
+    description: string | null;
+    episodes: number | null;
+    chapters: number | null;
+    total_seasons: number | null;
+    episodes_detail: unknown[] | null;
+    cast_members: unknown[] | null;
+  }>(
     'media_metadata',
-    'title, type, description, episodes, chapters, total_seasons'
+    'title, type, description, episodes, chapters, total_seasons, episodes_detail, cast_members'
   );
   const have = new Map(existing.map((r) => [metaKey(r.title, r.type), r]));
 
+  // Watchable types now require the V2 per-episode list to count as complete, so
+  // existing rows that predate the episodes_detail column get refetched once.
   const isComplete = (it: TrackerItem) => {
     const m = have.get(metaKey(it.title, it.type));
     if (!m) return false;
     const t = it.type.toLowerCase();
     const readable = ['manga', 'manhwa', 'manhua'].includes(t);
-    return Boolean(m.description) && (readable ? Boolean(m.chapters) : Boolean(m.episodes || m.total_seasons));
+    if (readable) return Boolean(m.description) && Boolean(m.chapters);
+    if (t === 'movie') return Boolean(m.description); // movies have no episode list
+    // series / anime / kdrama / jdrama: need description + a real episode list.
+    const hasEpisodeList = Array.isArray(m.episodes_detail) && m.episodes_detail.length > 0;
+    return Boolean(m.description) && hasEpisodeList;
   };
 
   const todo = FORCE ? items : items.filter((it) => !isComplete(it));
   console.log(`To process: ${todo.length}${FORCE ? '' : ` (${items.length - todo.length} already complete)`}`);
   if (todo.length === 0) { console.log('Nothing to do.'); return; }
 
-  let updated = 0, missed = 0, failed = 0;
+  let processed = 0, missed = 0, failed = 0;
+  // Per-field tallies (inspected from the edge response top result).
+  let withDescription = 0, withSeasons = 0, withEpisodeList = 0, withCast = 0;
 
   for (let i = 0; i < todo.length; i++) {
     const item = todo[i];
     if (i > 0 && i % BATCH_SIZE === 0) {
-      console.log(`  ... ${i}/${todo.length} (ok ${updated}, miss ${missed}, fail ${failed}) ...`);
+      console.log(`  ... ${i}/${todo.length} (ok ${processed}, miss ${missed}, fail ${failed}) ...`);
       await sleep(DELAY_MS);
     }
 
@@ -121,7 +158,7 @@ async function backfill() {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
       if (!res.ok) { failed++; console.log(`  [FAIL] ${item.title} (${item.type}) - HTTP ${res.status}`); continue; }
-      const data = await res.json();
+      const data = (await res.json()) as EdgeResponse;
       const top = data?.results?.[0];
       if (!top) { missed++; console.log(`  [MISS] ${item.title} (${item.type}) - no match from ${source}`); continue; }
 
@@ -132,15 +169,38 @@ async function backfill() {
       if (Object.keys(patch).length > 0) {
         await supabase.from('media_tracker').update(patch).eq('id', item.id);
       }
-      updated++;
-      console.log(`  [OK]  ${item.title} (${item.type}) <- ${source}${top.total_seasons ? ` · ${top.total_seasons}s` : ''}${top.episodes ? `/${top.episodes}ep` : ''}`);
+
+      // Per-field tallies for the summary.
+      const hasDescription = Boolean(top.description);
+      const hasSeasons = (typeof top.total_seasons === 'number' && top.total_seasons > 0)
+        || (Array.isArray(top.seasons) && top.seasons.length > 0);
+      const hasEpisodeList = Array.isArray(top.episodes_detail) && top.episodes_detail.length > 0;
+      const hasCast = Array.isArray(top.cast_members) && top.cast_members.length > 0;
+      if (hasDescription) withDescription++;
+      if (hasSeasons) withSeasons++;
+      if (hasEpisodeList) withEpisodeList++;
+      if (hasCast) withCast++;
+
+      processed++;
+      const epCount = Array.isArray(top.episodes_detail) ? top.episodes_detail.length : 0;
+      const castCount = Array.isArray(top.cast_members) ? top.cast_members.length : 0;
+      console.log(
+        `  [OK]  ${item.title} (${item.type}) <- ${source}` +
+        `${top.total_seasons ? ` · ${top.total_seasons}s` : ''}` +
+        `${top.episodes ? `/${top.episodes}ep` : ''}` +
+        `${epCount ? ` · ${epCount} ep-list` : ''}` +
+        `${castCount ? ` · ${castCount} cast` : ''}`
+      );
     } catch (e) {
       failed++;
       console.log(`  [FAIL] ${item.title} (${item.type}) - ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  console.log(`\nDone: ${updated} updated, ${missed} no-match, ${failed} failed (of ${todo.length}).`);
+  console.log(
+    `\nDone: ${processed} processed · description: ${withDescription} · seasons: ${withSeasons}` +
+    ` · episodes(list): ${withEpisodeList} · cast: ${withCast} · no-match: ${missed} · failed: ${failed}`
+  );
 }
 
 backfill().catch((e) => { console.error(e); process.exit(1); });

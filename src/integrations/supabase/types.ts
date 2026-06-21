@@ -317,16 +317,19 @@ export type Database = {
         Row: {
           anilist_id: number | null
           banner_image: string | null
+          cast_members: Json | null
           chapters: number | null
           cover_image: string
           created_at: string | null
           description: string | null
           episodes: number | null
+          episodes_detail: Json | null
           genres: string[] | null
           id: number
           last_updated: string | null
           mal_id: number | null
           rating: number | null
+          runtime: number | null
           seasons: Json | null
           status: string | null
           title: string
@@ -337,16 +340,19 @@ export type Database = {
         Insert: {
           anilist_id?: number | null
           banner_image?: string | null
+          cast_members?: Json | null
           chapters?: number | null
           cover_image: string
           created_at?: string | null
           description?: string | null
           episodes?: number | null
+          episodes_detail?: Json | null
           genres?: string[] | null
           id?: number
           last_updated?: string | null
           mal_id?: number | null
           rating?: number | null
+          runtime?: number | null
           seasons?: Json | null
           status?: string | null
           title: string
@@ -357,16 +363,19 @@ export type Database = {
         Update: {
           anilist_id?: number | null
           banner_image?: string | null
+          cast_members?: Json | null
           chapters?: number | null
           cover_image?: string
           created_at?: string | null
           description?: string | null
           episodes?: number | null
+          episodes_detail?: Json | null
           genres?: string[] | null
           id?: number
           last_updated?: string | null
           mal_id?: number | null
           rating?: number | null
+          runtime?: number | null
           seasons?: Json | null
           status?: string | null
           title?: string

@@ -12,9 +12,7 @@ const Index = () => {
   return (
     <div className="relative z-10 min-h-screen flex items-center justify-center">
       <div className="text-center">
-        <div className="mb-5 mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-brand text-2xl font-extrabold text-white shadow-glow-md animate-glow-pulse">
-          N
-        </div>
+        <img src="/icon-512.png" alt="NoteHaven" className="mb-5 mx-auto h-16 w-16 rounded-2xl object-cover shadow-glow-md animate-glow-pulse" />
         <h1 className="text-4xl font-extrabold font-heading mb-2 gradient-text">NoteHaven</h1>
         <p className="text-base text-muted-foreground font-body">Loading your sanctuary…</p>
       </div>
