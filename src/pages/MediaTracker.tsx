@@ -2702,6 +2702,16 @@ const MediaTracker = () => {
             </DialogContent>
           </Dialog>
 
+          {/* Hidden file input that the ⋮ → Import / Export ▸ Import JSON item triggers.
+              (It was missing entirely, so fileInputRef.current was null → clicking did nothing.) */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={handleJsonImport}
+          />
+
           {/* Refresh Library sweep (covers / seasons / descriptions / ratings / status) */}
           <RefreshLibraryDialog
             open={refreshLibraryOpen}
