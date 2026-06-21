@@ -20,10 +20,15 @@
     <script>
       (function () {
         try {
-          // Dark-first (Netflix default): dark unless the user explicitly chose light.
-          if (localStorage.getItem('theme') !== 'light') {
-            document.documentElement.classList.add('dark');
-          }
+          // Dark-first. 'light'/'dark' are explicit; 'system' follows the OS;
+          // unset defaults to dark (the brand default).
+          var m = localStorage.getItem('theme');
+          var dark;
+          if (m === 'light') dark = false;
+          else if (m === 'dark') dark = true;
+          else if (m === 'system') dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          else dark = true;
+          if (dark) document.documentElement.classList.add('dark');
         } catch (e) { document.documentElement.classList.add('dark'); }
       })();
     </script>

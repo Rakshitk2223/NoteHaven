@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { getCachedPrefs } from '@/lib/preferences';
 import type { LedgerEntry, LedgerCategory, LedgerSummary } from '@/integrations/supabase/types';
 
 export type { LedgerEntry, LedgerCategory, LedgerSummary };
@@ -231,10 +232,16 @@ export function downloadFile(content: string, filename: string, type: string) {
 // ============================================
 
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR'
-  }).format(amount);
+  const { locale, currency } = getCachedPrefs();
+  try {
+    return new Intl.NumberFormat(locale || 'en-IN', {
+      style: 'currency',
+      currency: currency || 'INR',
+    }).format(amount);
+  } catch {
+    // Bad locale/currency code — fall back to the original default.
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
+  }
 }
 
 export function getMonthName(month: number): string {

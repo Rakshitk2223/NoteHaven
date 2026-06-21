@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { getCachedPrefs } from "@/lib/preferences";
 
 // Floating background shapes component
 const FloatingShapes = () => {
@@ -64,7 +65,7 @@ const Login = () => {
   };
 
   useEffect(() => {
-    if (user) navigate('/dashboard');
+    if (user) navigate(getCachedPrefs().defaultLanding || '/dashboard');
   }, [user, navigate]);
 
   return (

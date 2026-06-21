@@ -214,7 +214,11 @@ export async function fetchFiles(): Promise<VaultFile[]> {
   return (data || []) as VaultFile[];
 }
 
-export async function uploadFile(file: File, folderId: number | null): Promise<VaultFile> {
+export async function uploadFile(
+  file: File,
+  folderId: number | null,
+  displayName?: string
+): Promise<VaultFile> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
@@ -235,7 +239,7 @@ export async function uploadFile(file: File, folderId: number | null): Promise<V
     .insert([{
       user_id: user.id,
       folder_id: folderId,
-      name: file.name,
+      name: displayName ?? file.name,
       storage_path: path,
       mime_type: file.type || null,
       size_bytes: file.size,
@@ -272,6 +276,72 @@ export async function deleteFile(file: Pick<VaultFile, 'id' | 'storage_path'>): 
   await removeStorageObjects([file.storage_path]);
   const { error } = await supabase.from('vault_files').delete().eq('id', file.id);
   if (error) throw error;
+}
+
+/** Bulk move — one UPDATE for many files. */
+export async function moveFiles(ids: number[], folderId: number | null): Promise<void> {
+  if (ids.length === 0) return;
+  const { error } = await supabase.from('vault_files').update({ folder_id: folderId }).in('id', ids);
+  if (error) throw error;
+}
+
+/** Bulk delete — removes the storage objects, then the rows in one round-trip each. */
+export async function deleteFiles(files: Pick<VaultFile, 'id' | 'storage_path'>[]): Promise<void> {
+  if (files.length === 0) return;
+  await removeStorageObjects(files.map((f) => f.storage_path));
+  const { error } = await supabase
+    .from('vault_files')
+    .delete()
+    .in('id', files.map((f) => f.id));
+  if (error) throw error;
+}
+
+/**
+ * Replace an existing file's content in place: upload the new bytes, repoint the
+ * row, then drop the old object. Keeps the row id, folder, and name.
+ */
+export async function replaceFile(
+  existing: Pick<VaultFile, 'id' | 'storage_path'>,
+  newFile: File
+): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+  if (newFile.size > MAX_FILE_BYTES) {
+    throw new Error(`"${newFile.name}" is ${formatBytes(newFile.size)} — over the ${formatBytes(MAX_FILE_BYTES)} limit.`);
+  }
+
+  const ext = getExtension(newFile.name);
+  const path = `${user.id}/${crypto.randomUUID()}${ext ? `.${ext}` : ''}`;
+
+  const { error: upErr } = await supabase.storage
+    .from(VAULT_BUCKET)
+    .upload(path, newFile, { contentType: newFile.type || undefined, upsert: false });
+  if (upErr) throw upErr;
+
+  const { error } = await supabase
+    .from('vault_files')
+    .update({ storage_path: path, size_bytes: newFile.size, mime_type: newFile.type || null })
+    .eq('id', existing.id);
+  if (error) {
+    await removeStorageObjects([path]); // roll back the new upload
+    throw error;
+  }
+  await removeStorageObjects([existing.storage_path]); // drop the old bytes
+}
+
+/** Returns `name`, or a `name (n).ext` variant that isn't already in `taken`. */
+export function uniqueName(name: string, taken: Set<string>): string {
+  if (!taken.has(name)) return name;
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let n = 1;
+  let candidate = `${base} (${n})${ext}`;
+  while (taken.has(candidate)) {
+    n += 1;
+    candidate = `${base} (${n})${ext}`;
+  }
+  return candidate;
 }
 
 // --------------------------------------------
@@ -368,6 +438,54 @@ export async function downloadFolderAsZip(folderId: number, folderName: string):
   triggerDownload(url, `${folderName}.zip`);
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
   return files.length;
+}
+
+/**
+ * Download an arbitrary set of files as a single .zip (flat — no folder
+ * structure). A single file downloads directly with its original name. Holds
+ * the bytes in memory while zipping — fine for typical document selections.
+ */
+export async function downloadFilesAsZip(
+  files: Pick<VaultFile, 'storage_path' | 'name'>[],
+  zipName = 'vault-files',
+): Promise<number> {
+  if (files.length === 0) throw new Error('No files selected.');
+  if (files.length === 1) { await downloadFile(files[0]); return 1; }
+
+  const { default: JSZip } = await import('jszip');
+  const zip = new JSZip();
+  const used = new Set<string>();
+  let added = 0;
+
+  for (const f of files) {
+    // De-dupe identical names ("file.pdf" → "file (1).pdf").
+    let name = f.name;
+    if (used.has(name)) {
+      const dot = name.lastIndexOf('.');
+      let n = 1;
+      let candidate = name;
+      do {
+        candidate = dot > 0 ? `${name.slice(0, dot)} (${n})${name.slice(dot)}` : `${name} (${n})`;
+        n++;
+      } while (used.has(candidate));
+      name = candidate;
+    }
+    used.add(name);
+
+    const url = await getPreviewUrl(f.storage_path);
+    const resp = await fetch(url);
+    if (!resp.ok) continue;
+    zip.file(name, await resp.blob());
+    added++;
+  }
+
+  if (added === 0) throw new Error('Could not fetch the selected files.');
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  triggerDownload(url, `${zipName}.zip`);
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return added;
 }
 
 // --------------------------------------------

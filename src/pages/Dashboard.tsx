@@ -1,14 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Settings2, RotateCcw, LayoutGrid, LayoutDashboard } from 'lucide-react';
+import { Settings2, LayoutDashboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { PageShell } from '@/components/PageShell';
-import { Stagger, StaggerItem } from '@/components/ui/motion';
+import { Stagger } from '@/components/ui/motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import { useNavigate } from 'react-router-dom';
@@ -16,15 +10,14 @@ import { useAuth } from '@/hooks/useAuth';
 import { fetchUserTags, type Tag } from '@/lib/tags';
 import { getUpcomingRenewals, type UpcomingRenewal } from '@/lib/subscriptions';
 import { getLedgerSummary, getMonthName } from '@/lib/ledger';
-import { parseYMD } from '@/lib/date-utils';
+import { parseYMD, dateToYMD } from '@/lib/date-utils';
 import {
   loadWidgets,
   saveWidgets,
   resetWidgets,
   sizeClasses,
   DEFAULT_WIDGETS,
-  type DashboardWidget,
-  type WidgetSize
+  type DashboardWidget
 } from '@/lib/dashboard';
 import {
   WidgetManager,
@@ -43,11 +36,14 @@ import {
   CircularProgress
 } from '@/components/dashboard';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { MasonryItem } from '@/components/dashboard/MasonryItem';
+import { cn } from '@/lib/utils';
 
 interface Task {
   id: number;
   task_text: string;
   is_completed: boolean;
+  due_date?: string | null;
 }
 
 interface Note {
@@ -89,6 +85,7 @@ interface Birthday {
 interface CalendarEvent {
   date: string;
   type: 'task' | 'birthday' | 'subscription' | 'countdown';
+  label: string;
 }
 
 interface LedgerSummaryData {
@@ -105,6 +102,13 @@ const Dashboard = () => {
   const [widgets, setWidgets] = useState<DashboardWidget[]>(DEFAULT_WIDGETS);
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [fillSpace, setFillSpace] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('dashboard_fill_space') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [deleteConfirm, setDeleteConfirm] = useState<{
     open: boolean;
     id: number | null;
@@ -233,7 +237,7 @@ const Dashboard = () => {
 
     const { data, error } = await supabase
       .from('tasks')
-      .select('id, task_text, is_completed')
+      .select('id, task_text, is_completed, due_date')
       .eq('user_id', user.id)
       .eq('is_completed', false)
       .order('created_at', { ascending: false })
@@ -262,13 +266,23 @@ const Dashboard = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    const { data, error } = await supabase
-      .from('media_tracker')
-      .select('id, title, type')
-      .eq('user_id', user.id)
-      .eq('status', 'Watching')
-      .order('updated_at', { ascending: false })
-      .limit(10);
+    const base = () =>
+      supabase
+        .from('media_tracker')
+        .select('id, title, type')
+        .eq('user_id', user.id)
+        .eq('status', 'Watching')
+        .limit(10);
+
+    // Order by genuine last activity; gracefully fall back if migration 11
+    // (the last_activity_at column) hasn't been run yet.
+    let { data, error } = await base().order('last_activity_at', {
+      ascending: false,
+      nullsFirst: false
+    });
+    if (error) {
+      ({ data, error } = await base().order('updated_at', { ascending: false }));
+    }
 
     if (error) throw error;
     return data || [];
@@ -431,40 +445,48 @@ const Dashboard = () => {
     countdowns: Countdown[]
   ): CalendarEvent[] => {
     const events: CalendarEvent[] = [];
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    tasks.forEach(() => {
+    // Tasks only mark the calendar when they actually have a due date.
+    tasks.forEach((task) => {
+      if (!task.due_date) return;
       events.push({
-        date: new Date().toISOString().split('T')[0],
-        type: 'task'
+        date: task.due_date.slice(0, 10),
+        type: 'task',
+        label: task.task_text || 'Task'
       });
     });
 
+    // Birthdays: next occurrence (this year, or next if already passed).
     birthdays.forEach((birthday) => {
       const base = parseYMD(birthday.date_of_birth);
-      const now = new Date();
       const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
-      if (target.getTime() < now.getTime()) {
+      if (target.getTime() < todayStart.getTime()) {
         target.setFullYear(now.getFullYear() + 1);
       }
       events.push({
-        date: target.toISOString().split('T')[0],
-        type: 'birthday'
+        date: dateToYMD(target),
+        type: 'birthday',
+        label: `${birthday.name}'s birthday`
       });
     });
 
+    // Renewals: use the real next renewal date from the RPC.
     renewals.forEach((renewal) => {
-      const date = new Date();
-      date.setDate(date.getDate() + renewal.days_until);
+      if (!renewal.next_renewal_date) return;
       events.push({
-        date: date.toISOString().split('T')[0],
-        type: 'subscription'
+        date: renewal.next_renewal_date.slice(0, 10),
+        type: 'subscription',
+        label: `${renewal.name} renews`
       });
     });
 
     countdowns.forEach((countdown) => {
       events.push({
-        date: countdown.event_date,
-        type: 'countdown'
+        date: countdown.event_date.slice(0, 10),
+        type: 'countdown',
+        label: countdown.event_name
       });
     });
 
@@ -559,6 +581,17 @@ const Dashboard = () => {
     setWidgets(newWidgets);
     await saveWidgets(newWidgets);
   };
+
+  const toggleFillSpace = () =>
+    setFillSpace((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem('dashboard_fill_space', next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
 
   const handleResetLayout = async () => {
     const defaultWidgets = await resetWidgets();
@@ -729,23 +762,14 @@ const Dashboard = () => {
   const pageTitle = displayName ? `${greeting}, ${displayName}` : 'Dashboard';
 
   const optionsMenu = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" title="Dashboard options">
-          <Settings2 className="h-5 w-5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setIsManagerOpen(true)}>
-          <LayoutGrid className="h-4 w-4 mr-2" />
-          Customize
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={handleResetLayout}>
-          <RotateCcw className="h-4 w-4 mr-2" />
-          Reset to Default
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      title="Customize dashboard"
+      onClick={() => setIsManagerOpen(true)}
+    >
+      <Settings2 className="h-5 w-5" />
+    </Button>
   );
 
   const headerActions = (
@@ -763,11 +787,16 @@ const Dashboard = () => {
 
   return (
     <PageShell title={pageTitle} icon={LayoutDashboard} actions={headerActions} mobileActions={optionsMenu}>
-      <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+      <Stagger
+        className={cn(
+          'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4',
+          fillSpace ? 'grid-flow-row-dense gap-5 [grid-auto-rows:4px]' : 'gap-4 sm:gap-5'
+        )}
+      >
         {visibleWidgets.map((widget) => (
-          <StaggerItem key={widget.id} hover={false} className={sizeClasses[widget.size]}>
+          <MasonryItem key={widget.id} fill={fillSpace} className={sizeClasses[widget.size]}>
             {renderWidget(widget)}
-          </StaggerItem>
+          </MasonryItem>
         ))}
       </Stagger>
 
@@ -776,6 +805,8 @@ const Dashboard = () => {
         onClose={() => setIsManagerOpen(false)}
         widgets={widgets}
         onWidgetsChange={handleWidgetsChange}
+        fillSpace={fillSpace}
+        onToggleFillSpace={toggleFillSpace}
         onReset={handleResetLayout}
       />
 

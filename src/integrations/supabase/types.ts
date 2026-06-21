@@ -512,6 +512,7 @@ export type Database = {
           current_season: number | null
           has_new_content: boolean
           id: number
+          last_activity_at: string | null
           last_known_total_episodes: number | null
           last_known_total_seasons: number | null
           rating: number | null
@@ -530,6 +531,7 @@ export type Database = {
           current_season?: number | null
           has_new_content?: boolean
           id?: number
+          last_activity_at?: string | null
           last_known_total_episodes?: number | null
           last_known_total_seasons?: number | null
           rating?: number | null
@@ -548,6 +550,7 @@ export type Database = {
           current_season?: number | null
           has_new_content?: boolean
           id?: number
+          last_activity_at?: string | null
           last_known_total_episodes?: number | null
           last_known_total_seasons?: number | null
           rating?: number | null

@@ -19,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 import { StaggerItem } from "@/components/ui/motion";
 import { cn } from "@/lib/utils";
 import {
@@ -33,6 +34,12 @@ import {
 interface VaultFileCardProps {
   file: VaultFile;
   view: "grid" | "list";
+  /** Whether this file is currently selected for a bulk action. */
+  selected?: boolean;
+  /** Keep the selection checkbox visible (select-mode on, or something selected). */
+  selectionActive?: boolean;
+  /** Toggle this file's selection. When omitted, no checkbox is rendered. */
+  onToggleSelect?: () => void;
   onPreview: () => void;
   onDownload: () => void;
   onRename: () => void;
@@ -52,6 +59,9 @@ function pickIcon(file: VaultFile) {
 export function VaultFileCard({
   file,
   view,
+  selected = false,
+  selectionActive = false,
+  onToggleSelect,
   onPreview,
   onDownload,
   onRename,
@@ -74,6 +84,8 @@ export function VaultFileCard({
       active = false;
     };
   }, [file.storage_path, showImage]);
+
+  const checkboxVisible = selected || selectionActive;
 
   const menu = (
     <DropdownMenu>
@@ -115,8 +127,22 @@ export function VaultFileCard({
     return (
       <div
         onClick={onPreview}
-        className="group flex items-center gap-3 zen-card px-3 py-2.5 cursor-pointer"
+        className={cn(
+          "group flex items-center gap-3 zen-card px-3 py-2.5 cursor-pointer",
+          selected && "ring-1 ring-primary"
+        )}
       >
+        {onToggleSelect && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "flex-shrink-0 transition-opacity",
+              checkboxVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            )}
+          >
+            <Checkbox checked={selected} onCheckedChange={() => onToggleSelect()} aria-label={`Select ${file.name}`} />
+          </div>
+        )}
         <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-secondary/60 overflow-hidden">
           {showImage && thumb ? (
             <img src={thumb} alt="" className="h-full w-full object-cover" />
@@ -140,9 +166,25 @@ export function VaultFileCard({
     <StaggerItem>
       <div
         onClick={onPreview}
-        className="group zen-card overflow-hidden cursor-pointer relative h-full flex flex-col"
+        className={cn(
+          "group zen-card overflow-hidden cursor-pointer relative h-full flex flex-col",
+          selected && "ring-2 ring-primary ring-offset-1 ring-offset-background"
+        )}
         title={file.name}
       >
+        {/* Selection checkbox */}
+        {onToggleSelect && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "absolute top-2 left-2 z-10 rounded-md bg-background/85 p-1 shadow-sm ring-1 ring-border/50 backdrop-blur-sm transition-opacity",
+              checkboxVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            )}
+          >
+            <Checkbox checked={selected} onCheckedChange={() => onToggleSelect()} aria-label={`Select ${file.name}`} />
+          </div>
+        )}
+
         {/* Thumbnail / icon area */}
         <div className="relative aspect-[4/3] bg-secondary/50 flex items-center justify-center overflow-hidden">
           {showImage && thumb ? (
@@ -150,16 +192,16 @@ export function VaultFileCard({
           ) : (
             <Icon className="h-9 w-9 text-muted-foreground/70" />
           )}
-          {file.is_starred && (
-            <Star className="absolute top-2 left-2 h-4 w-4 fill-current text-warning drop-shadow" />
-          )}
           <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
             {menu}
           </div>
         </div>
         {/* Meta */}
         <div className="p-2.5">
-          <p className="truncate text-sm font-medium text-foreground">{file.name}</p>
+          <p className="truncate text-sm font-medium text-foreground flex items-center gap-1.5">
+            {file.is_starred && <Star className="h-3 w-3 fill-current text-warning flex-shrink-0" />}
+            <span className="truncate">{file.name}</span>
+          </p>
           <p className="text-xs text-muted-foreground mt-0.5">{formatBytes(file.size_bytes)}</p>
         </div>
       </div>

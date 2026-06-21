@@ -9,6 +9,7 @@ import {
   EyeOff
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,8 @@ interface WidgetManagerProps {
   onClose: () => void;
   widgets: DashboardWidget[];
   onWidgetsChange: (widgets: DashboardWidget[]) => void;
+  fillSpace: boolean;
+  onToggleFillSpace: () => void;
   onReset: () => void;
 }
 
@@ -50,6 +53,8 @@ export function WidgetManager({
   onClose,
   widgets,
   onWidgetsChange,
+  fillSpace,
+  onToggleFillSpace,
   onReset
 }: WidgetManagerProps) {
   const [localWidgets, setLocalWidgets] = useState<DashboardWidget[]>(widgets);
@@ -140,11 +145,6 @@ export function WidgetManager({
     onClose();
   };
 
-  const handleReset = () => {
-    onReset();
-    onClose();
-  };
-
   const getIcon = (type: string) => {
     const Icon = widgetMetadata[type]?.icon;
     return Icon ? <Icon className="h-5 w-5" /> : null;
@@ -154,21 +154,18 @@ export function WidgetManager({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>Customize Dashboard</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleReset}
-              className="text-muted-foreground"
-            >
-              <RotateCcw className="h-4 w-4 mr-1" />
-              Reset
-            </Button>
-          </DialogTitle>
+          <DialogTitle>Customize Dashboard</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
+          <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/40 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Fill space (compact)</p>
+              <p className="text-xs text-muted-foreground">Pack cards tightly with no gaps</p>
+            </div>
+            <Switch checked={fillSpace} onCheckedChange={onToggleFillSpace} />
+          </div>
+
           <div>
             <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
               <Eye className="h-4 w-4" />
@@ -303,11 +300,22 @@ export function WidgetManager({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancel
+        <DialogFooter className="sm:justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { onReset(); onClose(); }}
+            className="text-muted-foreground"
+          >
+            <RotateCcw className="h-4 w-4 mr-1" />
+            Reset to default
           </Button>
-          <Button onClick={handleSave}>Save Changes</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave}>Save Changes</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -4,7 +4,7 @@
 // episodes" is ticked.
 
 import { useEffect, useState } from 'react';
-import { RefreshCw, ImageIcon, ListVideo, FileText, Star, Radio } from 'lucide-react';
+import { RefreshCw, ImageIcon, ListVideo, FileText, Users, Tags, Star, Radio } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import {
   refreshLibrary,
@@ -30,8 +31,11 @@ const DEFAULT_OPTS: RefreshOptions = {
   covers: true,
   seasons: true,
   descriptions: true,
-  ratings: false,
+  cast: true,
+  genres: true,
+  ratings: true,
   status: true,
+  force: false,
 };
 
 function loadOpts(): RefreshOptions {
@@ -73,9 +77,11 @@ interface Props {
 
 const FIELDS: Array<{ key: keyof RefreshOptions; label: string; hint: string; Icon: typeof ImageIcon }> = [
   { key: 'covers', label: 'Cover images', hint: 'Fetch covers for items still missing one (never overwrites)', Icon: ImageIcon },
-  { key: 'seasons', label: 'Seasons & episodes', hint: 'Real totals + flag new seasons', Icon: ListVideo },
-  { key: 'descriptions', label: 'Descriptions', hint: 'Synopsis text', Icon: FileText },
-  { key: 'ratings', label: 'Ratings', hint: 'External community score', Icon: Star },
+  { key: 'seasons', label: 'Seasons & episodes', hint: 'Real totals, per-season + per-episode lists, new-season flags', Icon: ListVideo },
+  { key: 'descriptions', label: 'Synopsis', hint: 'Description text + banner art', Icon: FileText },
+  { key: 'cast', label: 'Cast', hint: 'Top cast with photos', Icon: Users },
+  { key: 'genres', label: 'Genres', hint: 'Genre tags', Icon: Tags },
+  { key: 'ratings', label: 'Source rating', hint: 'External / community score', Icon: Star },
   { key: 'status', label: 'Airing status', hint: 'Ongoing / Completed / Upcoming', Icon: Radio },
 ];
 
@@ -91,7 +97,8 @@ export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, sc
     if (open) setProgress(null);
   }, [open]);
 
-  const anyChecked = Object.values(opts).some(Boolean);
+  // `force` is a modifier, not a field to fetch — ignore it here.
+  const anyChecked = FIELDS.some(({ key }) => opts[key]);
   const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
   const toggle = (key: keyof RefreshOptions) =>
@@ -166,6 +173,26 @@ export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, sc
               </div>
             </label>
           ))}
+
+          <label
+            htmlFor="refresh-force"
+            className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border p-3 cursor-pointer"
+          >
+            <div className="min-w-0">
+              <div className="text-sm font-medium">Force re-fetch</div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {opts.force
+                  ? 'Overwrites existing values with fresh data.'
+                  : 'Off — only fills blanks; never overwrites what you already have.'}
+              </p>
+            </div>
+            <Switch
+              id="refresh-force"
+              checked={!!opts.force}
+              onCheckedChange={() => toggle('force')}
+              disabled={running}
+            />
+          </label>
         </div>
 
         {progress && (

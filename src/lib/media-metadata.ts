@@ -183,12 +183,14 @@ export async function removeCoverImage(mediaId: number): Promise<boolean> {
 }
 
 // Pick the richest single source for a type's metadata/season structure.
+// Mirrors the backfill script: keyless sources that carry per-episode names +
+// cast where possible (Jikan for anime, TVmaze for live-action TV).
 function metadataSourceFor(type: string): string {
   const t = type.toLowerCase();
-  if (t === 'anime') return 'anilist';
+  if (t === 'anime') return 'jikan';                                  // episode names + cast
   if (['manga', 'manhwa', 'manhua'].includes(t)) return 'anilist';
-  if (['kdrama', 'jdrama'].includes(t)) return 'tvmaze';
-  return 'tmdb'; // movie, series
+  if (['series', 'kdrama', 'jdrama'].includes(t)) return 'tvmaze';    // episode lists + cast, keyless
+  return 'tmdb'; // movie
 }
 
 // ---- progress vs total -----------------------------------------------------
@@ -256,10 +258,14 @@ function buildProgress(kind: 'episode' | 'chapter', watched: number, total: numb
 
 export interface RefreshOptions {
   covers: boolean;        // fill in MISSING covers (never overwrites existing)
-  seasons: boolean;       // refresh real season/episode structure + detect new content
-  descriptions: boolean;  // refresh synopsis
-  ratings: boolean;       // refresh external rating
-  status: boolean;        // refresh airing status
+  seasons: boolean;       // real season/episode structure + per-episode list + new-content detection
+  descriptions: boolean;  // synopsis (+ banner art)
+  cast: boolean;          // top cast members
+  genres: boolean;        // genre tags
+  ratings: boolean;       // external/community rating
+  status: boolean;        // airing status
+  /** Overwrite values that already exist. Default (false) only fills blanks. */
+  force?: boolean;
 }
 
 export interface RefreshProgress {
@@ -284,7 +290,8 @@ interface SweepItem {
   last_known_total_seasons?: number | null;
 }
 
-const wantsMetadata = (o: RefreshOptions) => o.seasons || o.descriptions || o.ratings || o.status;
+const wantsMetadata = (o: RefreshOptions) =>
+  o.seasons || o.descriptions || o.ratings || o.status || o.cast || o.genres;
 
 /**
  * Sweep the library refreshing the ticked fields. Calls the edge function per
@@ -348,12 +355,73 @@ async function refreshOne(
     )}&source=${source}`;
 
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (res.ok) {
         const data = await res.json();
         const top = data?.results?.[0];
         if (top) {
-          applied = true;
+          // For "fill gaps" we read the existing row so we only write blanks.
+          let existing: Record<string, unknown> | null = null;
+          if (!opts.force) {
+            const r = await supabase
+              .from('media_metadata')
+              .select('description, banner_image, episodes, chapters, total_seasons, seasons, rating, status, genres, episodes_detail, cast_members, runtime')
+              .eq('title', item.title)
+              .eq('type', item.type.toLowerCase())
+              .maybeSingle();
+            existing = (r.data as Record<string, unknown> | null) ?? null;
+          }
+          const filled = (key: string): boolean => {
+            const v = existing?.[key];
+            if (v == null) return false;
+            if (Array.isArray(v)) return v.length > 0;
+            if (typeof v === 'string') return v.trim().length > 0;
+            return true;
+          };
+
+          // Write under the TRACKER's own title+type — what the app reads. (The
+          // edge function caches under the SOURCE's canonical title, which the
+          // app would never find — that mismatch is why in-app refresh used to
+          // appear to do nothing.) Only ticked fields, and unless `force` only
+          // where the existing value is blank. Cover images are never touched.
+          const meta: Record<string, unknown> = {
+            title: item.title,
+            type: item.type.toLowerCase(),
+            last_updated: new Date().toISOString(),
+          };
+          const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+          const num = (v: unknown) => (typeof v === 'number' ? v : null);
+          const arr = (v: unknown) => (Array.isArray(v) && v.length ? v : null);
+          const put = (enabled: boolean, key: string, val: unknown) => {
+            if (!enabled || val == null) return;
+            if (!opts.force && filled(key)) return;
+            meta[key] = val;
+          };
+
+          put(opts.descriptions, 'description', str(top.description));
+          put(opts.descriptions, 'banner_image', str(top.banner_image));
+          put(opts.ratings, 'rating', num(top.rating));
+          put(opts.status, 'status', str(top.status));
+          put(opts.genres, 'genres', arr(top.genres));
+          put(opts.seasons, 'total_seasons', num(top.total_seasons));
+          put(opts.seasons, 'seasons', arr(top.seasons));
+          put(opts.seasons, 'episodes', num(top.episodes));
+          put(opts.seasons, 'chapters', num(top.chapters));
+          put(opts.seasons, 'episodes_detail', arr(top.episodes_detail));
+          put(opts.seasons, 'runtime', num(top.runtime));
+          put(opts.cast, 'cast_members', arr(top.cast_members));
+
+          const wrote = Object.keys(meta).some((k) => !['title', 'type', 'last_updated'].includes(k));
+          if (wrote) {
+            const { error } = await supabase.from('media_metadata').upsert(meta, { onConflict: 'title,type' });
+            if (error) {
+              errored = true;
+              devLog(`metadata upsert failed for "${item.title}": ${error.message}`);
+            } else {
+              applied = true;
+            }
+          }
+          // matched but nothing to fill (fill-gaps, already complete) → counts as skipped
 
           // New-content detection (only when seasons refresh was requested).
           if (opts.seasons && userId) {

@@ -472,3 +472,48 @@ html { scroll-behavior: smooth; }
   }
   .aurora-backdrop::before, .aurora-backdrop::after { animation: none !important; }
 }
+
+/* ============================================================
+   Preference-driven accessibility overrides (toggled via
+   classes on <html> by lib/preferences.ts applyPreferencesToDOM).
+   ============================================================ */
+
+/* Reduced motion — same kill-switch as the media query, but opt-in. */
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+.reduce-motion .aurora-backdrop::before,
+.reduce-motion .aurora-backdrop::after { animation: none !important; }
+
+/* High contrast — firm up borders and lift muted text toward the foreground. */
+.high-contrast {
+  --border: var(--border-strong);
+  --muted-foreground: var(--foreground);
+}
+.high-contrast *,
+.high-contrast *::before,
+.high-contrast *::after {
+  border-color: hsl(var(--border-strong)) !important;
+}
+.high-contrast .text-muted-foreground { color: hsl(var(--foreground) / 0.85) !important; }
+
+/* Always-visible focus rings (not just keyboard navigation). */
+.always-focus *:focus {
+  outline: 2px solid hsl(var(--ring)) !important;
+  outline-offset: 2px !important;
+}
+
+/* Underline all links for readability. */
+.underline-links a { text-decoration: underline !important; }
+
+/* Dyslexia-friendly: wider, even-stroked system fonts + looser spacing. */
+.dyslexia-font,
+.dyslexia-font body {
+  font-family: "Atkinson Hyperlegible", "Comic Sans MS", Verdana, Tahoma, sans-serif !important;
+  letter-spacing: 0.02em;
+  word-spacing: 0.08em;
+  line-height: 1.7;
+}

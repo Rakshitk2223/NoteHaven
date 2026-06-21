@@ -10,6 +10,10 @@ import {
   HardDrive,
   Loader2,
   X,
+  FolderInput,
+  Trash2,
+  CheckSquare,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,12 +40,17 @@ import {
   deleteFolder,
   moveFolder,
   uploadFile,
+  replaceFile,
+  uniqueName,
   renameFile,
   moveFile,
+  moveFiles,
   toggleStar,
   deleteFile,
+  deleteFiles,
   downloadFile,
   downloadFolderAsZip,
+  downloadFilesAsZip,
   buildBreadcrumb,
   collectDescendantFolderIds,
   formatBytes,
@@ -53,6 +62,7 @@ import { VaultFolderCard } from "@/components/vault/VaultFolderCard";
 import { VaultFileCard } from "@/components/vault/VaultFileCard";
 import { FilePreviewModal } from "@/components/vault/FilePreviewModal";
 import { MoveToFolderDialog } from "@/components/vault/MoveToFolderDialog";
+import { DuplicateResolveDialog } from "@/components/vault/DuplicateResolveDialog";
 
 const VIEW_KEY = "vault-view";
 
@@ -73,9 +83,19 @@ const Vault = () => {
     }
   });
   const [uploading, setUploading] = useState(false);
+  const [conflicts, setConflicts] = useState<{ file: File; existing: VaultFile }[]>([]);
+  const [conflictBusy, setConflictBusy] = useState(false);
+  const batchStats = useRef({ added: 0, replaced: 0, skipped: 0, errors: [] as string[] });
   const [dragOver, setDragOver] = useState(false);
   const [zippingId, setZippingId] = useState<number | null>(null);
   const [previewFile, setPreviewFile] = useState<VaultFile | null>(null);
+
+  // Multi-select
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDownloading, setBulkDownloading] = useState(false);
 
   // Dialog state
   const [folderModal, setFolderModal] = useState<{
@@ -137,6 +157,25 @@ const Vault = () => {
     setSearch("");
   };
 
+  // ---- multi-select ----
+  // Selection is scoped to the current view; reset it when the folder or search changes.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [currentFolderId, search]);
+
+  const toggleSelect = (id: number) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const clearSelection = () => setSelectedIds(new Set());
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
   // ---- derived ----
   const usage = useMemo(() => files.reduce((s, f) => s + (f.size_bytes ?? 0), 0), [files]);
   const usagePct = Math.min(100, (usage / STORAGE_LIMIT_BYTES) * 100);
@@ -165,25 +204,90 @@ const Vault = () => {
   const isEmpty = !loading && shownFolders.length === 0 && shownFiles.length === 0;
 
   // ---- uploads ----
+  const finishBatch = async () => {
+    await load();
+    const { added, replaced, skipped, errors } = batchStats.current;
+    const parts: string[] = [];
+    if (added) parts.push(`${added} added`);
+    if (replaced) parts.push(`${replaced} replaced`);
+    if (skipped) parts.push(`${skipped} skipped`);
+    if (parts.length) toast({ title: "Upload complete", description: parts.join(" · ") });
+    if (errors.length) toast({ title: "Some uploads failed", description: errors[0], variant: "destructive" });
+  };
+
   const handleFiles = async (list: FileList | File[]) => {
     const arr = Array.from(list);
     if (!arr.length) return;
-    setUploading(true);
-    let ok = 0;
-    const errors: string[] = [];
-    for (const file of arr) {
+    batchStats.current = { added: 0, replaced: 0, skipped: 0, errors: [] };
+
+    // A duplicate = same display name within the folder being viewed.
+    const namesHere = new Set(
+      files.filter((f) => (f.folder_id ?? null) === currentFolderId).map((f) => f.name)
+    );
+    const clean = arr.filter((f) => !namesHere.has(f.name));
+    const conflicting = arr
+      .filter((f) => namesHere.has(f.name))
+      .map((f) => ({
+        file: f,
+        existing: files.find((x) => (x.folder_id ?? null) === currentFolderId && x.name === f.name)!,
+      }));
+
+    if (clean.length) {
+      setUploading(true);
+      for (const f of clean) {
+        try {
+          await uploadFile(f, currentFolderId);
+          batchStats.current.added++;
+        } catch (e) {
+          batchStats.current.errors.push(e instanceof Error ? e.message : `Failed to upload ${f.name}`);
+        }
+      }
+      setUploading(false);
+    }
+
+    if (conflicting.length) {
+      setConflicts(conflicting); // opens the resolve dialog
+    } else {
+      await finishBatch();
+    }
+  };
+
+  const resolveConflict = async (action: "keep" | "replace" | "skip", applyToAll: boolean) => {
+    const queue = conflicts;
+    if (!queue.length) return;
+    const toProcess = applyToAll ? queue : [queue[0]];
+    setConflictBusy(true);
+    // Track names already used in this folder so "Keep both" copies don't collide.
+    const taken = new Set(
+      files.filter((f) => (f.folder_id ?? null) === currentFolderId).map((f) => f.name)
+    );
+    for (const { file, existing } of toProcess) {
       try {
-        await uploadFile(file, currentFolderId);
-        ok++;
+        if (action === "keep") {
+          const newName = uniqueName(file.name, taken);
+          taken.add(newName);
+          await uploadFile(file, currentFolderId, newName);
+          batchStats.current.added++;
+        } else if (action === "replace") {
+          await replaceFile(existing, file);
+          batchStats.current.replaced++;
+        } else {
+          batchStats.current.skipped++;
+        }
       } catch (e) {
-        errors.push(e instanceof Error ? e.message : `Failed to upload ${file.name}`);
+        batchStats.current.errors.push(e instanceof Error ? e.message : `Failed: ${file.name}`);
       }
     }
-    setUploading(false);
-    await load();
-    if (ok > 0) toast({ title: `Uploaded ${ok} file${ok > 1 ? "s" : ""}` });
-    if (errors.length > 0)
-      toast({ title: "Some uploads failed", description: errors[0], variant: "destructive" });
+    setConflictBusy(false);
+    const rest = applyToAll ? [] : queue.slice(1);
+    setConflicts(rest);
+    if (rest.length === 0) await finishBatch();
+  };
+
+  const cancelConflicts = () => {
+    batchStats.current.skipped += conflicts.length;
+    setConflicts([]);
+    finishBatch();
   };
 
   const onDrop = (e: React.DragEvent) => {
@@ -322,6 +426,53 @@ const Vault = () => {
     }
   };
 
+  const doBulkMove = async (destId: number | null) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    try {
+      await moveFiles(ids, destId);
+      await load();
+      exitSelectMode();
+      toast({ title: `Moved ${ids.length} file${ids.length > 1 ? "s" : ""}` });
+    } catch {
+      toast({ title: "Error", description: "Could not move the selected files.", variant: "destructive" });
+    } finally {
+      setBulkMoveOpen(false);
+    }
+  };
+
+  const doBulkDownload = async () => {
+    const selected = files.filter((f) => selectedIds.has(f.id));
+    if (selected.length === 0) return;
+    setBulkDownloading(true);
+    if (selected.length > 1) {
+      toast({ title: "Preparing download…", description: `Zipping ${selected.length} files.` });
+    }
+    try {
+      const n = await downloadFilesAsZip(selected, `vault-${selected.length}-files`);
+      if (n > 1) toast({ title: "Download ready", description: `Zipped ${n} files.` });
+    } catch {
+      toast({ title: "Error", description: "Could not download the selected files.", variant: "destructive" });
+    } finally {
+      setBulkDownloading(false);
+    }
+  };
+
+  const doBulkDelete = async () => {
+    const selected = files.filter((f) => selectedIds.has(f.id));
+    if (selected.length === 0) return;
+    try {
+      await deleteFiles(selected);
+      setFiles((prev) => prev.filter((f) => !selectedIds.has(f.id)));
+      exitSelectMode();
+      toast({ title: `Deleted ${selected.length} file${selected.length > 1 ? "s" : ""}` });
+    } catch {
+      toast({ title: "Error", description: "Could not delete the selected files.", variant: "destructive" });
+    } finally {
+      setBulkDeleteOpen(false);
+    }
+  };
+
   // Folders that can't be a move destination (the folder itself + its subtree).
   const moveDisabledIds = useMemo(() => {
     if (moveState?.kind === "folder") return new Set(collectDescendantFolderIds(folders, moveState.id));
@@ -438,6 +589,14 @@ const Vault = () => {
               <List className="h-4 w-4" />
             </button>
           </div>
+          <Button
+            variant={selectMode ? "default" : "outline"}
+            size="sm"
+            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            title="Select multiple files"
+          >
+            <CheckSquare className="h-4 w-4 mr-2" /> {selectMode ? "Done" : "Select"}
+          </Button>
         </div>
       </div>
 
@@ -461,6 +620,38 @@ const Vault = () => {
         <p className="text-xs text-muted-foreground mb-3">
           Showing matches across all folders for “{search.trim()}”.
         </p>
+      )}
+
+      {/* Selection action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/10 px-3 py-2 mb-4">
+          <div className="flex items-center gap-1">
+            <span className="text-sm font-medium text-foreground">{selectedIds.size} selected</span>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set(shownFiles.map((f) => f.id)))}>
+              Select all ({shownFiles.length})
+            </Button>
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
+              Clear
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={doBulkDownload} disabled={bulkDownloading}>
+              {bulkDownloading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+              {bulkDownloading ? "Preparing…" : "Download"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setBulkMoveOpen(true)}>
+              <FolderInput className="h-4 w-4 mr-2" /> Move
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBulkDeleteOpen(true)}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-2" /> Delete
+            </Button>
+          </div>
+        </div>
       )}
 
       {/* Droppable content region */}
@@ -570,7 +761,10 @@ const Vault = () => {
                         key={file.id}
                         file={file}
                         view="grid"
-                        onPreview={() => setPreviewFile(file)}
+                        selected={selectedIds.has(file.id)}
+                        selectionActive={selectMode || selectedIds.size > 0}
+                        onToggleSelect={() => toggleSelect(file.id)}
+                        onPreview={() => (selectMode ? toggleSelect(file.id) : setPreviewFile(file))}
                         onDownload={() => handleDownloadFile(file)}
                         onRename={() => setRenameModal({ open: true, id: file.id, name: file.name })}
                         onMove={() => setMoveState({ kind: "file", id: file.id, name: file.name, location: file.folder_id ?? null })}
@@ -586,7 +780,10 @@ const Vault = () => {
                         key={file.id}
                         file={file}
                         view="list"
-                        onPreview={() => setPreviewFile(file)}
+                        selected={selectedIds.has(file.id)}
+                        selectionActive={selectMode || selectedIds.size > 0}
+                        onToggleSelect={() => toggleSelect(file.id)}
+                        onPreview={() => (selectMode ? toggleSelect(file.id) : setPreviewFile(file))}
                         onDownload={() => handleDownloadFile(file)}
                         onRename={() => setRenameModal({ open: true, id: file.id, name: file.name })}
                         onMove={() => setMoveState({ kind: "file", id: file.id, name: file.name, location: file.folder_id ?? null })}
@@ -620,6 +817,16 @@ const Vault = () => {
         disabledIds={moveDisabledIds}
         currentLocationId={moveState?.location ?? null}
         onMove={doMove}
+      />
+
+      {/* Bulk move */}
+      <MoveToFolderDialog
+        open={bulkMoveOpen}
+        onOpenChange={setBulkMoveOpen}
+        folders={folders}
+        title={`Move ${selectedIds.size} item${selectedIds.size > 1 ? "s" : ""} to…`}
+        currentLocationId={currentFolderId}
+        onMove={doBulkMove}
       />
 
       {/* New / edit folder */}
@@ -719,6 +926,23 @@ const Vault = () => {
         title="Delete file"
         description={`"${deleteFileState.file?.name ?? ""}" will be permanently deleted. This cannot be undone.`}
         confirmText="Delete file"
+      />
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        onConfirm={doBulkDelete}
+        title={`Delete ${selectedIds.size} file${selectedIds.size > 1 ? "s" : ""}`}
+        description="The selected files will be permanently deleted. This cannot be undone."
+        confirmText="Delete"
+      />
+
+      <DuplicateResolveDialog
+        open={conflicts.length > 0}
+        fileName={conflicts[0]?.file.name}
+        remaining={conflicts.length}
+        busy={conflictBusy}
+        onResolve={resolveConflict}
+        onCancel={cancelConflicts}
       />
     </PageShell>
   );

@@ -1,515 +1,134 @@
-import { useEffect, useState, useCallback } from 'react';
-import { PageShell } from "@/components/PageShell";
-import { Stagger, StaggerItem } from "@/components/ui/motion";
-import { supabase } from '@/integrations/supabase/client';
-import { Button } from '@/components/ui/button';
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Settings as SettingsIcon, Search, User, Palette, Accessibility,
+  SlidersHorizontal, Globe, LayoutDashboard, PanelLeft, Keyboard, Lock, Database, Info,
+} from 'lucide-react';
+import { PageShell } from '@/components/PageShell';
 import { Input } from '@/components/ui/input';
-import { Card } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useToast } from '@/components/ui/use-toast';
-import { themes, getCurrentTheme, saveTheme, applyTheme } from '@/lib/themes';
+import { FadeIn } from '@/components/ui/motion';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/useAuth';
-import { Settings as SettingsIcon, ExternalLink, GripVertical, Save, RotateCcw, ChevronDown, ChevronRight, LogOut, Mail, CalendarDays, Download } from 'lucide-react';
+import { useProfile, initialsFor } from '@/pages/settings/useProfile';
 
-interface SidebarItem {
-  name: string;
-  href: string;
+import { AccountSection } from '@/pages/settings/AccountSection';
+import { AppearanceSection } from '@/pages/settings/AppearanceSection';
+import { AccessibilitySection } from '@/pages/settings/AccessibilitySection';
+import { BehaviorSection } from '@/pages/settings/BehaviorSection';
+import { RegionSection } from '@/pages/settings/RegionSection';
+import { DashboardSection } from '@/pages/settings/DashboardSection';
+import { SidebarSection } from '@/pages/settings/SidebarSection';
+import { KeyboardSection } from '@/pages/settings/KeyboardSection';
+import { SecuritySection } from '@/pages/settings/SecuritySection';
+import { DataSection } from '@/pages/settings/DataSection';
+import { AboutSection } from '@/pages/settings/AboutSection';
+
+interface SectionDef {
+  id: string;
+  label: string;
+  icon: React.ElementType;
+  keywords: string;
+  Component: React.ComponentType;
 }
 
-const DEFAULT_ORDER: SidebarItem[] = [
-  { name: 'Dashboard', href: '/dashboard' },
-  { name: 'Calendar', href: '/calendar' },
-  { name: 'Library', href: '/library' },
-  { name: 'Media', href: '/media' },
-  { name: 'Tasks', href: '/tasks' },
-  { name: 'Notes', href: '/notes' },
-  { name: 'Birthdays', href: '/birthdays' },
-  { name: 'Money Ledger', href: '/ledger' },
-  { name: 'Subscriptions', href: '/subscriptions' },
+const SECTIONS: SectionDef[] = [
+  { id: 'account', label: 'Account', icon: User, keywords: 'profile avatar name email sign out delete danger stats', Component: AccountSection },
+  { id: 'appearance', label: 'Appearance', icon: Palette, keywords: 'theme dark light mode accent color font size radius motion background glow', Component: AppearanceSection },
+  { id: 'accessibility', label: 'Accessibility', icon: Accessibility, keywords: 'contrast underline focus dyslexia readable motion', Component: AccessibilitySection },
+  { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal, keywords: 'defaults start page landing view sort media vault library', Component: BehaviorSection },
+  { id: 'region', label: 'Language & region', icon: Globe, keywords: 'currency locale number date format money', Component: RegionSection },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, keywords: 'widgets layout customize', Component: DashboardSection },
+  { id: 'sidebar', label: 'Sidebar', icon: PanelLeft, keywords: 'navigation order reorder collapse rail', Component: SidebarSection },
+  { id: 'keyboard', label: 'Keyboard', icon: Keyboard, keywords: 'shortcuts command palette keys', Component: KeyboardSection },
+  { id: 'security', label: 'Security', icon: Lock, keywords: 'password change', Component: SecuritySection },
+  { id: 'data', label: 'Data', icon: Database, keywords: 'export import backup cache storage vault restore', Component: DataSection },
+  { id: 'about', label: 'About', icon: Info, keywords: 'version environment links weebslist', Component: AboutSection },
 ];
 
-const STORAGE_KEY = 'sidebar-order';
-
 const Settings = () => {
-  const { signOut } = useAuth();
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') === 'light' ? 'light' : 'dark'));
-  const [colorTheme, setColorTheme] = useState(() => getCurrentTheme());
-  const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
-  const [memberSince, setMemberSince] = useState('');
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [pw1, setPw1] = useState('');
-  const [pw2, setPw2] = useState('');
-  const [exporting, setExporting] = useState(false);
-  const { toast } = useToast();
+  const [params, setParams] = useSearchParams();
+  const [query, setQuery] = useState('');
+  const { profile } = useProfile();
 
-  // Sidebar ordering state
-  const [sidebarItems, setSidebarItems] = useState<SidebarItem[]>(DEFAULT_ORDER);
-  const [draggedItem, setDraggedItem] = useState<number | null>(null);
+  const activeId = SECTIONS.some((s) => s.id === params.get('section')) ? params.get('section')! : 'account';
+  const active = SECTIONS.find((s) => s.id === activeId)!;
+  const ActiveComponent = active.Component;
 
-  // Theme effect
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') root.classList.add('dark'); else root.classList.remove('dark');
-    localStorage.setItem('theme', theme);
-    applyTheme(colorTheme, theme);
-  }, [theme, colorTheme]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return SECTIONS;
+    return SECTIONS.filter((s) => s.label.toLowerCase().includes(q) || s.keywords.includes(q));
+  }, [query]);
 
-  // Apply saved theme on mount
-  useEffect(() => {
-    applyTheme(colorTheme, theme);
-  }, []);
-
-  // Load user metadata
-  useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        setLoadingProfile(true);
-        const { data: { user }, error } = await supabase.auth.getUser();
-        if (error) throw error;
-        if (user?.user_metadata?.display_name) {
-          setDisplayName(user.user_metadata.display_name);
-        }
-        if (user?.email) setEmail(user.email);
-        if (user?.created_at) {
-          setMemberSince(new Date(user.created_at).toLocaleDateString('en-IN', {
-            year: 'numeric', month: 'long', day: 'numeric',
-          }));
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoadingProfile(false);
-      }
-    };
-    loadProfile();
-  }, []);
-
-  // Load saved sidebar order and merge with any new items from DEFAULT_ORDER
-  // Also removes stale items that are no longer in DEFAULT_ORDER (like old "Prompts")
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as SidebarItem[];
-        
-        // Create a set of valid item names from DEFAULT_ORDER
-        const validNames = new Set(DEFAULT_ORDER.map(item => item.name));
-        
-        // Filter out stale items (like "Prompts") that are no longer valid
-        const validSavedItems = parsed.filter(item => validNames.has(item.name));
-        
-        // Create a set of existing valid item names
-        const existingNames = new Set(validSavedItems.map(item => item.name));
-        
-        // Add any new items from DEFAULT_ORDER that aren't in the saved order
-        const newItems = DEFAULT_ORDER.filter(item => !existingNames.has(item.name));
-        
-        // Merge saved order with new items (new items added at their default positions)
-        const mergedItems = [...validSavedItems];
-        
-        // Insert new items at their positions from DEFAULT_ORDER
-        newItems.forEach(newItem => {
-          const defaultIndex = DEFAULT_ORDER.findIndex(item => item.name === newItem.name);
-          // Insert at the same position, or at end if position is beyond current length
-          if (defaultIndex <= mergedItems.length) {
-            mergedItems.splice(defaultIndex, 0, newItem);
-          } else {
-            mergedItems.push(newItem);
-          }
-        });
-        
-        setSidebarItems(mergedItems);
-      } catch (e) {
-        console.error('Failed to parse sidebar order:', e);
-        setSidebarItems(DEFAULT_ORDER);
-      }
-    }
-  }, []);
-
-  // Sidebar section expansion state - collapsed by default
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
-
-  // Sidebar drag and drop handlers
-  const handleDragStart = (index: number) => {
-    setDraggedItem(index);
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (draggedItem === null || draggedItem === index) return;
-
-    const newItems = [...sidebarItems];
-    const dragged = newItems[draggedItem];
-    newItems.splice(draggedItem, 1);
-    newItems.splice(index, 0, dragged);
-
-    setSidebarItems(newItems);
-    setDraggedItem(index);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedItem(null);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDraggedItem(null);
-  };
-
-  const handleSaveSidebarOrder = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sidebarItems));
-    // Dispatch event to notify AppSidebar to reload immediately
-    window.dispatchEvent(new CustomEvent('sidebar-order-changed'));
-    toast({
-      title: 'Sidebar order saved',
-      description: 'Your new sidebar order is now active.',
-    });
-  };
-
-  const handleResetSidebarOrder = () => {
-    setSidebarItems(DEFAULT_ORDER);
-    localStorage.removeItem(STORAGE_KEY);
-    // Dispatch event to notify AppSidebar to reload immediately
-    window.dispatchEvent(new CustomEvent('sidebar-order-changed'));
-    toast({
-      title: 'Sidebar order reset',
-      description: 'Sidebar has been reset to default order.',
-    });
-  };
-
-  const handleSaveDisplayName = async () => {
-    try {
-      const name = displayName.trim();
-      const { error } = await supabase.auth.updateUser({ data: { display_name: name || null } });
-      if (error) throw error;
-      toast({ title: 'Display name updated' });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'An error occurred';
-      toast({ title: 'Error', description: message, variant: 'destructive' });
-    }
-  };
-
-  const handleUpdatePassword = async () => {
-    if (!pw1 || !pw2) {
-      toast({ title: 'Missing fields', description: 'Fill both password fields', variant: 'destructive' });
-      return;
-    }
-    if (pw1 !== pw2) {
-      toast({ title: 'Mismatch', description: 'Passwords do not match', variant: 'destructive' });
-      return;
-    }
-    if (pw1.length < 8) {
-      toast({ title: 'Weak password', description: 'Minimum 8 characters', variant: 'destructive' });
-      return;
-    }
-    try {
-      const { error } = await supabase.auth.updateUser({ password: pw1 });
-      if (error) throw error;
-      toast({ title: 'Password updated' });
-      setPw1(''); setPw2('');
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'An error occurred';
-      toast({ title: 'Error', description: message, variant: 'destructive' });
-    }
-  };
-
-  const handleExportData = useCallback(async () => {
-    try {
-      setExporting(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-      const userId = user.id;
-
-      // Every user-owned table — a full account backup, not just the original four.
-      const tables = [
-        'prompts', 'notes', 'tasks', 'media_tracker',
-        'subscriptions', 'subscription_categories',
-        'ledger_entries', 'ledger_categories', 'ledger_buckets',
-        'birthdays', 'countdowns', 'code_snippets', 'snippet_folders', 'tags',
-      ] as const;
-
-      // allSettled so a single failing table can't sink the whole export.
-      const results = await Promise.allSettled(
-        tables.map((t) =>
-          supabase.from(t).select('*').eq('user_id', userId).then((r) => {
-            if (r.error) throw r.error;
-            return r.data || [];
-          })
-        )
-      );
-
-      const exportObj: Record<string, unknown> = {
-        exported_at: new Date().toISOString(),
-        user_id: userId,
-        email: user.email,
-      };
-      tables.forEach((t, i) => {
-        const res = results[i];
-        exportObj[t] = res.status === 'fulfilled' ? res.value : [];
-      });
-
-      const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'notehaven_export.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({ title: 'Export ready', description: 'Downloaded notehaven_export.json' });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'An error occurred';
-      toast({ title: 'Export failed', description: message, variant: 'destructive' });
-    } finally {
-      setExporting(false);
-    }
-  }, [toast]);
+  const select = (id: string) => setParams({ section: id }, { replace: true });
 
   return (
-    <PageShell
-      title="Settings"
-      icon={SettingsIcon}
-      subtitle="Manage your account & preferences"
-    >
-          <Stagger className="space-y-6 sm:space-y-8 max-w-3xl">
-            {/* Appearance */}
-            <StaggerItem hover={false}>
-            <Card className="p-6 space-y-4">
-              <h2 className="text-lg font-semibold">Appearance</h2>
-
-              {/* Color Theme Selector */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Color Theme</label>
-                <Select value={colorTheme} onValueChange={(value) => {
-                  setColorTheme(value);
-                  saveTheme(value);
-                  applyTheme(value, theme);
-                  toast({ title: 'Theme changed', description: `Switched to ${themes[value].label}` });
-                }}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.values(themes).map((t) => {
-                      const swatch = t.colors[theme];
-                      const dots: string[] = [swatch.background, swatch.card, swatch.primary];
-                      return (
-                        <SelectItem key={t.name} value={t.name}>
-                          <div className="flex items-center gap-3">
-                            <div className="flex -space-x-1">
-                              {dots.map((c, i) => (
-                                <span
-                                  key={i}
-                                  className="h-4 w-4 rounded-full ring-1 ring-border"
-                                  style={{ backgroundColor: `hsl(${c})` }}
-                                />
-                              ))}
-                            </div>
-                            <div>
-                              <p className="font-medium">{t.label}</p>
-                              <p className="text-xs text-muted-foreground">{t.description}</p>
-                            </div>
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Choose your preferred color scheme</p>
-              </div>
-
-              {/* Light/Dark Mode Toggle */}
-              <div className="flex items-center justify-between pt-2">
-                <div>
-                  <p className="font-medium">Mode</p>
-                  <p className="text-sm text-muted-foreground">Toggle light / dark mode</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Light</span>
-                  <Switch checked={theme === 'dark'} onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')} />
-                  <span className="text-xs text-muted-foreground">Dark</span>
-                </div>
-              </div>
-
-              {/* Reset to the default Netflix dark look */}
-              <div className="flex items-center justify-between pt-2 border-t border-border/60">
-                <div>
-                  <p className="font-medium">Reset appearance</p>
-                  <p className="text-sm text-muted-foreground">Back to Netflix dark (default)</p>
-                </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setColorTheme('netflix');
-                    setTheme('dark');
-                    saveTheme('netflix');
-                    applyTheme('netflix', 'dark');
-                    toast({ title: 'Appearance reset', description: 'Netflix dark restored' });
-                  }}
-                >
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  Reset
-                </Button>
-              </div>
-            </Card>
-            </StaggerItem>
-
-            {/* Account */}
-            <StaggerItem hover={false}>
-            <Card className="p-6 space-y-4">
-              <h2 className="text-lg font-semibold">Account</h2>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 text-sm">
-                  <Mail className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <span className="text-muted-foreground">Email</span>
-                  <span className="ml-auto font-medium truncate">{email || '—'}</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm">
-                  <CalendarDays className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <span className="text-muted-foreground">Member since</span>
-                  <span className="ml-auto font-medium">{memberSince || '—'}</span>
-                </div>
-              </div>
-              <div className="pt-2 border-t border-border/60">
-                <Button variant="ghost" onClick={() => signOut()} className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Sign Out
-                </Button>
-              </div>
-            </Card>
-            </StaggerItem>
-
-            {/* Sidebar Order */}
-            <StaggerItem hover={false}>
-            <Card className="p-6 space-y-4">
-              <div
-                className="flex items-center justify-between cursor-pointer"
-                onClick={() => setSidebarExpanded(!sidebarExpanded)}
-              >
-                <h2 className="text-lg font-semibold">Sidebar Order</h2>
-                <Button variant="ghost" size="sm">
-                  {sidebarExpanded ? (
-                    <ChevronDown className="h-5 w-5" />
-                  ) : (
-                    <ChevronRight className="h-5 w-5" />
-                  )}
-                </Button>
-              </div>
-              
-              {sidebarExpanded && (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Drag and drop items to reorder your sidebar navigation.
-                  </p>
-
-                  <div className="space-y-2" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
-                    {sidebarItems.map((item, index) => (
-                      <div
-                        key={item.name}
-                        draggable
-                        onDragStart={() => handleDragStart(index)}
-                        onDragOver={(e) => handleDragOver(e, index)}
-                        onDragEnd={handleDragEnd}
-                        className={cn(
-                          "flex items-center gap-3 p-3 bg-secondary/50 rounded-lg cursor-move hover:bg-secondary transition-all",
-                          draggedItem === index && "opacity-50 ring-2 ring-primary bg-primary/10 scale-[1.02]"
-                        )}
-                      >
-                        <GripVertical className="h-5 w-5 text-muted-foreground" />
-                        <span className="font-medium">{item.name}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="flex gap-2 pt-2">
-                    <Button onClick={handleSaveSidebarOrder}>
-                      <Save className="h-4 w-4 mr-2" />
-                      Save Order
-                    </Button>
-                    <Button variant="secondary" onClick={handleResetSidebarOrder}>
-                      <RotateCcw className="h-4 w-4 mr-2" />
-                      Reset to Default
-                    </Button>
-                  </div>
-                </>
+    <PageShell title="Settings" icon={SettingsIcon} subtitle="Manage your account & preferences">
+      <div className="flex flex-col lg:flex-row gap-6 xl:gap-8 max-w-6xl">
+        {/* Nav rail */}
+        <nav className="lg:w-60 flex-shrink-0 lg:sticky lg:top-6 lg:self-start space-y-4">
+          {/* Identity (desktop) */}
+          <div className="hidden lg:flex items-center gap-3 rounded-2xl zen-card p-3">
+            <div className="h-10 w-10 flex-shrink-0 rounded-xl overflow-hidden ring-1 ring-border bg-gradient-brand-soft">
+              {profile.avatarUrl ? (
+                <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center text-sm font-bold text-primary">
+                  {initialsFor(profile.displayName, profile.email)}
+                </span>
               )}
-            </Card>
-            </StaggerItem>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate">{profile.displayName || 'Account'}</p>
+              <p className="text-xs text-muted-foreground truncate">{profile.email || '—'}</p>
+            </div>
+          </div>
 
-            {/* Profile */}
-            <StaggerItem hover={false}>
-            <Card className="p-6 space-y-4">
-              <h2 className="text-lg font-semibold">Profile</h2>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Display Name</label>
-                <div className="flex gap-2">
-                  <Input
-                    value={displayName}
-                    disabled={loadingProfile}
-                    placeholder="Your name"
-                    onChange={e => setDisplayName(e.target.value)}
-                  />
-                  <Button onClick={handleSaveDisplayName} disabled={loadingProfile || displayName.trim().length === 0}>Save</Button>
-                </div>
-                <p className="text-xs text-muted-foreground">This name may appear in future collaborative features.</p>
-              </div>
-            </Card>
-            </StaggerItem>
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search settings"
+              className="pl-9"
+            />
+          </div>
 
-            {/* Security */}
-            <StaggerItem hover={false}>
-            <Card className="p-6 space-y-4">
-              <h2 className="text-lg font-semibold">Security</h2>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">New Password</label>
-                <Input type="password" value={pw1} onChange={e => setPw1(e.target.value)} placeholder="••••••••" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Confirm New Password</label>
-                <Input type="password" value={pw2} onChange={e => setPw2(e.target.value)} placeholder="••••••••" />
-              </div>
-              <Button onClick={handleUpdatePassword} variant="default">Update Password</Button>
-              <p className="text-xs text-muted-foreground">Choose a strong password (8+ characters).</p>
-            </Card>
-            </StaggerItem>
-
-            {/* Data Management */}
-            <StaggerItem hover={false}>
-            <Card className="p-6 space-y-4">
-              <h2 className="text-lg font-semibold">Data Management</h2>
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">Download a full backup of your account as JSON — notes, tasks, prompts, media, subscriptions, ledger (entries, categories, buckets), birthdays, countdowns, code snippets &amp; tags.</p>
-                <Button onClick={handleExportData} disabled={exporting}>
-                  <Download className="h-4 w-4 mr-2" />
-                  {exporting ? 'Exporting…' : 'Export All My Data'}
-                </Button>
-              </div>
-            </Card>
-            </StaggerItem>
-
-            {/* External Links */}
-            <StaggerItem hover={false}>
-            <Card className="p-6 space-y-4">
-              <h2 className="text-lg font-semibold">External Links</h2>
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">Track your anime, manga, and more.</p>
-                <a
-                  href="https://weebslist.netlify.app/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-primary hover:underline"
+          {/* Items — horizontal scroll on mobile, vertical list on desktop */}
+          <div className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-1 -mx-1 px-1">
+            {filtered.map((s) => {
+              const Icon = s.icon;
+              const isActive = s.id === activeId;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => select(s.id)}
+                  className={cn(
+                    'flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors flex-shrink-0 lg:w-full',
+                    isActive
+                      ? 'bg-gradient-brand-soft text-primary ring-1 ring-primary/15'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60',
+                  )}
                 >
-                  Open WeebsList
-                  <ExternalLink className="h-4 w-4" />
-                </a>
-              </div>
-            </Card>
-            </StaggerItem>
-          </Stagger>
+                  <Icon className="h-4 w-4 flex-shrink-0" />
+                  {s.label}
+                </button>
+              );
+            })}
+            {filtered.length === 0 && (
+              <p className="text-sm text-muted-foreground px-3 py-2">No matching settings.</p>
+            )}
+          </div>
+        </nav>
+
+        {/* Active section */}
+        <div className="flex-1 min-w-0">
+          <FadeIn key={activeId}>
+            <ActiveComponent />
+          </FadeIn>
+        </div>
+      </div>
     </PageShell>
   );
 };

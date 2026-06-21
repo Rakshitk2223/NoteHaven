@@ -1,12 +1,15 @@
 import { Toaster } from "@/components/ui/toaster";
 import { useEffect, lazy, Suspense } from 'react';
+import { MotionConfig } from "framer-motion";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { SidebarProvider } from "@/contexts/SidebarContext";
+import { PreferencesProvider, usePreferences } from "@/hooks/usePreferences";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { getCurrentTheme, applyTheme } from "@/lib/themes";
+import { getStoredMode, resolveMode, getCachedPrefs, applyPreferencesToDOM } from "@/lib/preferences";
 import { AuroraBackdrop } from "@/components/AuroraBackdrop";
 import { RouteFallback } from "@/components/RouteFallback";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -47,15 +50,21 @@ const queryClient = new QueryClient({
 
 const AppInner = () => {
   useEffect(() => {
-    const savedMode = localStorage.getItem('theme');
     const savedColorTheme = getCurrentTheme();
-    // Dark-first; honour saved choice.
-    const mode: 'light' | 'dark' = savedMode === 'light' ? 'light' : 'dark';
+    const apply = () => {
+      const mode = resolveMode(getStoredMode());
+      document.documentElement.classList.toggle('dark', mode === 'dark');
+      applyTheme(savedColorTheme, mode);
+      // applyTheme rewrites --primary etc.; re-assert any custom accent/radius.
+      applyPreferencesToDOM(getCachedPrefs());
+    };
+    apply();
 
-    if (mode === 'dark') {
-      document.documentElement.classList.add('dark');
-    }
-    applyTheme(savedColorTheme, mode);
+    // When mode is "system", track OS light/dark changes live.
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const onChange = () => { if (getStoredMode() === 'system') apply(); };
+    mq?.addEventListener?.('change', onChange);
+    return () => mq?.removeEventListener?.('change', onChange);
   }, []);
   const location = useLocation();
   return (
@@ -87,24 +96,37 @@ const AppInner = () => {
   );
 };
 
+// Reads preferences to drive motion + the ambient backdrop, then mounts the
+// router. Kept separate so it sits *inside* PreferencesProvider.
+const AppShell = () => {
+  const { prefs } = usePreferences();
+  return (
+    <MotionConfig reducedMotion={prefs.reducedMotion ? 'always' : 'user'}>
+      <Toaster />
+      {prefs.backgroundEffects && <AuroraBackdrop />}
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <CommandPalette />
+        <AppInner />
+      </BrowserRouter>
+    </MotionConfig>
+  );
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <SidebarProvider>
-        <TooltipProvider delayDuration={200}>
-          <Toaster />
-          <AuroraBackdrop />
-          <BrowserRouter
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true,
-            }}
-          >
-            <CommandPalette />
-            <AppInner />
-          </BrowserRouter>
-        </TooltipProvider>
-      </SidebarProvider>
+      <PreferencesProvider>
+        <SidebarProvider>
+          <TooltipProvider delayDuration={200}>
+            <AppShell />
+          </TooltipProvider>
+        </SidebarProvider>
+      </PreferencesProvider>
     </AuthProvider>
   </QueryClientProvider>
 );

@@ -10,6 +10,7 @@ import {
   CommandItem, CommandSeparator, CommandShortcut,
 } from "@/components/ui/command";
 import { applyTheme, getCurrentTheme } from "@/lib/themes";
+import { getCachedPrefs, applyPreferencesToDOM } from "@/lib/preferences";
 
 type Cmd = { icon: React.ElementType; label: string; perform: () => void; keywords?: string };
 
@@ -52,6 +53,8 @@ export function CommandPalette() {
       const mode: "light" | "dark" = isDark ? "dark" : "light";
       localStorage.setItem("theme", mode);
       applyTheme(getCurrentTheme(), mode);
+      // applyTheme rewrites --primary etc.; re-assert any custom accent/radius.
+      applyPreferencesToDOM(getCachedPrefs());
     });
   }, [run]);
 

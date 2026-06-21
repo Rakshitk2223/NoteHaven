@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp, Database, Upload, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +18,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   Sheet,
@@ -126,6 +130,49 @@ const normalizeMediaItem = (item: MediaItem): MediaItem => {
 // Type sets for conditional progress logic (module scope: pure, no component state).
 const READABLE_TYPES: MediaItem['type'][] = ['Manga', 'Manhwa', 'Manhua'];
 const WATCHABLE_TYPES: MediaItem['type'][] = ['Series', 'Anime', 'KDrama', 'JDrama'];
+
+// ---- metadata light-cache (instant revisits) -------------------------------
+// Persist a compact projection of the metadata map to localStorage so returning
+// to /media (or switching tabs) renders synopsis / ratings / totals / genres
+// instantly, while the heavy payload (per-episode lists + cast) re-fetches in
+// the background. Those big arrays are excluded to stay well under the quota.
+const META_CACHE_KEY = 'media_meta_light_v1';
+type LightMeta = Omit<MediaMeta, 'episodes_detail' | 'cast_members'>;
+
+const hydrateMetaCache = (): Map<number, MediaMeta> => {
+  const map = new Map<number, MediaMeta>();
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(META_CACHE_KEY) : null;
+    if (raw) {
+      const obj = JSON.parse(raw) as Record<string, LightMeta>;
+      for (const [id, light] of Object.entries(obj)) {
+        map.set(Number(id), { ...light, episodes_detail: null, cast_members: null });
+      }
+    }
+  } catch { /* ignore corrupt cache */ }
+  return map;
+};
+
+const persistMetaCache = (map: Map<number, MediaMeta>) => {
+  try {
+    const obj: Record<number, LightMeta> = {};
+    map.forEach((v, id) => {
+      obj[id] = {
+        description: v.description,
+        episodes: v.episodes,
+        chapters: v.chapters,
+        total_seasons: v.total_seasons,
+        seasons: v.seasons,
+        banner_image: v.banner_image,
+        rating: v.rating,
+        status: v.status,
+        genres: v.genres,
+        runtime: v.runtime ?? null,
+      };
+    });
+    localStorage.setItem(META_CACHE_KEY, JSON.stringify(obj));
+  } catch { /* quota / serialize errors are non-fatal */ }
+};
 
 // Big, frictionless +/- control for progress fields in the detail drawer.
 function ProgressStepper({ label, value, onDec, onInc }: { label: string; value: number; onDec: () => void; onInc: () => void }) {
@@ -469,7 +516,7 @@ const MediaTracker = () => {
   const [imageUrls, setImageUrls] = useState<Map<number, string | null>>(new Map());
   const [imageApiSources, setImageApiSources] = useState<Map<number, string>>(new Map());
   // Cached media metadata (synopsis, real totals, seasons, airing status, genres).
-  const [metadataMap, setMetadataMap] = useState<Map<number, MediaMeta>>(new Map());
+  const [metadataMap, setMetadataMap] = useState<Map<number, MediaMeta>>(hydrateMetaCache);
   const metadataAttemptedRef = useRef<Set<number>>(new Set());
 
   // Save custom groups to localStorage
@@ -670,11 +717,26 @@ const MediaTracker = () => {
       .catch((err) => console.error('Metadata load error:', err));
   }, [mediaItems]);
 
-  // Force a fresh metadata pull (e.g. after a library refresh sweep).
+  // Persist a light projection of the metadata map so revisits are instant.
+  useEffect(() => {
+    if (metadataMap.size === 0) return;
+    const t = setTimeout(() => persistMetaCache(metadataMap), 800);
+    return () => clearTimeout(t);
+  }, [metadataMap]);
+
+  // Force a fresh metadata pull (e.g. after a library refresh sweep). Re-fetches
+  // for the loaded items and MERGES the result — it must never blank the map, or
+  // synopsis/cast would flash away until the background refetch lands (the old
+  // bug where everything "vanished" until a hard reload).
   const reloadMetadata = useCallback(() => {
     metadataAttemptedRef.current = new Set();
-    setMetadataMap(new Map());
-  }, []);
+    const loaded = mediaItems.map((i) => ({ id: i.id, title: i.title, type: i.type }));
+    loaded.forEach((i) => metadataAttemptedRef.current.add(i.id));
+    if (loaded.length === 0) return;
+    fetchMediaMetadataBatch(loaded)
+      .then((m) => { if (m.size) setMetadataMap((prev) => new Map([...prev, ...m])); })
+      .catch((err) => console.error('Metadata reload error:', err));
+  }, [mediaItems]);
 
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
@@ -821,8 +883,13 @@ const MediaTracker = () => {
 
     // "Needs cover" = no persisted cover_image AND no resolved cover from the lazy loader.
     // Using the persisted column keeps the filter stable regardless of scroll position.
+    // "Needs cover" = no displayable cover anywhere. Show an item only once its
+    // cover is CONFIRMED absent (resolved to null) — items whose cover hasn't
+    // resolved yet stay hidden rather than flashing in then vanishing once a
+    // cover loads (the old jarring behaviour). The resolver effect below fills
+    // the in-scope set so the list is complete without scrolling.
     if (needsCoverOnly) {
-      base = base.filter((i) => !i.cover_image && !imageUrls.get(i.id));
+      base = base.filter((i) => !i.cover_image && imageUrls.get(i.id) === null);
     }
 
     // "What should I watch?" quick filter.
@@ -844,6 +911,29 @@ const MediaTracker = () => {
 
     return base;
   }, [categoryFilteredItems, needsCoverOnly, imageUrls, progressFilter, sortBy, sortOrder, metadataMap]);
+
+  // When "Needs cover" is on, resolve covers for the in-scope set (not just the
+  // visible rows), in chunks, so every item actually missing artwork surfaces.
+  useEffect(() => {
+    if (!needsCoverOnly) return;
+    const unresolved = categoryFilteredItems.filter((i) => !imageUrls.has(i.id)).slice(0, 200);
+    if (unresolved.length === 0) return;
+    let cancelled = false;
+    fetchImagesFromSupabaseBatch(unresolved.map((i) => ({ id: i.id, title: i.title, type: i.type })))
+      .then((response) => {
+        if (cancelled) return;
+        const urls = new Map<number, string | null>();
+        const sources = new Map<number, string>();
+        response.results.forEach((r) => {
+          urls.set(r.id, r.imageUrl);
+          if (r.apiSource) sources.set(r.id, r.apiSource);
+        });
+        setImageUrls((prev) => new Map([...prev, ...urls]));
+        setImageApiSources((prev) => new Map([...prev, ...sources]));
+      })
+      .catch((err) => console.error('Needs-cover resolve error:', err));
+    return () => { cancelled = true; };
+  }, [needsCoverOnly, categoryFilteredItems, imageUrls]);
 
   // Whether any filter that can hide existing items is active.
   const hasActiveFilters = useMemo(() => (
@@ -1109,15 +1199,36 @@ const MediaTracker = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-      const { data, error } = await supabase.from('media_tracker').select('*').eq('user_id', user.id);
+      // Pull every tracker column + tag names so a backup restores fully.
+      const { data, error } = await supabase
+        .from('media_tracker')
+        .select('*, media_tags(tags(name))')
+        .eq('user_id', user.id);
       if (error) throw error;
-      const json = JSON.stringify(data || [], null, 2);
+      const items = ((data || []) as Array<Record<string, unknown>>).map((row) => {
+        const mediaTags = row.media_tags as Array<{ tags: { name: string } | null }> | undefined;
+        const tags = Array.isArray(mediaTags)
+          ? mediaTags.map((mt) => mt.tags?.name).filter((n): n is string => Boolean(n))
+          : [];
+        const rest = { ...row };
+        delete rest.media_tags;
+        return { ...rest, tags };
+      });
+      const payload = {
+        app: 'NoteHaven',
+        kind: 'media',
+        version: 2,
+        exported_at: new Date().toISOString(),
+        count: items.length,
+        items,
+      };
+      const json = JSON.stringify(payload, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'notehaven_media_export.json';
+      a.href = url; a.download = `notehaven_media_${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      toast({ title: 'Export started', description: 'Download should begin shortly.' });
+      toast({ title: 'Export started', description: `${items.length} items — download should begin shortly.` });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Export failed', description: message, variant: 'destructive' });
@@ -1634,15 +1745,30 @@ const MediaTracker = () => {
       let data: unknown[] = [];
       try {
         const parsed = JSON.parse(text);
-        if (!Array.isArray(parsed)) throw new Error('JSON root must be an array');
-        data = parsed;
+        // Accept both the v2 envelope ({ items: [...] }) and a raw array (v1).
+        const arr = Array.isArray(parsed)
+          ? parsed
+          : (parsed && Array.isArray((parsed as { items?: unknown[] }).items)
+            ? (parsed as { items: unknown[] }).items
+            : null);
+        if (!arr) throw new Error('JSON must be an array, or an object with an "items" array');
+        data = arr;
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : 'Invalid JSON';
         setError(message);
         setIsImporting(false);
         return;
       }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
       toast({ title: 'Import started', description: 'Your media is being imported in the background.' });
+
+      // Resolve tags once: name→id, creating any missing tags as we go.
+      const tagIdByName = new Map<string, number>();
+      try {
+        (await fetchUserTags()).forEach((t) => tagIdByName.set(t.name.toLowerCase(), t.id));
+      } catch { /* tags are best-effort */ }
+
       const batchSize = 50;
       const successfulImports: { title: string }[] = [];
       const failedImports: { title: string }[] = [];
@@ -1654,31 +1780,50 @@ const MediaTracker = () => {
         current_season: number | null;
         current_episode: number | null;
         current_chapter: number | null;
+        cover_image: string | null;
         user_id: string;
       }
       for (let i = 0; i < data.length; i += batchSize) {
-        const batch: ImportItem[] = data.slice(i, i + batchSize).map((item: unknown) => {
-          const record = item as Record<string, unknown>;
-          return {
-            title: String(record.title || ''),
-            type: String(record.type || 'Movie'),
-            status: String(record.status || 'Plan to Read'),
-            rating: typeof record.rating === 'number' ? record.rating : null,
-            current_season: typeof record.current_season === 'number' ? record.current_season : null,
-            current_episode: typeof record.current_episode === 'number' ? record.current_episode : null,
-            current_chapter: typeof record.current_chapter === 'number' ? record.current_chapter : null,
-            user_id: String(record.user_id || '') // will be overridden by RLS / server if needed
-          };
-        });
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error('Not authenticated');
-        batch.forEach(b => b.user_id = user.id);
-        const { error } = await supabase.from('media_tracker').insert(batch);
-        if (error) {
+        const slice = data.slice(i, i + batchSize).map((item) => item as Record<string, unknown>);
+        const batch: ImportItem[] = slice.map((record) => ({
+          title: String(record.title || ''),
+          type: String(record.type || 'Movie'),
+          status: String(record.status || 'Plan to Read'),
+          rating: typeof record.rating === 'number' ? record.rating : null,
+          current_season: typeof record.current_season === 'number' ? record.current_season : null,
+          current_episode: typeof record.current_episode === 'number' ? record.current_episode : null,
+          current_chapter: typeof record.current_chapter === 'number' ? record.current_chapter : null,
+          cover_image: typeof record.cover_image === 'string' ? record.cover_image : null,
+          user_id: user.id,
+        }));
+        const { data: inserted, error } = await supabase.from('media_tracker').insert(batch).select('id, title');
+        if (error || !inserted) {
           console.error('Batch insert failed', error);
-            failedImports.push(...batch);
-        } else {
-          successfulImports.push(...batch);
+          failedImports.push(...batch);
+          continue;
+        }
+        successfulImports.push(...batch);
+
+        // Restore tags (best-effort): RETURNING rows come back in insert order.
+        try {
+          for (let j = 0; j < inserted.length; j++) {
+            const rawTags = slice[j]?.tags;
+            const names = Array.isArray(rawTags) ? rawTags.filter((t): t is string => typeof t === 'string') : [];
+            if (names.length === 0) continue;
+            const ids: number[] = [];
+            for (const name of names) {
+              const key = name.toLowerCase();
+              let id = tagIdByName.get(key);
+              if (!id) {
+                const created = await createTag(name);
+                if (created?.id) { id = created.id; tagIdByName.set(key, id); }
+              }
+              if (id) ids.push(id);
+            }
+            if (ids.length) await setMediaTags((inserted[j] as { id: number }).id, ids);
+          }
+        } catch (tagErr) {
+          console.error('Tag restore failed for batch', tagErr);
         }
       }
       if (failedImports.length === 0) {
@@ -2357,19 +2502,27 @@ const MediaTracker = () => {
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent align="end" className="w-56">
                     <DropdownMenuItem onClick={() => setRefreshLibraryOpen(true)}>
                       <RefreshCw className="h-4 w-4 mr-2" /> Refresh Library…
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
-                      Import JSON
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleExportJson}>
-                      Export JSON
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTxtExportDialogOpen(true)}>
-                      Export TXT
-                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <Database className="h-4 w-4 mr-2" /> Import / Export
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+                          <Upload className="h-4 w-4 mr-2" /> Import JSON…
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={handleExportJson}>
+                          <Download className="h-4 w-4 mr-2" /> Export JSON
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setTxtExportDialogOpen(true)}>
+                          <FileText className="h-4 w-4 mr-2" /> Export TXT
+                        </DropdownMenuItem>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>

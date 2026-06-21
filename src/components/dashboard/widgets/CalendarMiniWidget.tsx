@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  HoverCard,
+  HoverCardTrigger,
+  HoverCardContent
+} from '@/components/ui/hover-card';
 import { WidgetWrapper } from '../WidgetWrapper';
 import { cn } from '@/lib/utils';
 import type { WidgetProps } from '@/lib/dashboard';
@@ -8,6 +13,7 @@ import type { WidgetProps } from '@/lib/dashboard';
 interface CalendarEvent {
   date: string;
   type: 'task' | 'birthday' | 'subscription' | 'countdown';
+  label: string;
 }
 
 interface CalendarMiniWidgetProps extends WidgetProps {
@@ -61,6 +67,13 @@ export function CalendarMiniWidget({
     return colors[type] || 'bg-muted';
   };
 
+  const typeLabels: Record<string, string> = {
+    task: 'Task',
+    birthday: 'Birthday',
+    subscription: 'Renewal',
+    countdown: 'Countdown'
+  };
+
   const isToday = (day: number) => {
     const today = new Date();
     return (
@@ -87,13 +100,13 @@ export function CalendarMiniWidget({
     const dayEvents = getEventsForDate(day);
     const today = isToday(day);
 
-    days.push(
+    const dayButton = (
       <button
         key={day}
         onClick={() => handleDayClick(day)}
         className={cn(
-          'h-10 md:h-12 p-1 flex flex-col items-center justify-center rounded-lg transition-colors hover:bg-muted',
-          today && 'bg-primary/10 font-bold'
+          'h-10 md:h-12 w-full p-1 flex flex-col items-center justify-center rounded-lg transition-colors hover:bg-muted',
+          today && 'bg-primary/10 font-bold ring-1 ring-primary/40'
         )}
       >
         <span className={cn('text-sm', today && 'text-primary')}>{day}</span>
@@ -108,6 +121,34 @@ export function CalendarMiniWidget({
           </div>
         )}
       </button>
+    );
+
+    days.push(
+      dayEvents.length > 0 ? (
+        <HoverCard key={day} openDelay={80} closeDelay={60}>
+          <HoverCardTrigger asChild>{dayButton}</HoverCardTrigger>
+          <HoverCardContent align="center" className="w-60 p-3">
+            <p className="text-xs font-semibold text-muted-foreground mb-2">
+              {monthNames[month]} {day}
+            </p>
+            <div className="space-y-1.5">
+              {dayEvents.map((event, idx) => (
+                <div key={idx} className="flex items-center gap-2 text-sm">
+                  <span
+                    className={cn('h-2 w-2 rounded-full flex-shrink-0', getEventDotColor(event.type))}
+                  />
+                  <span className="flex-1 truncate text-foreground">{event.label}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
+                    {typeLabels[event.type]}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </HoverCardContent>
+        </HoverCard>
+      ) : (
+        dayButton
+      )
     );
   }
 
