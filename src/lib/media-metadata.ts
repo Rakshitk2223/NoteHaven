@@ -182,15 +182,44 @@ export async function removeCoverImage(mediaId: number): Promise<boolean> {
   }
 }
 
-// Pick the richest single source for a type's metadata/season structure.
-// Mirrors the backfill script: keyless sources that carry per-episode names +
-// cast where possible (Jikan for anime, TVmaze for live-action TV).
-function metadataSourceFor(type: string): string {
+// Ordered list of sources to try for a type's metadata, best-coverage first.
+// The refresh tries them in order and fills each blank field from the first
+// source that carries it — so one API missing a title (or rate-limiting) no
+// longer leaves the item with no data. Earlier the refresh used a single source
+// per type with no fallback, which is why so much media stayed blank:
+//   - anime: Jikan alone rate-limits (429s) and its slow episode/cast enrichment
+//     could time out and drop the base synopsis. AniList (keyless, reliable)
+//     now leads and returns synopsis+episodes+genres+rating in one call; Jikan
+//     follows for episode names/cast + as a fallback.
+//   - kdrama/jdrama/series: TVmaze has thin K-drama coverage. TMDB now leads.
+function metadataSourcesFor(type: string): string[] {
   const t = type.toLowerCase();
-  if (t === 'anime') return 'jikan';                                  // episode names + cast
-  if (['manga', 'manhwa', 'manhua'].includes(t)) return 'anilist';
-  if (['series', 'kdrama', 'jdrama'].includes(t)) return 'tvmaze';    // episode lists + cast, keyless
-  return 'tmdb'; // movie
+  if (t === 'anime') return ['anilist', 'jikan'];
+  if (['manga', 'manhwa', 'manhua'].includes(t)) return ['anilist', 'jikan', 'mangadex', 'mangaupdates'];
+  if (['kdrama', 'jdrama', 'series'].includes(t)) return ['tmdb', 'tvmaze'];
+  return ['tmdb']; // movie
+}
+
+// True when `top` already carries non-empty values for every field the user
+// ticked — lets the refresh stop early instead of hitting every fallback source.
+function hasAllWanted(top: Record<string, unknown>, o: RefreshOptions): boolean {
+  const ok = (v: unknown) => v != null && (Array.isArray(v) ? v.length > 0 : typeof v === 'string' ? v.trim().length > 0 : true);
+  if (o.descriptions && !ok(top.description)) return false;
+  if (o.ratings && !ok(top.rating)) return false;
+  if (o.status && !ok(top.status)) return false;
+  if (o.genres && !ok(top.genres)) return false;
+  if (o.seasons && !ok(top.episodes) && !ok(top.seasons) && !ok(top.chapters)) return false;
+  if (o.cast && !ok(top.cast_members)) return false;
+  return true;
+}
+
+// Fill blanks in `into` from `from` (first-source-wins per field).
+function mergeFill(into: Record<string, unknown>, from: Record<string, unknown>): Record<string, unknown> {
+  const empty = (v: unknown) => v == null || (Array.isArray(v) ? v.length === 0 : typeof v === 'string' ? v.trim().length === 0 : false);
+  for (const [k, v] of Object.entries(from)) {
+    if (empty(into[k]) && !empty(v)) into[k] = v;
+  }
+  return into;
 }
 
 // ---- progress vs total -----------------------------------------------------
@@ -359,16 +388,30 @@ async function refreshOne(
   //    repopulates the cache for all of these at once.
   if (wantsMetadata(opts)) {
     attempted = true;
-    const source = metadataSourceFor(item.type);
-    const url = `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(
-      item.type.toLowerCase()
-    )}&source=${source}`;
+
+    // Try each source for this type in order, merging blanks from later sources,
+    // and stop early once everything ticked is filled. One API missing the title
+    // (or rate-limiting) no longer leaves the item with no data.
+    let top: Record<string, unknown> | null = null;
+    for (const source of metadataSourcesFor(item.type)) {
+      if (top && hasAllWanted(top, opts)) break;
+      const url = `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(
+        item.type.toLowerCase()
+      )}&source=${source}`;
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const hit = data?.results?.[0];
+        if (!hit) continue;
+        top = top ? mergeFill(top, hit) : { ...hit };
+      } catch (error) {
+        devLog(`metadata source "${source}" failed for "${item.title}": ${String(error)}`);
+      }
+    }
 
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      if (res.ok) {
-        const data = await res.json();
-        const top = data?.results?.[0];
+      {
         if (top) {
           // For "fill gaps" we read the existing row so we only write blanks.
           let existing: Record<string, unknown> | null = null;
@@ -456,10 +499,8 @@ async function refreshOne(
             }
           }
         } else {
-          errored = true; // no match for this title from the chosen source
+          errored = true; // no match from any source for this title
         }
-      } else {
-        errored = true;
       }
     } catch (error) {
       errored = true;
