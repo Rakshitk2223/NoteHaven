@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Trash2, Gift, Edit, Search, Cake, Clock } from 'lucide-react';
+import { Plus, Trash2, Gift, Edit, Search, Cake, CalendarDays, PartyPopper } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -13,6 +14,26 @@ import { Stagger, StaggerItem } from "@/components/ui/motion";
 import { parseYMD, formatDateForDisplay } from '@/lib/date-utils';
 
 interface Birthday { id: number; name: string; date_of_birth: string; }
+
+// Western zodiac from month (1-12) + day. lastDay[m-1] = last day the sign that
+// *ends* in month m occupies; past it, the next sign begins.
+const ZODIAC_SIGNS = ['Capricorn', 'Aquarius', 'Pisces', 'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpio', 'Sagittarius', 'Capricorn'];
+const ZODIAC_EMOJI = ['♑', '♒', '♓', '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑'];
+const ZODIAC_LASTDAY = [19, 18, 20, 19, 20, 20, 22, 22, 21, 22, 21, 21];
+function zodiacFor(month: number, day: number) {
+  const i = day > ZODIAC_LASTDAY[month - 1] ? month : month - 1;
+  return { sign: ZODIAC_SIGNS[i], emoji: ZODIAC_EMOJI[i] };
+}
+
+const initials = (name: string) =>
+  name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
+
+const AVATAR_GRADIENTS = [
+  'from-indigo-500 to-cyan-400', 'from-rose-500 to-orange-400', 'from-emerald-500 to-teal-400',
+  'from-violet-500 to-fuchsia-400', 'from-blue-500 to-sky-400', 'from-amber-500 to-yellow-400',
+  'from-pink-500 to-rose-400', 'from-purple-500 to-indigo-400',
+];
+const gradientFor = (name: string) => AVATAR_GRADIENTS[(name.charCodeAt(0) || 0) % AVATAR_GRADIENTS.length];
 
 const Birthdays = () => {
   const [birthdays, setBirthdays] = useState<Birthday[]>([]);
@@ -121,37 +142,32 @@ const Birthdays = () => {
     return Math.ceil((target.getTime() - now.getTime()) / (1000*60*60*24));
   };
 
-  // Categorize birthdays
-  const categorizedBirthdays = useMemo(() => {
+  // The age the person turns on their NEXT birthday.
+  const turningAge = (iso: string) => {
+    const base = parseYMD(iso);
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    
-    const withDays = birthdays.map(b => ({
+    let nextYear = now.getFullYear();
+    const thisYear = new Date(now.getFullYear(), base.getMonth(), base.getDate());
+    if (thisYear.getTime() < now.getTime()) nextYear += 1;
+    return nextYear - base.getFullYear();
+  };
+
+  // Birthdays grouped for the redesigned layout: the nearest one (hero), this
+  // calendar month, and the full list sorted by who's up soonest.
+  const groups = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const withMeta = birthdays.map((b) => ({
       ...b,
       days: daysDifference(b.date_of_birth),
-      date: parseYMD(b.date_of_birth)
+      date: parseYMD(b.date_of_birth),
     }));
-    
-    // Get past birthdays (those that already happened this year)
-    const past = withDays
-      .filter(b => {
-        const thisYearBday = new Date(now.getFullYear(), b.date.getMonth(), b.date.getDate());
-        return thisYearBday.getTime() < now.getTime();
-      })
-      .sort((a, b) => {
-        const aDate = new Date(now.getFullYear(), a.date.getMonth(), a.date.getDate());
-        const bDate = new Date(now.getFullYear(), b.date.getMonth(), b.date.getDate());
-        return bDate.getTime() - aDate.getTime(); // Most recent first
-      })
-      .slice(0, 3);
-    
-    // Get upcoming birthdays
-    const upcoming = withDays
-      .filter(b => b.days >= 0)
-      .sort((a, b) => a.days - b.days)
-      .slice(0, 5);
-    
-    return { past, upcoming };
+    const bySoonest = [...withMeta].sort((a, b) => a.days - b.days);
+    const thisMonth = withMeta
+      .filter((b) => b.date.getMonth() === now.getMonth())
+      .sort((a, b) => a.date.getDate() - b.date.getDate());
+    return { next: bySoonest[0] ?? null, thisMonth, all: bySoonest };
   }, [birthdays]);
 
   // Filtered birthdays based on search
@@ -194,58 +210,71 @@ const Birthdays = () => {
     : 31;
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-  const BirthdayCard = ({ birthday, showAge = true }: { birthday: Birthday; showAge?: boolean }) => {
+  const BirthdayCard = ({ birthday }: { birthday: Birthday }) => {
     const date = parseYMD(birthday.date_of_birth);
     const days = daysDifference(birthday.date_of_birth);
-    const now = new Date();
-    let age = now.getFullYear() - date.getFullYear();
-    const thisYearBday = new Date(now.getFullYear(), date.getMonth(), date.getDate());
-    // If birthday hasn't occurred yet this year, subtract 1 from age
-    if (thisYearBday.getTime() > now.getTime()) {
-      age -= 1;
-    }
-    const isPast = days > 300; // More than 300 days means it was recent past
-    
+    const age = turningAge(birthday.date_of_birth);
+    const z = zodiacFor(date.getMonth() + 1, date.getDate());
+    const isToday = days === 0;
+    const soon = days > 0 && days <= 7;
+
     return (
-      <div className="group relative p-4 rounded-xl bg-gradient-to-br from-card to-card/50 border-2 border-border hover:border-border-strong transition-all hover:shadow-lg">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-lg mb-1 truncate">{birthday.name}</h3>
-            <p className="text-sm text-muted-foreground mb-2">
-              {formatDateForDisplay(birthday.date_of_birth)}
-            </p>
-            <div className="flex items-center gap-2 flex-wrap">
-              {showAge && (
-                <Badge variant="neutral">
-                  {age} years old
-                </Badge>
-              )}
-              <Badge
-                variant={days === 0 ? 'accent' : isPast ? 'neutral' : days <= 7 ? 'warning' : 'neutral'}
-                className={days === 0 ? 'animate-pulse bg-primary/15 text-primary' : undefined}
-              >
-                {days === 0 ? '🎉 Today!' : isPast ? `Was ${365 - days} days ago` : `In ${days} days`}
-              </Badge>
-            </div>
-          </div>
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => openEditModal(birthday)}
-              className="h-9 w-9 hover:bg-secondary"
-            >
-              <Edit className="h-4 w-4" />
-            </Button>
-            <Button 
-              size="icon" 
-              variant="ghost" 
-              onClick={() => setDeleteConfirm({ open: true, id: birthday.id })} 
-              className="h-9 w-9 text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
+      <div className={cn('zen-card group relative flex items-center gap-3 p-4', isToday && 'ring-1 ring-primary/50 shadow-glow')}>
+        <div className={cn('grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br text-base font-bold text-white shadow-md', gradientFor(birthday.name))}>
+          {initials(birthday.name)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-semibold leading-tight">{birthday.name}</p>
+          <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+            <span title={z.sign}>{z.emoji}</span>{formatDateForDisplay(birthday.date_of_birth)} · turns {age}
+          </p>
+          <span className={cn(
+            'mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
+            isToday ? 'animate-pulse bg-primary/15 text-primary' : soon ? 'bg-warning/15 text-warning' : 'bg-secondary/60 text-muted-foreground',
+          )}>
+            {isToday ? '🎉 Today!' : `In ${days} ${days === 1 ? 'day' : 'days'}`}
+          </span>
+        </div>
+        <div className="flex flex-shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <Button size="icon" variant="ghost" onClick={() => openEditModal(birthday)} className="h-8 w-8 hover:bg-secondary">
+            <Edit className="h-4 w-4" />
+          </Button>
+          <Button size="icon" variant="ghost" onClick={() => setDeleteConfirm({ open: true, id: birthday.id })} className="h-8 w-8 text-destructive hover:bg-destructive/10">
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const HeroBirthday = ({ birthday }: { birthday: Birthday }) => {
+    const date = parseYMD(birthday.date_of_birth);
+    const days = daysDifference(birthday.date_of_birth);
+    const age = turningAge(birthday.date_of_birth);
+    const z = zodiacFor(date.getMonth() + 1, date.getDate());
+    const isToday = days === 0;
+
+    return (
+      <div className="aurora-card relative flex items-center gap-5 overflow-hidden p-5 sm:p-6">
+        <div className={cn('grid h-16 w-16 flex-shrink-0 place-items-center rounded-2xl bg-gradient-to-br text-2xl font-bold text-white shadow-lg sm:h-20 sm:w-20', gradientFor(birthday.name))}>
+          {initials(birthday.name)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
+            <PartyPopper className="h-3.5 w-3.5" /> Next birthday
+          </p>
+          <h2 className="truncate text-xl font-bold sm:text-2xl">{birthday.name}</h2>
+          <p className="truncate text-sm text-muted-foreground">{z.emoji} {z.sign} · {formatDateForDisplay(birthday.date_of_birth)} · turns {age}</p>
+        </div>
+        <div className="flex-shrink-0 text-right">
+          {isToday ? (
+            <p className="animate-pulse text-2xl font-bold text-primary">🎉<br />Today!</p>
+          ) : (
+            <>
+              <p className="gradient-text text-4xl font-bold tabular-nums sm:text-5xl">{days}</p>
+              <p className="text-xs text-muted-foreground">{days === 1 ? 'day' : 'days'} away</p>
+            </>
+          )}
         </div>
       </div>
     );
@@ -291,15 +320,15 @@ const Birthdays = () => {
               </div>
             ) : searchQuery ? (
               /* Search Results */
-              <div className="zen-card p-6">
-                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                  <Search className="h-5 w-5" />
-                  Search Results ({filteredBirthdays.length})
+              <div>
+                <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+                  <Search className="h-5 w-5 text-muted-foreground" />
+                  Results ({filteredBirthdays.length})
                 </h2>
                 {filteredBirthdays.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8">No birthdays found matching "{searchQuery}"</p>
+                  <p className="py-8 text-center text-muted-foreground">No birthdays found matching "{searchQuery}"</p>
                 ) : (
-                  <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {filteredBirthdays.map(b => (
                       <StaggerItem key={b.id} hover={false}>
                         <BirthdayCard birthday={b} />
@@ -310,62 +339,40 @@ const Birthdays = () => {
               </div>
             ) : (
               <>
-                {/* Upcoming Birthdays */}
-                <div className="zen-card p-6">
-                  <h2 className="text-xl font-semibold mb-5 flex items-center gap-2">
-                    <Cake className="h-5 w-5 text-muted-foreground" />
-                    Upcoming Birthdays
-                  </h2>
-                  {categorizedBirthdays.upcoming.length === 0 ? (
-                    <p className="text-muted-foreground text-center py-8">No upcoming birthdays</p>
-                  ) : (
-                    <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {categorizedBirthdays.upcoming.map(b => (
-                        <StaggerItem key={b.id} hover={false}>
-                          <BirthdayCard birthday={b} />
-                        </StaggerItem>
-                      ))}
-                    </Stagger>
-                  )}
-                </div>
+                {/* Hero — whoever's up next */}
+                {groups.next && <HeroBirthday birthday={groups.next} />}
 
-                {/* Recent Past Birthdays */}
-                {categorizedBirthdays.past.length > 0 && (
-                  <div className="zen-card p-6">
-                    <h2 className="text-xl font-semibold mb-5 flex items-center gap-2">
-                      <Clock className="h-5 w-5 text-muted-foreground" />
-                      Recent Birthdays
+                {/* This month */}
+                {groups.thisMonth.length > 0 && (
+                  <section>
+                    <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+                      <Cake className="h-5 w-5 text-primary" /> This month
+                      <span className="text-sm font-normal text-muted-foreground">({groups.thisMonth.length})</span>
                     </h2>
-                    <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {categorizedBirthdays.past.map(b => (
+                    <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {groups.thisMonth.map(b => (
                         <StaggerItem key={b.id} hover={false}>
                           <BirthdayCard birthday={b} />
                         </StaggerItem>
                       ))}
                     </Stagger>
-                  </div>
+                  </section>
                 )}
 
-                {/* All Birthdays */}
-                <div className="zen-card p-6">
-                  <h2 className="text-xl font-semibold mb-5 flex items-center gap-2">
-                    <Gift className="h-5 w-5 text-muted-foreground" />
-                    All Birthdays ({birthdays.length})
+                {/* All — sorted by who's soonest */}
+                <section>
+                  <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+                    <CalendarDays className="h-5 w-5 text-muted-foreground" /> All birthdays
+                    <span className="text-sm font-normal text-muted-foreground">· soonest first</span>
                   </h2>
-                  <Stagger className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {birthdays
-                      .sort((a, b) => {
-                        const aDate = parseYMD(a.date_of_birth);
-                        const bDate = parseYMD(b.date_of_birth);
-                        return aDate.getMonth() - bDate.getMonth() || aDate.getDate() - bDate.getDate();
-                      })
-                      .map(b => (
-                        <StaggerItem key={b.id} hover={false}>
-                          <BirthdayCard birthday={b} showAge={false} />
-                        </StaggerItem>
-                      ))}
+                  <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {groups.all.map(b => (
+                      <StaggerItem key={b.id} hover={false}>
+                        <BirthdayCard birthday={b} />
+                      </StaggerItem>
+                    ))}
                   </Stagger>
-                </div>
+                </section>
               </>
             )}
       </div>
