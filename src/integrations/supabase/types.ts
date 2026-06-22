@@ -83,6 +83,96 @@ export type Database = {
         }
         Relationships: []
       }
+      recipe_folders: {
+        Row: {
+          created_at: string
+          id: number
+          name: string
+          sort_order: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          name: string
+          sort_order?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          name?: string
+          sort_order?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      recipes: {
+        Row: {
+          category: string | null
+          cook_minutes: number | null
+          created_at: string
+          cuisine: string | null
+          description: string | null
+          difficulty: string | null
+          folder_id: number | null
+          id: number
+          image_url: string | null
+          ingredients: string[]
+          instructions: string | null
+          is_favorite: boolean | null
+          prep_minutes: number | null
+          servings: number | null
+          sort_order: number | null
+          source_url: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          cook_minutes?: number | null
+          created_at?: string
+          cuisine?: string | null
+          description?: string | null
+          difficulty?: string | null
+          folder_id?: number | null
+          id?: number
+          image_url?: string | null
+          ingredients?: string[]
+          instructions?: string | null
+          is_favorite?: boolean | null
+          prep_minutes?: number | null
+          servings?: number | null
+          sort_order?: number | null
+          source_url?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          cook_minutes?: number | null
+          created_at?: string
+          cuisine?: string | null
+          description?: string | null
+          difficulty?: string | null
+          folder_id?: number | null
+          id?: number
+          image_url?: string | null
+          ingredients?: string[]
+          instructions?: string | null
+          is_favorite?: boolean | null
+          prep_minutes?: number | null
+          servings?: number | null
+          sort_order?: number | null
+          source_url?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       code_snippet_tags: {
         Row: {
           snippet_id: number

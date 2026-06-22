@@ -19,6 +19,7 @@ const DEFAULT_ORDER: SidebarItem[] = [
   { name: 'Vault', href: '/vault' },
   { name: 'Birthdays', href: '/birthdays' },
   { name: 'Bucket List', href: '/bucket-list' },
+  { name: 'Recipes', href: '/recipes' },
   { name: 'Money Ledger', href: '/ledger' },
   { name: 'Subscriptions', href: '/subscriptions' },
 ];
