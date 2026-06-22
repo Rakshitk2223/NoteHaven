@@ -1,10 +1,11 @@
-// "Refresh Library" sweep dialog. Tick which fields to pull fresh from the
-// external APIs, then run a batched refresh across the whole (or filtered)
-// library with a live progress bar. New-season detection runs when "Seasons &
-// episodes" is ticked.
+// "Refresh Library" configurator. Tick which fields to pull fresh, optionally
+// force-overwrite, then launch — the actual sweep runs in the global
+// RefreshActivityProvider (so it survives navigation) and this dialog sends you
+// to Settings → Sync activity to watch live progress in the background.
 
-import { useEffect, useState } from 'react';
-import { RefreshCw, ImageIcon, ListVideo, FileText, Users, Tags, Star, Radio } from 'lucide-react';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { RefreshCw, ImageIcon, ListVideo, FileText, Users, Tags, Star, Radio, Activity } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -15,15 +16,10 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
-import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
-import {
-  refreshLibrary,
-  type RefreshOptions,
-  type RefreshProgress,
-} from '@/lib/media-metadata';
+import { useRefreshActivity } from '@/contexts/RefreshActivityContext';
+import type { RefreshOptions } from '@/lib/media-metadata';
 
 const STORAGE_KEY = 'media_refresh_options_v1';
 
@@ -61,13 +57,9 @@ interface SweepItem {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /**
-   * Resolves the full set of items to sweep at run time. Returning a promise
-   * (rather than a static array) lets the page page through the whole library —
-   * not just the items currently loaded into the infinite-scroll grid.
-   */
+  /** Resolves the full set of items to sweep at run time (pages the whole library). */
   fetchItems: () => Promise<SweepItem[]>;
-  /** Expected number of items (for the label + button before the fetch runs). */
+  /** Expected number of items (for the button label). */
   count: number;
   /** Label describing the scope, e.g. "all 124 items" or "42 filtered items". */
   scopeLabel: string;
@@ -87,19 +79,12 @@ const FIELDS: Array<{ key: keyof RefreshOptions; label: string; hint: string; Ic
 
 export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, scopeLabel, onComplete }: Props) {
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const activity = useRefreshActivity();
   const [opts, setOpts] = useState<RefreshOptions>(loadOpts);
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<RefreshProgress | null>(null);
-
-  // Reset any previous run's progress each time the dialog is reopened, so it
-  // doesn't show a stale "Done 200/200" from last time.
-  useEffect(() => {
-    if (open) setProgress(null);
-  }, [open]);
 
   // `force` is a modifier, not a field to fetch — ignore it here.
   const anyChecked = FIELDS.some(({ key }) => opts[key]);
-  const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
   const toggle = (key: keyof RefreshOptions) =>
     setOpts((prev) => {
@@ -108,123 +93,80 @@ export function RefreshLibraryDialog({ open, onOpenChange, fetchItems, count, sc
       return next;
     });
 
-  const run = async () => {
-    if (!anyChecked) return;
-    setRunning(true);
-    const zero = { done: 0, total: count, updated: 0, failed: 0, skipped: 0, newContent: 0, failedTitles: [] as string[] };
-    setProgress(zero);
-    try {
-      const items = await fetchItems();
-      if (items.length === 0) {
-        toast({ title: 'Nothing to refresh', description: 'No items in scope.' });
-        setProgress(null);
-        return;
-      }
-      setProgress({ ...zero, total: items.length });
-      const result = await refreshLibrary(opts, items, (p) => setProgress({ ...p }));
-      toast({
-        title: 'Library refreshed',
-        description: `${result.updated} updated` +
-          (result.failed > 0 ? ` · ${result.failed} no match` : '') +
-          (result.newContent > 0 ? ` · ${result.newContent} new seasons 🎉` : ''),
-      });
-      onComplete();
-    } catch (error) {
-      console.error('refreshLibrary failed', error);
-      toast({ title: 'Refresh failed', description: 'Please try again later', variant: 'destructive' });
-    } finally {
-      setRunning(false);
-    }
+  const goToActivity = () => {
+    onOpenChange(false);
+    navigate('/settings?section=sync');
+  };
+
+  const run = () => {
+    if (!anyChecked || activity.running) return;
+    activity.start({ fetchItems, opts, scopeLabel, onComplete });
+    toast({ title: 'Refresh started', description: 'Running in the background — track it in Sync activity.' });
+    goToActivity();
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!running) onOpenChange(o); }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <RefreshCw className={running ? 'h-5 w-5 animate-spin' : 'h-5 w-5'} />
+            <RefreshCw className="h-5 w-5" />
             Refresh Library
           </DialogTitle>
           <DialogDescription>
-            Pull fresh data for {scopeLabel} from the media databases. Pick what to update.
+            Pull fresh data for {scopeLabel} from the media databases. Pick what to update — it runs in the background.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 py-2">
-          {FIELDS.map(({ key, label, hint, Icon }) => (
-            <label
-              key={key}
-              htmlFor={`refresh-${key}`}
-              className="flex items-start gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/50 transition-colors"
-            >
-              <Checkbox
-                id={`refresh-${key}`}
-                checked={opts[key]}
-                onCheckedChange={() => toggle(key)}
-                disabled={running}
-                className="mt-0.5"
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                  {label}
+        {activity.running ? (
+          <div className="space-y-3 py-2">
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+              <span>A refresh is already running{activity.progress ? ` (${activity.progress.done}/${activity.progress.total})` : ''}.</span>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3 py-2">
+            {FIELDS.map(({ key, label, hint, Icon }) => (
+              <label
+                key={key}
+                htmlFor={`refresh-${key}`}
+                className="flex items-start gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+              >
+                <Checkbox id={`refresh-${key}`} checked={opts[key]} onCheckedChange={() => toggle(key)} className="mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    {label}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>
+              </label>
+            ))}
+
+            <label htmlFor="refresh-force" className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border p-3 cursor-pointer">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">Force re-fetch</div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {opts.force ? 'Overwrites existing values with fresh data.' : 'Off — only fills blanks; never overwrites what you already have.'}
+                </p>
               </div>
+              <Switch id="refresh-force" checked={!!opts.force} onCheckedChange={() => toggle('force')} />
             </label>
-          ))}
-
-          <label
-            htmlFor="refresh-force"
-            className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border p-3 cursor-pointer"
-          >
-            <div className="min-w-0">
-              <div className="text-sm font-medium">Force re-fetch</div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {opts.force
-                  ? 'Overwrites existing values with fresh data.'
-                  : 'Off — only fills blanks; never overwrites what you already have.'}
-              </p>
-            </div>
-            <Switch
-              id="refresh-force"
-              checked={!!opts.force}
-              onCheckedChange={() => toggle('force')}
-              disabled={running}
-            />
-          </label>
-        </div>
-
-        {progress && (
-          <div className="space-y-1.5">
-            <Progress value={pct} />
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>{running ? 'Refreshing…' : 'Done'} {progress.done} / {progress.total}</span>
-              <span className="flex items-center gap-2">
-                <span className="text-success">{progress.updated} updated</span>
-                {progress.failed > 0 && <span className="text-destructive">{progress.failed} no match</span>}
-                {progress.skipped > 0 && <span>{progress.skipped} skipped</span>}
-                {progress.newContent > 0 && <span className="text-success">{progress.newContent} new</span>}
-              </span>
-            </div>
-            {!running && progress.failed > 0 && progress.failedTitles.length > 0 && (
-              <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer hover:text-foreground">
-                  {progress.failed} couldn't be matched{progress.failedTitles.length < progress.failed ? ' (showing first 25)' : ''}
-                </summary>
-                <p className="mt-1 max-h-24 overflow-y-auto leading-relaxed">{progress.failedTitles.join(', ')}</p>
-              </details>
-            )}
           </div>
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={running}>
-            {progress && !running ? 'Close' : 'Cancel'}
-          </Button>
-          <Button onClick={run} disabled={running || !anyChecked || count === 0}>
-            {running ? 'Refreshing…' : `Refresh ${count} item${count === 1 ? '' : 's'}`}
-          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          {activity.running ? (
+            <Button onClick={goToActivity}>
+              <Activity className="h-4 w-4 mr-2" /> View activity
+            </Button>
+          ) : (
+            <Button onClick={run} disabled={!anyChecked || count === 0}>
+              Refresh {count} item{count === 1 ? '' : 's'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

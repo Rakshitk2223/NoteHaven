@@ -278,7 +278,7 @@ export interface RefreshProgress {
   failedTitles: string[]; // capped sample of titles that failed, for the summary
 }
 
-interface SweepItem {
+export interface SweepItem {
   id: number;
   title: string;
   type: string;
@@ -288,6 +288,16 @@ interface SweepItem {
   current_chapter?: number | null;
   last_known_total_episodes?: number | null;
   last_known_total_seasons?: number | null;
+}
+
+export type ItemOutcome = 'updated' | 'failed' | 'skipped';
+
+/** Per-item result streamed during a sweep (for the live Sync Activity view). */
+export interface RefreshItemResult {
+  id: number;
+  title: string;
+  type: string;
+  outcome: ItemOutcome;
 }
 
 const wantsMetadata = (o: RefreshOptions) =>
@@ -301,7 +311,8 @@ const wantsMetadata = (o: RefreshOptions) =>
 export async function refreshLibrary(
   opts: RefreshOptions,
   items: SweepItem[],
-  onProgress?: (p: RefreshProgress) => void
+  onProgress?: (p: RefreshProgress) => void,
+  onItem?: (r: RefreshItemResult) => void
 ): Promise<RefreshProgress> {
   const { data: { user } } = await supabase.auth.getUser();
   const progress: RefreshProgress = { done: 0, total: items.length, updated: 0, failed: 0, skipped: 0, newContent: 0, failedTitles: [] };
@@ -326,14 +337,13 @@ export async function refreshLibrary(
       } else progress.skipped += 1;
       progress.done += 1;
       onProgress?.({ ...progress, failedTitles: [...progress.failedTitles] });
+      onItem?.({ id: item.id, title: item.title, type: item.type, outcome });
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker));
   return progress;
 }
-
-type ItemOutcome = 'updated' | 'failed' | 'skipped';
 
 async function refreshOne(
   item: SweepItem,

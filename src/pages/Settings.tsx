@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Settings as SettingsIcon, Search, User, Palette, Accessibility,
-  SlidersHorizontal, Globe, LayoutDashboard, PanelLeft, Keyboard, Lock, Database, Info,
+  SlidersHorizontal, Globe, LayoutDashboard, PanelLeft, Keyboard, Lock, Database, Info, Activity,
 } from 'lucide-react';
 import { PageShell } from '@/components/PageShell';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,7 @@ import { KeyboardSection } from '@/pages/settings/KeyboardSection';
 import { SecuritySection } from '@/pages/settings/SecuritySection';
 import { DataSection } from '@/pages/settings/DataSection';
 import { AboutSection } from '@/pages/settings/AboutSection';
+import { SyncActivitySection } from '@/pages/settings/SyncActivitySection';
 
 interface SectionDef {
   id: string;
@@ -41,6 +42,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'keyboard', label: 'Keyboard', icon: Keyboard, keywords: 'shortcuts command palette keys', Component: KeyboardSection },
   { id: 'security', label: 'Security', icon: Lock, keywords: 'password change', Component: SecuritySection },
   { id: 'data', label: 'Data', icon: Database, keywords: 'export import backup cache storage vault restore', Component: DataSection },
+  { id: 'sync', label: 'Sync activity', icon: Activity, keywords: 'refresh media library background status updated failed sync metadata', Component: SyncActivitySection },
   { id: 'about', label: 'About', icon: Info, keywords: 'version environment links weebslist', Component: AboutSection },
 ];
 
