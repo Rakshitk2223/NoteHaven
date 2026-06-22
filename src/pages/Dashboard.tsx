@@ -458,17 +458,17 @@ const Dashboard = () => {
       });
     });
 
-    // Birthdays: next occurrence (this year, or next if already passed).
+    // Birthdays: place on the actual day for BOTH this year and next, so the
+    // dot shows whether the birthday is earlier or later in the viewed month
+    // (and still appears when paging into next year, e.g. January birthdays).
     birthdays.forEach((birthday) => {
       const base = parseYMD(birthday.date_of_birth);
-      const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
-      if (target.getTime() < todayStart.getTime()) {
-        target.setFullYear(now.getFullYear() + 1);
-      }
-      events.push({
-        date: dateToYMD(target),
-        type: 'birthday',
-        label: `${birthday.name}'s birthday`
+      [now.getFullYear(), now.getFullYear() + 1].forEach((yr) => {
+        events.push({
+          date: dateToYMD(new Date(yr, base.getMonth(), base.getDate())),
+          type: 'birthday',
+          label: `${birthday.name}'s birthday`,
+        });
       });
     });
 

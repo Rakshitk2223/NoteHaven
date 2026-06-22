@@ -1015,7 +1015,7 @@ const MediaTracker = () => {
     if (selectedItems.length === 0) return;
     const ids = selectedItems.map((i) => i.id);
     try {
-      const { error } = await supabase.from('media_tracker').update({ status: newStatus }).in('id', ids);
+      const { error } = await supabase.from('media_tracker').update({ status: newStatus, last_activity_at: new Date().toISOString() }).in('id', ids);
       if (error) throw error;
       toast({ title: 'Status updated', description: `${ids.length} items set to ${newStatus}` });
       clearSelection();
@@ -1147,7 +1147,7 @@ const MediaTracker = () => {
     });
 
     try {
-      const { error } = await supabase.from('media_tracker').update({ [field]: newValue }).eq('id', item.id);
+      const { error } = await supabase.from('media_tracker').update({ [field]: newValue, last_activity_at: new Date().toISOString() }).eq('id', item.id);
       if (error) throw error;
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
     } catch (e: unknown) {
@@ -1177,7 +1177,7 @@ const MediaTracker = () => {
       } : old,
     );
     try {
-      const { error } = await supabase.from('media_tracker').update(patch).eq('id', item.id);
+      const { error } = await supabase.from('media_tracker').update({ ...patch, last_activity_at: new Date().toISOString() }).eq('id', item.id);
       if (error) throw error;
     } catch (e: unknown) {
       queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
@@ -1462,7 +1462,7 @@ const MediaTracker = () => {
 
       const { error } = await supabase
         .from('media_tracker')
-        .update(mediaData)
+        .update({ ...mediaData, last_activity_at: new Date().toISOString() })
         .eq('id', editingItem.id);
 
       if (error) {

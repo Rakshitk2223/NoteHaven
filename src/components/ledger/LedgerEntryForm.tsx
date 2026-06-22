@@ -1,7 +1,14 @@
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 import type { LedgerCategory } from '@/lib/ledger';
 import type { LedgerAccount } from '@/lib/accounts';
+
+const TYPES: Array<{ value: LedgerEntryFormData['type']; label: string }> = [
+  { value: 'income', label: 'Income' },
+  { value: 'expense', label: 'Expense' },
+  { value: 'transfer', label: 'Transfer' },
+];
 
 export interface LedgerEntryFormData {
   type: 'income' | 'expense' | 'transfer';
@@ -47,19 +54,29 @@ export function LedgerEntryForm({ value, onChange, categories, accounts = [], on
     <div className="grid gap-4 py-4">
       <div className="grid gap-2">
         <label className="text-sm font-medium">Type</label>
-        <Select value={value.type} onValueChange={(v: LedgerEntryFormData['type']) => set({ type: v })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="income">Income</SelectItem>
-            <SelectItem value="expense">Expense</SelectItem>
-            <SelectItem value="transfer">Transfer (between accounts)</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-secondary/50 p-1">
+          {TYPES.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => set({ type: t.value })}
+              className={cn(
+                'rounded-md py-1.5 text-sm font-medium transition-colors',
+                value.type === t.value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="grid gap-2">
         <label className="text-sm font-medium">Amount</label>
-        <Input type="number" step="0.01" placeholder="0.00" value={value.amount} onChange={(e) => set({ amount: e.target.value })} />
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
+          <Input type="number" step="0.01" placeholder="0.00" value={value.amount} onChange={(e) => set({ amount: e.target.value })} className="pl-7 text-lg font-semibold tabular-nums" />
+        </div>
       </div>
 
       {/* Category — not used for transfers */}
