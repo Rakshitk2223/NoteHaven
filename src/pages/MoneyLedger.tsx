@@ -1,574 +1,421 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2, ArrowLeftRight, ChevronDown } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
-} from '@/components/ui/dropdown-menu';
+  Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2,
+  ArrowLeftRight, ChevronDown, Landmark, Banknote, CreditCard, Settings2, Repeat,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 import { PageShell } from '@/components/PageShell';
 import { Stagger, StaggerItem } from '@/components/ui/motion';
+import { cn } from '@/lib/utils';
+import { parseYMD, dateToYMD } from '@/lib/date-utils';
 import {
-  fetchLedgerEntries, 
-  createLedgerEntry,
-  updateLedgerEntry,
-  deleteLedgerEntry,
-  calculateLedgerSummary,
-  formatCurrency,
-  formatDateDDMMYYYY,
-  getMonthName,
-  exportToCSV,
-  exportToJSON,
-  downloadFile,
-  type LedgerEntry,
-  type LedgerCategory
+  fetchLedgerEntries, createLedgerEntry, updateLedgerEntry, deleteLedgerEntry,
+  formatCurrency, formatDateDDMMYYYY, getMonthName, exportToCSV, exportToJSON, downloadFile,
+  deriveSubscriptionCharges, sumSubscriptionCharges,
+  type LedgerEntry, type LedgerCategory, type SubscriptionLike,
 } from '@/lib/ledger';
+import {
+  fetchAccounts, ensureAccountsExist, computeAccountBalances, computeMoneyInHand,
+  type LedgerAccount, type AccountKind,
+} from '@/lib/accounts';
 import { ensureLedgerCategoriesExist } from '@/lib/category-init';
+import { fetchSubscriptions } from '@/lib/subscriptions';
 import { TagBadge } from '@/components/TagBadge';
-import { LedgerEntryForm } from '@/components/ledger/LedgerEntryForm';
+import { LedgerEntryForm, type LedgerEntryFormData } from '@/components/ledger/LedgerEntryForm';
 import { LedgerCharts } from '@/components/ledger/LedgerCharts';
-import { BucketsSection } from '@/components/ledger/BucketsSection';
-import { ensureBucketsExist, fetchBuckets, type LedgerBucket } from '@/lib/buckets';
+import { AccountsManager } from '@/components/ledger/AccountsManager';
+
+const KIND_ICON: Record<AccountKind, typeof Landmark> = { bank: Landmark, cash: Banknote, card: CreditCard };
+
+const emptyForm = (): LedgerEntryFormData => ({
+  type: 'expense', amount: '', category_id: '', description: '',
+  transaction_date: dateToYMD(new Date()), account_id: '', to_account_id: '',
+});
 
 const MoneyLedger = () => {
-  const navigate = useNavigate();
   const { toast } = useToast();
 
-  // State
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [categories, setCategories] = useState<LedgerCategory[]>([]);
-  const [buckets, setBuckets] = useState<LedgerBucket[]>([]);
-  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
-  
-  // Modal state
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
-  const [newEntry, setNewEntry] = useState({
-    type: 'expense' as 'income' | 'expense' | 'transfer',
-    amount: '',
-    category_id: '',
-    description: '',
-    transaction_date: new Date().toISOString().split('T')[0],
-    notes: '',
-    bucket_id: '',
-    from_bucket_id: ''
-  });
-  const [editFormData, setEditFormData] = useState({
-    type: 'expense' as 'income' | 'expense' | 'transfer',
-    amount: '',
-    category_id: '',
-    description: '',
-    transaction_date: '',
-    notes: '',
-    bucket_id: '',
-    from_bucket_id: ''
-  });
+  const [accounts, setAccounts] = useState<LedgerAccount[]>([]);
+  const [subs, setSubs] = useState<SubscriptionLike[]>([]);
 
-  // Load data
-  useEffect(() => {
-    loadData();
-  }, [selectedMonth, selectedYear]);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
+  const [newEntry, setNewEntry] = useState<LedgerEntryFormData>(emptyForm);
+  const [editForm, setEditForm] = useState<LedgerEntryFormData>(emptyForm);
+
+  useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      
-      // Fetch entries and ensure categories + buckets exist
-      const [entriesData, categoriesData, bucketsData] = await Promise.all([
+      const [entriesData, cats, accs, subscriptions] = await Promise.all([
         fetchLedgerEntries(),
         ensureLedgerCategoriesExist(),
-        ensureBucketsExist()
+        ensureAccountsExist(),
+        fetchSubscriptions().catch(() => []),
       ]);
-
       setEntries(entriesData);
-      setCategories(categoriesData);
-      setBuckets(bucketsData);
+      setCategories(cats);
+      setAccounts(accs);
+      setSubs((subscriptions as Array<Record<string, unknown>>).map((s) => ({
+        id: Number(s.id),
+        name: String(s.name ?? ''),
+        amount: Number(s.amount ?? 0),
+        billing_cycle: String(s.billing_cycle ?? 'monthly'),
+        start_date: String(s.start_date ?? ''),
+        end_date: (s.end_date as string) ?? null,
+        status: (s.status as string) ?? null,
+        ledger_category_id: (s.ledger_category_id as number) ?? null,
+      })));
     } catch (error) {
       console.error('Error loading ledger data:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load ledger data',
-        variant: 'destructive'
-      });
+      toast({ title: 'Error', description: 'Failed to load ledger data', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
 
-  // Reload buckets after add/edit/delete in BucketsSection
-  const reloadBuckets = async () => {
-    try {
-      setBuckets(await fetchBuckets());
-    } catch (error) {
-      console.error('Error reloading buckets:', error);
-    }
+  const reloadAccounts = async () => { try { setAccounts(await fetchAccounts()); } catch { /* ignore */ } };
+  const refreshCategories = async () => { try { setCategories(await ensureLedgerCategoriesExist()); toast({ title: 'Categories refreshed' }); } catch { /* ignore */ } };
+
+  // ---- derived (cumulative) ----
+  const subCharges = useMemo(() => deriveSubscriptionCharges(subs), [subs]);
+  const subTotal = useMemo(() => sumSubscriptionCharges(subCharges), [subCharges]);
+  const moneyInHand = useMemo(() => computeMoneyInHand(accounts, entries, subTotal), [accounts, entries, subTotal]);
+  const accountBalances = useMemo(() => computeAccountBalances(entries, accounts), [entries, accounts]);
+  const tilesSum = accountBalances.reduce((s, b) => s + b.balance, 0);
+  const otherBalance = moneyInHand - tilesSum; // legacy unassigned entries + subscription charges
+  const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
+
+  const inMonth = (ymd: string) => {
+    const d = parseYMD(ymd);
+    return d.getMonth() + 1 === selectedMonth && d.getFullYear() === selectedYear;
   };
 
-  // Refresh categories (reload from server)
-  const refreshCategories = async () => {
-    try {
-      const categoriesData = await ensureLedgerCategoriesExist();
-      setCategories(categoriesData);
-      toast({ title: 'Categories refreshed' });
-    } catch (error) {
-      console.error('Error refreshing categories:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to refresh categories',
-        variant: 'destructive'
-      });
-    }
+  const monthEntries = useMemo(() => entries.filter((e) => inMonth(e.transaction_date)), [entries, selectedMonth, selectedYear]);
+  const monthSubs = useMemo(() => subCharges.filter((c) => inMonth(c.date)), [subCharges, selectedMonth, selectedYear]);
+  const monthIncome = monthEntries.filter((e) => e.type === 'income').reduce((s, e) => s + Number(e.amount), 0);
+  const monthExpense = monthEntries.filter((e) => e.type === 'expense').reduce((s, e) => s + Number(e.amount), 0)
+    + monthSubs.reduce((s, c) => s + c.amount, 0);
+
+  // Transaction rows for the month = real entries + derived subscription charges.
+  type Row = { kind: 'entry'; date: string; entry: LedgerEntry } | { kind: 'sub'; date: string; charge: typeof subCharges[number] };
+  const rows = useMemo<Row[]>(() => {
+    const entryRows: Row[] = monthEntries
+      .filter((e) => filterType === 'all' || e.type === filterType)
+      .map((e) => ({ kind: 'entry', date: e.transaction_date, entry: e }));
+    const subRows: Row[] = filterType === 'income' ? [] : monthSubs.map((c) => ({ kind: 'sub', date: c.date, charge: c }));
+    return [...entryRows, ...subRows].sort((a, b) => b.date.localeCompare(a.date));
+  }, [monthEntries, monthSubs, filterType]);
+
+  // ---- mutations ----
+  const buildPayload = (f: LedgerEntryFormData) => {
+    const isTransfer = f.type === 'transfer';
+    return {
+      type: f.type,
+      amount: parseFloat(f.amount),
+      category_id: isTransfer || !f.category_id ? null : parseInt(f.category_id),
+      description: f.description || null,
+      transaction_date: f.transaction_date,
+      is_recurring: false,
+      recurring_interval: null,
+      notes: null,
+      bucket_id: null,
+      from_bucket_id: null,
+      account_id: f.account_id ? parseInt(f.account_id) : null,
+      to_account_id: isTransfer && f.to_account_id ? parseInt(f.to_account_id) : null,
+    };
   };
 
-  // Filter entries by selected month/year
-  const filteredEntries = useMemo(() => {
-    return entries.filter(entry => {
-      const entryDate = new Date(entry.transaction_date);
-      const matchesMonth = entryDate.getMonth() + 1 === selectedMonth;
-      const matchesYear = entryDate.getFullYear() === selectedYear;
-      const matchesType = filterType === 'all' || entry.type === filterType;
-      return matchesMonth && matchesYear && matchesType;
-    }).sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
-  }, [entries, selectedMonth, selectedYear, filterType]);
+  const validate = (f: LedgerEntryFormData) => {
+    if (!f.amount) { toast({ title: 'Missing amount', description: 'Enter an amount.', variant: 'destructive' }); return false; }
+    if (f.type === 'transfer') {
+      if (!f.account_id || !f.to_account_id || f.account_id === f.to_account_id) {
+        toast({ title: 'Invalid transfer', description: 'Pick two different accounts.', variant: 'destructive' });
+        return false;
+      }
+    } else if (!f.category_id) {
+      toast({ title: 'Missing category', description: 'Pick a category.', variant: 'destructive' });
+      return false;
+    }
+    return true;
+  };
 
-  // Calculate summary
-  const summary = useMemo(() => {
-    return calculateLedgerSummary(filteredEntries);
-  }, [filteredEntries]);
-
-  // Handle add entry
-  const handleAddEntry = async () => {
+  const handleAdd = async () => {
+    if (!validate(newEntry)) return;
     try {
-      const isTransfer = newEntry.type === 'transfer';
-      if (!newEntry.amount) {
-        toast({ title: 'Missing fields', description: 'Please enter an amount', variant: 'destructive' });
-        return;
-      }
-      if (isTransfer) {
-        if (!newEntry.from_bucket_id || !newEntry.bucket_id || newEntry.from_bucket_id === newEntry.bucket_id) {
-          toast({ title: 'Invalid transfer', description: 'Pick two different buckets', variant: 'destructive' });
-          return;
-        }
-      } else if (!newEntry.category_id) {
-        toast({ title: 'Missing fields', description: 'Please select a category', variant: 'destructive' });
-        return;
-      }
-
-      await createLedgerEntry({
-        type: newEntry.type,
-        amount: parseFloat(newEntry.amount),
-        category_id: isTransfer || !newEntry.category_id ? null : parseInt(newEntry.category_id),
-        description: newEntry.description,
-        transaction_date: newEntry.transaction_date,
-        is_recurring: false,
-        recurring_interval: null,
-        notes: newEntry.notes,
-        bucket_id: newEntry.bucket_id ? parseInt(newEntry.bucket_id) : null,
-        from_bucket_id: isTransfer && newEntry.from_bucket_id ? parseInt(newEntry.from_bucket_id) : null
-      });
-
-      toast({ title: 'Entry added successfully' });
-      setIsAddDialogOpen(false);
-      setNewEntry({
-        type: 'expense',
-        amount: '',
-        category_id: '',
-        description: '',
-        transaction_date: new Date().toISOString().split('T')[0],
-        notes: '',
-        bucket_id: '',
-        from_bucket_id: ''
-      });
+      await createLedgerEntry(buildPayload(newEntry));
+      toast({ title: 'Entry added' });
+      setIsAddOpen(false);
+      setNewEntry(emptyForm());
       loadData();
-    } catch (error) {
-      console.error('Error adding entry:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to add entry',
-        variant: 'destructive'
-      });
-    }
+    } catch { toast({ title: 'Error', description: 'Failed to add entry', variant: 'destructive' }); }
   };
 
-  // Handle delete
+  const handleEdit = (entry: LedgerEntry) => {
+    setEditingEntry(entry);
+    setEditForm({
+      type: entry.type as LedgerEntryFormData['type'],
+      amount: entry.amount.toString(),
+      category_id: entry.category_id?.toString() || '',
+      description: entry.description || '',
+      transaction_date: entry.transaction_date,
+      account_id: entry.account_id?.toString() || '',
+      to_account_id: entry.to_account_id?.toString() || '',
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleUpdate = async () => {
+    if (!editingEntry || !validate(editForm)) return;
+    try {
+      await updateLedgerEntry(editingEntry.id, buildPayload(editForm));
+      toast({ title: 'Entry updated' });
+      setIsEditOpen(false);
+      setEditingEntry(null);
+      loadData();
+    } catch { toast({ title: 'Error', description: 'Failed to update entry', variant: 'destructive' }); }
+  };
+
   const handleDelete = async (id: number) => {
     try {
       await deleteLedgerEntry(id);
       toast({ title: 'Entry deleted' });
       loadData();
-    } catch (error) {
-      console.error('Error deleting entry:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete entry',
-        variant: 'destructive'
-      });
-    }
+    } catch { toast({ title: 'Error', description: 'Failed to delete entry', variant: 'destructive' }); }
   };
 
-  // Handle edit
-  const handleEdit = (entry: LedgerEntry) => {
-    setEditingEntry(entry);
-    setEditFormData({
-      type: entry.type as 'income' | 'expense' | 'transfer',
-      amount: entry.amount.toString(),
-      category_id: entry.category_id?.toString() || '',
-      description: entry.description || '',
-      transaction_date: entry.transaction_date,
-      notes: entry.notes || '',
-      bucket_id: entry.bucket_id?.toString() || '',
-      from_bucket_id: entry.from_bucket_id?.toString() || ''
-    });
-    setIsEditDialogOpen(true);
-  };
+  const handleExportCSV = () => { downloadFile(exportToCSV(monthEntries), `ledger_${selectedYear}_${selectedMonth}.csv`, 'text/csv'); toast({ title: 'CSV exported' }); };
+  const handleExportJSON = () => { downloadFile(exportToJSON(monthEntries), `ledger_${selectedYear}_${selectedMonth}.json`, 'application/json'); toast({ title: 'JSON exported' }); };
 
-  const handleUpdateEntry = async () => {
-    if (!editingEntry) return;
-
-    try {
-      const isTransfer = editFormData.type === 'transfer';
-      if (!editFormData.amount) {
-        toast({ title: 'Missing fields', description: 'Please enter an amount', variant: 'destructive' });
-        return;
-      }
-      if (isTransfer) {
-        if (!editFormData.from_bucket_id || !editFormData.bucket_id || editFormData.from_bucket_id === editFormData.bucket_id) {
-          toast({ title: 'Invalid transfer', description: 'Pick two different buckets', variant: 'destructive' });
-          return;
-        }
-      } else if (!editFormData.category_id) {
-        toast({ title: 'Missing fields', description: 'Please select a category', variant: 'destructive' });
-        return;
-      }
-
-      await updateLedgerEntry(editingEntry.id, {
-        type: editFormData.type,
-        amount: parseFloat(editFormData.amount),
-        category_id: isTransfer || !editFormData.category_id ? null : parseInt(editFormData.category_id),
-        description: editFormData.description,
-        transaction_date: editFormData.transaction_date,
-        notes: editFormData.notes,
-        bucket_id: editFormData.bucket_id ? parseInt(editFormData.bucket_id) : null,
-        from_bucket_id: isTransfer && editFormData.from_bucket_id ? parseInt(editFormData.from_bucket_id) : null
-      });
-
-      toast({ title: 'Entry updated successfully' });
-      setIsEditDialogOpen(false);
-      setEditingEntry(null);
-      loadData();
-    } catch (error) {
-      console.error('Error updating entry:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to update entry',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  // Export functions
-  const handleExportCSV = () => {
-    const csv = exportToCSV(filteredEntries);
-    downloadFile(csv, `ledger_${selectedYear}_${selectedMonth}.csv`, 'text/csv');
-    toast({ title: 'CSV exported' });
-  };
-
-  const handleExportJSON = () => {
-    const json = exportToJSON(filteredEntries);
-    downloadFile(json, `ledger_${selectedYear}_${selectedMonth}.json`, 'application/json');
-    toast({ title: 'JSON exported' });
-  };
-
-  // Generate month/year options
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
 
-  const bucketsById = useMemo(() => new Map(buckets.map((b) => [b.id, b])), [buckets]);
-  const bucketName = (id: number | null | undefined) => (id != null ? bucketsById.get(id)?.name : undefined);
-
-  const exportActions = (
+  const actions = (
     <>
+      <Button variant="outline" size="sm" onClick={() => setAccountsOpen(true)}>
+        <Settings2 className="h-4 w-4 mr-2" /> Accounts
+      </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline">
-            <Download className="h-4 w-4 mr-2" />
-            Export
-            <ChevronDown className="h-4 w-4 ml-1 opacity-70" />
-          </Button>
+          <Button variant="outline" size="sm"><Download className="h-4 w-4 mr-2" /> Export <ChevronDown className="h-4 w-4 ml-1 opacity-70" /></Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={handleExportCSV}>Export as CSV</DropdownMenuItem>
           <DropdownMenuItem onClick={handleExportJSON}>Export as JSON</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button variant="gradient" onClick={() => setIsAddDialogOpen(true)}>
-        <Plus className="h-4 w-4 mr-2" />
-        Add Entry
+      <Button variant="gradient" size="sm" onClick={() => { setNewEntry(emptyForm()); setIsAddOpen(true); }}>
+        <Plus className="h-4 w-4 mr-2" /> Add Entry
       </Button>
     </>
   );
 
   return (
-    <PageShell
-      title="Money Ledger"
-      subtitle="Track your income and expenses"
-      icon={Wallet}
-      actions={exportActions}
-    >
-          {/* Add Dialog */}
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Add New Entry</DialogTitle>
-              </DialogHeader>
-              <LedgerEntryForm
-                value={newEntry}
-                onChange={setNewEntry}
-                categories={categories}
-                buckets={buckets}
-                onCreateCategories={refreshCategories}
-              />
-              <Button onClick={handleAddEntry} className="w-full">Add Entry</Button>
-            </DialogContent>
-          </Dialog>
+    <PageShell title="Money Ledger" subtitle="Your real money in hand — income in, expenses out, cumulative" icon={Wallet} actions={actions}>
+      {/* Add / Edit dialogs */}
+      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader><DialogTitle>Add Entry</DialogTitle></DialogHeader>
+          <LedgerEntryForm value={newEntry} onChange={setNewEntry} categories={categories} accounts={accounts} onCreateCategories={refreshCategories} />
+          <Button onClick={handleAdd} className="w-full">Add Entry</Button>
+        </DialogContent>
+      </Dialog>
 
-          {/* Edit Dialog */}
-          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Edit Entry</DialogTitle>
-              </DialogHeader>
-              <LedgerEntryForm
-                value={editFormData}
-                onChange={setEditFormData}
-                categories={categories}
-                buckets={buckets}
-              />
-              <Button onClick={handleUpdateEntry} className="w-full">Update Entry</Button>
-            </DialogContent>
-          </Dialog>
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader><DialogTitle>Edit Entry</DialogTitle></DialogHeader>
+          <LedgerEntryForm value={editForm} onChange={setEditForm} categories={categories} accounts={accounts} />
+          <Button onClick={handleUpdate} className="w-full">Update Entry</Button>
+        </DialogContent>
+      </Dialog>
 
-          {/* Summary Cards */}
-          <Stagger className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <StaggerItem hover={false}>
-              <Card className="aurora-card">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Income</CardTitle>
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/15 text-success">
-                    <TrendingUp className="h-4 w-4" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold tabular-nums text-success">
-                    {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalIncome)}
-                  </div>
-                </CardContent>
-              </Card>
-            </StaggerItem>
+      <AccountsManager open={accountsOpen} onOpenChange={setAccountsOpen} accounts={accounts} onChanged={reloadAccounts} />
 
-            <StaggerItem hover={false}>
-              <Card className="aurora-card">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
-                    <TrendingDown className="h-4 w-4" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold tabular-nums text-destructive">
-                    {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.totalExpense)}
-                  </div>
-                </CardContent>
-              </Card>
-            </StaggerItem>
-
-            <StaggerItem hover={false}>
-              <Card className="aurora-card">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Net Balance</CardTitle>
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/12 text-primary">
-                    <Wallet className="h-4 w-4" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className={`text-2xl font-bold tabular-nums ${summary.netBalance >= 0 ? 'text-success' : 'text-destructive'}`}>
-                    {loading ? <Skeleton className="h-8 w-24" /> : formatCurrency(summary.netBalance)}
-                  </div>
-                </CardContent>
-              </Card>
-            </StaggerItem>
-          </Stagger>
-
-          {/* Buckets — where money is allocated (envelope budgeting) */}
-          {!loading && (
-            <BucketsSection entries={entries} buckets={buckets} onChanged={reloadBuckets} />
-          )}
-
-          {/* Charts — spend-by-category + monthly income/expense trend */}
-          {!loading && entries.length > 0 && (
-            <LedgerCharts entries={entries} year={selectedYear} month={selectedMonth} />
-          )}
-
-          {/* Show loading state while categories are being initialized */}
-          {!loading && categories.length === 0 && (
-            <div className="mb-6 p-4 border border-border rounded-lg bg-muted">
-              <p className="text-sm mb-2">Loading categories...</p>
-              <Button onClick={refreshCategories} variant="outline">
-                <Plus className="h-4 w-4 mr-2" />
-                Refresh Categories
-              </Button>
+      {/* Money in hand hero */}
+      <Card className="aurora-card mb-4">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Money in hand</CardTitle>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/12 text-primary"><Wallet className="h-4 w-4" /></div>
+        </CardHeader>
+        <CardContent>
+          {loading ? <Skeleton className="h-10 w-48" /> : (
+            <div className={cn('text-3xl font-extrabold tabular-nums sm:text-4xl', moneyInHand < 0 ? 'text-destructive' : 'gradient-text')}>
+              {formatCurrency(moneyInHand)}
             </div>
           )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            opening balances + all income − all expenses{subTotal > 0 ? <> − {formatCurrency(subTotal)} subscriptions</> : null}
+          </p>
+        </CardContent>
+      </Card>
 
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-4 mb-6">
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {months.map(month => (
-                    <SelectItem key={month} value={month.toString()}>
-                      {getMonthName(month)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              
-              <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
-                <SelectTrigger className="w-[100px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {years.map(year => (
-                    <SelectItem key={year} value={year.toString()}>{year}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <Select value={filterType} onValueChange={(v) => setFilterType(v as 'all' | 'income' | 'expense')}>
-                <SelectTrigger className="w-[130px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Entries</SelectItem>
-                  <SelectItem value="income">Income Only</SelectItem>
-                  <SelectItem value="expense">Expenses Only</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+      {/* Account tiles */}
+      {!loading && (
+        <Stagger className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {accountBalances.map(({ account, balance }) => {
+            const Icon = KIND_ICON[(account.kind as AccountKind)] || Landmark;
+            return (
+              <StaggerItem key={account.id} hover={false}>
+                <button type="button" onClick={() => setAccountsOpen(true)} className="zen-card w-full p-3 text-left transition-all hover:-translate-y-0.5">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Icon className="h-3.5 w-3.5" style={account.color ? { color: account.color } : undefined} />
+                    <span className="truncate">{account.name}</span>
+                  </div>
+                  <div className={cn('mt-1 text-lg font-bold tabular-nums', balance < 0 ? 'text-destructive' : 'text-foreground')}>
+                    {formatCurrency(balance)}
+                  </div>
+                </button>
+              </StaggerItem>
+            );
+          })}
+          {Math.abs(otherBalance) >= 0.01 && (
+            <StaggerItem hover={false}>
+              <div className="zen-card w-full p-3" title="Entries not assigned to an account + subscription charges">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Repeat className="h-3.5 w-3.5" /><span>Unassigned + subs</span></div>
+                <div className={cn('mt-1 text-lg font-bold tabular-nums', otherBalance < 0 ? 'text-destructive' : 'text-foreground')}>{formatCurrency(otherBalance)}</div>
+              </div>
+            </StaggerItem>
+          )}
+          <StaggerItem hover={false}>
+            <button type="button" onClick={() => setAccountsOpen(true)} className="zen-card flex h-full w-full items-center justify-center gap-2 border-dashed p-3 text-sm text-muted-foreground transition-colors hover:text-foreground">
+              <Plus className="h-4 w-4" /> Manage accounts
+            </button>
+          </StaggerItem>
+        </Stagger>
+      )}
 
-          {/* Entries Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Transactions ({filteredEntries.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="space-y-2">
-                  {[...Array(5)].map((_, i) => (
-                    <Skeleton key={i} className="h-12 w-full" />
-                  ))}
-                </div>
-              ) : filteredEntries.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Wallet className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No transactions for this period</p>
-                  <Button onClick={() => setIsAddDialogOpen(true)} className="mt-4">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Your First Entry
-                  </Button>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-2 px-4">Date</th>
-                        <th className="text-left py-2 px-4">Category</th>
-                        <th className="text-left py-2 px-4">Description</th>
-                        <th className="text-right py-2 px-4">Amount</th>
-                        <th className="text-right py-2 px-4">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredEntries.map((entry) => (
-                        <tr key={entry.id} className="border-b hover:bg-muted/50">
-                          <td className="py-3 px-4">{formatDateDDMMYYYY(entry.transaction_date)}</td>
-                          <td className="py-3 px-4">
-                            {entry.type === 'transfer' ? (
-                              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                                <ArrowLeftRight className="h-3 w-3" />
-                                {bucketName(entry.from_bucket_id) || '?'} → {bucketName(entry.bucket_id) || '?'}
-                              </span>
-                            ) : entry.category ? (
-                              <TagBadge
-                                tag={{
-                                  id: entry.category.id,
-                                  user_id: entry.category.user_id,
-                                  name: entry.category.name,
-                                  color: entry.category.color,
-                                  usage_count: 0,
-                                  created_at: entry.category.created_at
-                                }}
-                                size="sm"
-                              />
-                            ) : null}
-                          </td>
-                          <td className="py-3 px-4">
-                            {entry.description || '-'}
-                            {entry.type !== 'transfer' && bucketName(entry.bucket_id) && (
-                              <span className="ml-2 text-xs text-muted-foreground">· {bucketName(entry.bucket_id)}</span>
-                            )}
-                          </td>
-                          <td className={`py-3 px-4 text-right font-medium tabular-nums ${
-                            entry.type === 'income' ? 'text-success'
-                            : entry.type === 'transfer' ? 'text-muted-foreground'
-                            : 'text-destructive'
-                          }`}>
-                            {entry.type === 'income' ? '+' : entry.type === 'transfer' ? '' : '-'}{formatCurrency(Number(entry.amount))}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEdit(entry)}
-                              className="mr-1"
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(entry.id)}
-                              className="text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </td>
+      {/* This month */}
+      <div className="mb-6 grid grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="flex items-center justify-between p-4">
+            <div><p className="text-xs text-muted-foreground">Income · {getMonthName(selectedMonth)}</p><p className="text-xl font-bold tabular-nums text-success">{loading ? '—' : formatCurrency(monthIncome)}</p></div>
+            <TrendingUp className="h-5 w-5 text-success" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center justify-between p-4">
+            <div><p className="text-xs text-muted-foreground">Spent · {getMonthName(selectedMonth)}</p><p className="text-xl font-bold tabular-nums text-destructive">{loading ? '—' : formatCurrency(monthExpense)}</p></div>
+            <TrendingDown className="h-5 w-5 text-destructive" />
+          </CardContent>
+        </Card>
+      </div>
+
+      {!loading && entries.length > 0 && <LedgerCharts entries={entries} year={selectedYear} month={selectedMonth} />}
+
+      {/* Filters */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-muted-foreground" />
+          <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+            <SelectContent>{months.map((m) => <SelectItem key={m} value={m.toString()}>{getMonthName(m)}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+            <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
+            <SelectContent>{years.map((y) => <SelectItem key={y} value={y.toString()}>{y}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <Select value={filterType} onValueChange={(v) => setFilterType(v as 'all' | 'income' | 'expense')}>
+            <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All entries</SelectItem>
+              <SelectItem value="income">Income only</SelectItem>
+              <SelectItem value="expense">Expenses only</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Transactions */}
+      <Card>
+        <CardHeader><CardTitle>Transactions ({rows.length})</CardTitle></CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : rows.length === 0 ? (
+            <div className="py-8 text-center text-muted-foreground">
+              <Wallet className="mx-auto mb-3 h-12 w-12 opacity-50" />
+              <p>No transactions for {getMonthName(selectedMonth)} {selectedYear}</p>
+              <Button onClick={() => { setNewEntry(emptyForm()); setIsAddOpen(true); }} className="mt-4"><Plus className="h-4 w-4 mr-2" /> Add an entry</Button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead><tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="py-2 px-3 font-medium">Date</th>
+                  <th className="py-2 px-3 font-medium">Category</th>
+                  <th className="py-2 px-3 font-medium">Note</th>
+                  <th className="py-2 px-3 font-medium">Account</th>
+                  <th className="py-2 px-3 text-right font-medium">Amount</th>
+                  <th className="py-2 px-3 text-right font-medium">Actions</th>
+                </tr></thead>
+                <tbody>
+                  {rows.map((row) => {
+                    if (row.kind === 'sub') {
+                      const c = row.charge;
+                      return (
+                        <tr key={`sub-${c.subscription_id}-${c.date}`} className="border-b hover:bg-muted/40">
+                          <td className="py-3 px-3">{formatDateDDMMYYYY(c.date)}</td>
+                          <td className="py-3 px-3"><Badge variant="secondary" className="gap-1"><Repeat className="h-3 w-3" /> Subscription</Badge></td>
+                          <td className="py-3 px-3 text-muted-foreground">{c.name}</td>
+                          <td className="py-3 px-3 text-xs text-muted-foreground">auto</td>
+                          <td className="py-3 px-3 text-right font-medium tabular-nums text-destructive">-{formatCurrency(c.amount)}</td>
+                          <td className="py-3 px-3 text-right text-xs text-muted-foreground">—</td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                      );
+                    }
+                    const e = row.entry;
+                    const fromAcc = e.account_id ? accountsById.get(e.account_id)?.name : undefined;
+                    const toAcc = e.to_account_id ? accountsById.get(e.to_account_id)?.name : undefined;
+                    return (
+                      <tr key={e.id} className="border-b hover:bg-muted/50">
+                        <td className="py-3 px-3">{formatDateDDMMYYYY(e.transaction_date)}</td>
+                        <td className="py-3 px-3">
+                          {e.type === 'transfer' ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><ArrowLeftRight className="h-3 w-3" /> Transfer</span>
+                          ) : e.category ? (
+                            <TagBadge tag={{ id: e.category.id, user_id: e.category.user_id, name: e.category.name, color: e.category.color, usage_count: 0, created_at: e.category.created_at }} size="sm" />
+                          ) : null}
+                        </td>
+                        <td className="py-3 px-3">{e.description || '-'}</td>
+                        <td className="py-3 px-3 text-xs text-muted-foreground">
+                          {e.type === 'transfer' ? `${fromAcc || '?'} → ${toAcc || '?'}` : (fromAcc || '—')}
+                        </td>
+                        <td className={cn('py-3 px-3 text-right font-medium tabular-nums', e.type === 'income' ? 'text-success' : e.type === 'transfer' ? 'text-muted-foreground' : 'text-destructive')}>
+                          {e.type === 'income' ? '+' : e.type === 'transfer' ? '' : '-'}{formatCurrency(Number(e.amount))}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(e)} className="mr-1"><Edit2 className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDelete(e.id)} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </PageShell>
   );
 };
