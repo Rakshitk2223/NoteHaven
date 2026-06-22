@@ -38,6 +38,51 @@ export type Database = {
         }
         Relationships: []
       }
+      bucket_list: {
+        Row: {
+          achieved_at: string | null
+          category: string
+          created_at: string
+          description: string | null
+          id: number
+          image_url: string | null
+          sort_order: number | null
+          status: string
+          target_date: string | null
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          achieved_at?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: number
+          image_url?: string | null
+          sort_order?: number | null
+          status?: string
+          target_date?: string | null
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          achieved_at?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: number
+          image_url?: string | null
+          sort_order?: number | null
+          status?: string
+          target_date?: string | null
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       code_snippet_tags: {
         Row: {
           snippet_id: number

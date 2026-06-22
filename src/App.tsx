@@ -37,6 +37,7 @@ const MoneyLedger = lazy(() => import("./pages/MoneyLedger"));
 const Subscriptions = lazy(() => import("./pages/Subscriptions"));
 const Calendar = lazy(() => import("./pages/Calendar"));
 const Vault = lazy(() => import("./pages/Vault"));
+const BucketList = lazy(() => import("./pages/BucketList"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -90,6 +91,7 @@ const AppInner = () => {
           <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />
           <Route path="/calendar" element={<ProtectedRoute><Calendar /></ProtectedRoute>} />
           <Route path="/vault" element={<ProtectedRoute><Vault /></ProtectedRoute>} />
+          <Route path="/bucket-list" element={<ProtectedRoute><BucketList /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

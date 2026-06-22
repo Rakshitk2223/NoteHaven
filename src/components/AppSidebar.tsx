@@ -16,7 +16,8 @@ import {
   CreditCard,
   Calendar,
   Library,
-  FolderLock
+  FolderLock,
+  Compass
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ const defaultMainNavigation: NavItem[] = [
   { name: "Notes", href: "/notes", icon: FileText },
   { name: "Vault", href: "/vault", icon: FolderLock },
   { name: "Birthdays", href: "/birthdays", icon: Cake },
+  { name: "Bucket List", href: "/bucket-list", icon: Compass },
   { name: "Money Ledger", href: "/ledger", icon: Wallet },
   { name: "Subscriptions", href: "/subscriptions", icon: CreditCard },
 ];

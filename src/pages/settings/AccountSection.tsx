@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { User, Mail, CalendarDays, Camera, LogOut, Trash2, Loader2 } from 'lucide-react';
+import { User, Mail, CalendarDays, Camera, Trash2, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 import { SettingsSection, SettingRow } from '@/components/settings/primitives';
 import { useProfile, initialsFor } from './useProfile';
@@ -22,7 +21,6 @@ const STAT_TABLES = [
 
 export function AccountSection() {
   const { toast } = useToast();
-  const { signOut } = useAuth();
   const { profile, refresh } = useProfile();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -168,11 +166,8 @@ export function AccountSection() {
       {/* Danger zone */}
       <section className={cn('rounded-2xl border border-destructive/40 bg-destructive/5 p-5 sm:p-6')}>
         <h2 className="text-base font-semibold text-destructive mb-1">Danger zone</h2>
-        <p className="text-sm text-muted-foreground mb-4">Sign out of this device, or permanently delete your account.</p>
+        <p className="text-sm text-muted-foreground mb-4">Permanently delete your account. (To sign out, use <span className="font-medium text-foreground">Logout</span> in the sidebar.)</p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => signOut()}>
-            <LogOut className="h-4 w-4 mr-2" /> Sign out
-          </Button>
           <Button variant="outline" disabled className="border-destructive/40 text-destructive opacity-70" title="Account deletion isn't available yet — requires a server action.">
             <Trash2 className="h-4 w-4 mr-2" /> Delete account
           </Button>

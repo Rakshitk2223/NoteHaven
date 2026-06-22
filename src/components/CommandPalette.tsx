@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Calendar, Library, Monitor, CheckSquare, FileText,
   Cake, Wallet, CreditCard, Settings as SettingsIcon, Plus, Sparkles,
-  SunMedium, Moon, FolderLock,
+  SunMedium, Moon, FolderLock, Compass,
 } from "lucide-react";
 import {
   CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup,
@@ -67,6 +67,7 @@ export function CommandPalette() {
     { icon: FileText, label: "Notes", perform: () => go("/notes") },
     { icon: FolderLock, label: "Vault", perform: () => go("/vault"), keywords: "files documents storage drive aadhaar passport" },
     { icon: Cake, label: "Birthdays", perform: () => go("/birthdays") },
+    { icon: Compass, label: "Bucket List", perform: () => go("/bucket-list"), keywords: "dreams wishlist goals life" },
     { icon: Wallet, label: "Money Ledger", perform: () => go("/ledger"), keywords: "budget expenses income" },
     { icon: CreditCard, label: "Subscriptions", perform: () => go("/subscriptions") },
     { icon: SettingsIcon, label: "Settings", perform: () => go("/settings"), keywords: "theme preferences" },
