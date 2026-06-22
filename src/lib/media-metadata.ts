@@ -155,7 +155,7 @@ export async function removeCoverImage(mediaId: number): Promise<boolean> {
 
     const { error } = await supabase
       .from('media_tracker')
-      .update({ cover_image: null })
+      .update({ cover_image: null, last_activity_at: new Date().toISOString() })
       .eq('id', mediaId)
       .eq('user_id', user.id);
 

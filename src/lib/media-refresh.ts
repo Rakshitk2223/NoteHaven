@@ -331,7 +331,7 @@ async function updateMediaTracker(
       } else {
         const { error: trackerError } = await supabase
           .from('media_tracker')
-          .update({ cover_image: newData.coverImage })
+          .update({ cover_image: newData.coverImage, last_activity_at: new Date().toISOString() })
           .eq('id', mediaId)
           .eq('user_id', user.id);
 
