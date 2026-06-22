@@ -24,7 +24,7 @@ import {
 import {
   fetchRecipes, createRecipe, updateRecipe, deleteRecipe, setRecipeFields,
   fetchRecipeFolders, createRecipeFolder, deleteRecipeFolder,
-  searchMeals, importMeal, suggestRecipeImage,
+  searchMeals, mealsByArea, MEALDB_AREAS, importMeal, suggestRecipeImage,
   emptyDraft, recipeToDraft, totalMinutes, toSteps,
   DIFFICULTY_META, DIFFICULTY_ORDER,
   type Recipe, type RecipeFolder, type RecipeDraft, type Difficulty, type MealHit,
@@ -178,9 +178,20 @@ const Recipes = () => {
     } finally { setSaving(false); }
   };
 
+  const [browsed, setBrowsed] = useState(false);
+
   const runImportSearch = async () => {
     setImporting(true);
+    setBrowsed(true);
     try { setImportResults(await searchMeals(importQuery)); }
+    finally { setImporting(false); }
+  };
+
+  const browseArea = async (area: string) => {
+    setImporting(true);
+    setImportQuery('');
+    setBrowsed(true);
+    try { setImportResults(await mealsByArea(area)); }
     finally { setImporting(false); }
   };
 
@@ -257,7 +268,7 @@ const Recipes = () => {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input placeholder="Search recipes…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
           </div>
-          <Button variant="outline" onClick={() => { setImportOpen(true); setImportQuery(''); setImportResults([]); }}>
+          <Button variant="outline" onClick={() => { setImportOpen(true); setImportQuery(''); setImportResults([]); setBrowsed(false); }}>
             <Download className="mr-2 h-4 w-4" /> Import
           </Button>
           <Button variant="gradient" onClick={openAdd}><Plus className="mr-2 h-4 w-4" /> Add Recipe</Button>
@@ -300,7 +311,7 @@ const Recipes = () => {
             <h3 className="text-lg font-semibold">Your cookbook is empty</h3>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">Import a recipe from TheMealDB, or write your own — each gets a photo, ingredients checklist, and step-by-step cook mode.</p>
             <div className="mt-5 flex gap-2">
-              <Button variant="gradient" onClick={() => { setImportOpen(true); }}><Download className="mr-2 h-4 w-4" /> Import a recipe</Button>
+              <Button variant="gradient" onClick={() => { setImportOpen(true); setImportQuery(''); setImportResults([]); setBrowsed(false); }}><Download className="mr-2 h-4 w-4" /> Import a recipe</Button>
               <Button variant="outline" onClick={openAdd}><Plus className="mr-2 h-4 w-4" /> Write your own</Button>
             </div>
           </div>
@@ -465,13 +476,26 @@ const Recipes = () => {
             <DialogDescription>Search TheMealDB (free) — pick one to prefill the form, then tweak and save.</DialogDescription>
           </DialogHeader>
           <div className="flex gap-2">
-            <Input autoFocus placeholder="e.g. pasta, biryani, pancakes" value={importQuery}
+            <Input autoFocus placeholder="e.g. pasta, chicken, pancakes" value={importQuery}
               onChange={(e) => setImportQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') runImportSearch(); }} />
             <Button onClick={runImportSearch} disabled={importing || !importQuery.trim()}><Search className="h-4 w-4" /></Button>
           </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Browse cuisine:</span>
+            {MEALDB_AREAS.map((a) => (
+              <button key={a} onClick={() => browseArea(a)} disabled={importing}
+                className="rounded-full border border-border bg-secondary/40 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+                {a}
+              </button>
+            ))}
+          </div>
           <div className="max-h-[50vh] space-y-2 overflow-y-auto">
             {importing && importResults.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Searching…</p>}
-            {!importing && importQuery && importResults.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No matches. Try another dish.</p>}
+            {!importing && browsed && importResults.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nothing found — TheMealDB's free set is limited (no dosa/biryani, for example). Try a cuisine chip above, a single ingredient like "chicken", or just <span className="font-medium text-foreground">write your own</span>.
+              </p>
+            )}
             {importResults.map((hit) => (
               <button key={hit.id} onClick={() => pickImport(hit)} disabled={importing}
                 className="flex w-full items-center gap-3 rounded-lg border border-border p-2 text-left transition-colors hover:border-primary/40 hover:bg-secondary/40">

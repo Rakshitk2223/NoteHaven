@@ -184,24 +184,58 @@ interface MealDbMeal {
   [key: string]: string | undefined;
 }
 
-export async function searchMeals(query: string): Promise<MealHit[]> {
-  const q = query.trim();
-  if (!q) return [];
+// Cuisines TheMealDB actually carries — used by the "Browse by cuisine" chips
+// so you can see what's available (free-text search only matches meal names).
+export const MEALDB_AREAS = [
+  'Indian', 'Italian', 'Chinese', 'Mexican', 'Japanese', 'Thai', 'American',
+  'British', 'French', 'Greek', 'Spanish', 'Turkish', 'Vietnamese', 'Malaysian',
+];
+
+const mapMeals = (meals: MealDbMeal[] | null | undefined): MealHit[] =>
+  (meals ?? []).map((m) => ({
+    id: m.idMeal,
+    title: m.strMeal,
+    thumb: m.strMealThumb,
+    category: m.strCategory ?? '',
+    area: m.strArea ?? '',
+  }));
+
+async function mealDbGet(path: string): Promise<MealDbMeal[]> {
   try {
-    const res = await fetch(`https://www.themealdb.com/api/json/v1/1/search.php?s=${encodeURIComponent(q)}`);
+    const res = await fetch(`https://www.themealdb.com/api/json/v1/1/${path}`);
     if (!res.ok) return [];
     const json = await res.json();
-    const meals: MealDbMeal[] = json?.meals ?? [];
-    return meals.map((m) => ({
-      id: m.idMeal,
-      title: m.strMeal,
-      thumb: m.strMealThumb,
-      category: m.strCategory ?? '',
-      area: m.strArea ?? '',
-    }));
+    return json?.meals ?? [];
   } catch {
     return [];
   }
+}
+
+/**
+ * Best-effort meal search. TheMealDB's name search is exact-ish, so we widen it:
+ * 1) name search, 2) main-ingredient filter on the whole query, 3) per-word
+ * ingredient filter (so "chicken biryani" still surfaces chicken dishes).
+ */
+export async function searchMeals(query: string): Promise<MealHit[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const byName = mapMeals(await mealDbGet(`search.php?s=${encodeURIComponent(q)}`));
+  if (byName.length) return byName;
+
+  const byIngredient = mapMeals(await mealDbGet(`filter.php?i=${encodeURIComponent(q.replace(/\s+/g, '_'))}`));
+  if (byIngredient.length) return byIngredient;
+
+  for (const word of q.split(/\s+/).filter((w) => w.length > 2)) {
+    const hits = mapMeals(await mealDbGet(`filter.php?i=${encodeURIComponent(word)}`));
+    if (hits.length) return hits;
+  }
+  return [];
+}
+
+/** Browse every meal TheMealDB has for a cuisine (area), e.g. "Indian". */
+export async function mealsByArea(area: string): Promise<MealHit[]> {
+  return mapMeals(await mealDbGet(`filter.php?a=${encodeURIComponent(area)}`));
 }
 
 export async function importMeal(id: string): Promise<RecipeDraft | null> {
