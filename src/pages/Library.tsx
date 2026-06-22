@@ -126,6 +126,7 @@ const PromptsTab = () => {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -141,7 +142,7 @@ const PromptsTab = () => {
   const [editingPromptTags, setEditingPromptTags] = useState<Tag[]>([]);
 
   useEffect(() => {
-    fetchPrompts("All");
+    fetchPrompts();
     fetchTags();
   }, []);
 
@@ -168,21 +169,18 @@ const PromptsTab = () => {
     loadEditingPromptTags();
   }, [editingPrompt]);
 
-  const fetchPrompts = async (filter: string = activeFilter) => {
+  // Always fetch the FULL set; category/search/tag filtering is client-side so the
+  // category tabs stay stable (filtering used to re-query by category and then
+  // derive the tab list from the filtered result — which made the other tabs vanish).
+  const fetchPrompts = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      let query = supabase
+      const { data, error } = await supabase
         .from('prompts')
         .select('*')
         .order('created_at', { ascending: false });
-
-      if (filter !== 'All') {
-        query = query.eq('category', filter);
-      }
-
-      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -257,7 +255,7 @@ const PromptsTab = () => {
       setIsModalOpen(false);
       setFormData({ title: "", prompt_text: "", category: "" });
       setFormTags([]);
-      fetchPrompts(activeFilter);
+      fetchPrompts();
       fetchTags();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create prompt';
@@ -296,7 +294,7 @@ const PromptsTab = () => {
       setEditingPrompt(null);
       setEditingPromptTags([]);
       setFormData({ title: "", prompt_text: "", category: "" });
-      fetchPrompts(activeFilter);
+      fetchPrompts();
       fetchTags();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update prompt';
@@ -394,18 +392,39 @@ const PromptsTab = () => {
     setEditingPromptTags([]);
   };
 
-  const handleFilterChange = (filter: string) => {
-    setActiveFilter(filter);
-    fetchPrompts(filter);
-  };
+  // Per-category counts for the filter tabs (from the full set).
+  const categoryCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of prompts) {
+      const c = p.category?.trim();
+      if (c) m.set(c, (m.get(c) || 0) + 1);
+    }
+    return m;
+  }, [prompts]);
 
   const filteredPrompts = useMemo(() => {
-    if (selectedTags.length === 0) return prompts;
-    return prompts.filter(prompt => {
-      const promptTagNames = prompt.tags?.map(t => t.name) || [];
-      return selectedTags.every(tag => promptTagNames.includes(tag));
-    });
-  }, [prompts, selectedTags]);
+    let list = prompts;
+    if (activeFilter !== 'All') list = list.filter(p => (p.category?.trim() || '') === activeFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(p => p.title.toLowerCase().includes(q) || p.prompt_text.toLowerCase().includes(q));
+    }
+    if (selectedTags.length > 0) {
+      list = list.filter(prompt => {
+        const promptTagNames = prompt.tags?.map(t => t.name) || [];
+        return selectedTags.every(tag => promptTagNames.includes(tag));
+      });
+    }
+    return list;
+  }, [prompts, activeFilter, searchQuery, selectedTags]);
+
+  // Slim Media-style filter pill.
+  const filterPill = (active: boolean) =>
+    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium border transition-all ${
+      active
+        ? 'bg-primary text-primary-foreground border-primary shadow-glow'
+        : 'bg-foreground/[0.04] text-muted-foreground border-transparent hover:bg-foreground/[0.08] hover:text-foreground'
+    }`;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -418,11 +437,30 @@ const PromptsTab = () => {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-4">
-        <div />
+      <div className="mb-4 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search prompts…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-9 rounded-full pl-9 pr-8"
+            aria-label="Search prompts"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogTrigger asChild>
-            <Button variant="gradient" className="zen-transition touch-manipulation">
+            <Button variant="gradient" className="h-9 flex-shrink-0 rounded-full">
               <Plus className="h-4 w-4 mr-2" />
               Add Prompt
             </Button>
@@ -496,24 +534,20 @@ const PromptsTab = () => {
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Button
-          variant={activeFilter === 'All' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => handleFilterChange('All')}
-        >
-          All
-        </Button>
-        {categories.map(cat => (
-          <Button
-            key={cat}
-            variant={activeFilter === cat ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => handleFilterChange(cat)}
-          >
-            {cat}
-          </Button>
-        ))}
+      {/* Category filter tabs — dynamic, stable, switch instantly (client-side) */}
+      <div className="mb-4 -mx-1 overflow-x-auto scrollbar-hide px-1">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setActiveFilter('All')} className={filterPill(activeFilter === 'All')}>
+            <span>All</span>
+            <span className="text-xs tabular-nums opacity-70">{prompts.length}</span>
+          </button>
+          {categories.map(cat => (
+            <button key={cat} type="button" onClick={() => setActiveFilter(cat)} className={filterPill(activeFilter === cat)}>
+              <span>{cat}</span>
+              <span className="text-xs tabular-nums opacity-70">{categoryCounts.get(cat) || 0}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {availableTags.length > 0 && (
@@ -573,7 +607,7 @@ const PromptsTab = () => {
             .slice()
             .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
             .map((prompt) => (
-              <motion.div key={prompt.id} className="zen-card p-6 zen-shadow hover:zen-shadow-lg transition-all duration-300 ease-out relative group"
+              <motion.div key={prompt.id} className="zen-card p-5 zen-shadow hover:zen-shadow-lg transition-all duration-300 ease-out relative group flex flex-col"
                 variants={{
                   hidden: { opacity: 0, y: 12, scale: 0.95 },
                   show: {
@@ -586,34 +620,30 @@ const PromptsTab = () => {
                     }
                   }
                 }}
-                whileHover={{ y: -4, scale: 1.01, transition: { duration: 0.2 } }}
+                whileHover={{ y: -4, transition: { duration: 0.2 } }}
               >
-                {prompt.is_pinned && (
-                  <div className="absolute -top-2 -right-2 bg-secondary text-foreground border border-border rounded-full p-1 shadow">
-                    <Pin className="h-3 w-3" />
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    {prompt.is_pinned && <Pin className="h-3.5 w-3.5 flex-shrink-0 fill-current text-primary" />}
+                    <h3 className="truncate text-base font-semibold text-foreground">{prompt.title}</h3>
                   </div>
-                )}
-                <div className="flex items-start justify-between mb-2">
-                  <h3 className="text-lg font-semibold text-foreground truncate pr-2">
-                    {prompt.title}
-                  </h3>
                   {prompt.category && (
-                    <Badge variant="secondary" className="whitespace-nowrap ml-2">
+                    <Badge variant="secondary" className="flex-shrink-0 whitespace-nowrap text-[11px]">
                       {prompt.category}
                     </Badge>
                   )}
                 </div>
-                <p className="text-muted-foreground mb-4 text-sm overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}>
+                <p className="mb-3 flex-1 overflow-hidden text-sm leading-relaxed text-muted-foreground" style={{ display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical' }}>
                   {prompt.prompt_text}
                 </p>
                 {prompt.tags && prompt.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="mb-3 flex flex-wrap gap-1">
                     {prompt.tags.map(tag => (
                       <TagBadge key={tag.id} tag={tag} size="sm" />
                     ))}
                   </div>
                 )}
-                <div className="flex space-x-2">
+                <div className="mt-auto flex items-center gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -621,48 +651,40 @@ const PromptsTab = () => {
                     className="flex-1"
                   >
                     {copiedId === prompt.id ? (
-                      <>
-                        <Check className="h-4 w-4 mr-1" />
-                        Copied
-                      </>
+                      <><Check className="h-4 w-4 mr-1.5" /> Copied</>
                     ) : (
-                      <>
-                        <Copy className="h-4 w-4 mr-1" />
-                        Copy
-                      </>
+                      <><Copy className="h-4 w-4 mr-1.5" /> Copy</>
                     )}
                   </Button>
                   <Button
-                    size="sm"
-                    variant="outline"
+                    size="icon-sm"
+                    variant="ghost"
                     onClick={() => handleToggleFavorite(prompt)}
-                    className={prompt.is_favorited ? "text-warning hover:text-warning/80" : ""}
+                    className={prompt.is_favorited ? 'h-9 w-9 text-warning hover:text-warning' : 'h-9 w-9 text-muted-foreground'}
+                    title={prompt.is_favorited ? 'Unfavorite' : 'Favorite'}
+                    aria-label="Toggle favorite"
                   >
-                    <Star className={`h-4 w-4 ${prompt.is_favorited ? "fill-current" : ""}`} />
+                    <Star className={`h-4 w-4 ${prompt.is_favorited ? 'fill-current' : ''}`} />
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleTogglePin(prompt)}
-                    className={prompt.is_pinned ? "text-foreground" : ""}
-                  >
-                    <Pin className={`h-4 w-4 ${prompt.is_pinned ? 'fill-current' : ''}`} />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleEditPrompt(prompt)}
-                  >
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setDeleteConfirm({ open: true, id: prompt.id })}
-                    className="text-destructive hover:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="icon-sm" variant="ghost" className="h-9 w-9 text-muted-foreground" aria-label="More actions">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleTogglePin(prompt)}>
+                        <Pin className={`h-4 w-4 mr-2 ${prompt.is_pinned ? 'fill-current' : ''}`} /> {prompt.is_pinned ? 'Unpin' : 'Pin'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleEditPrompt(prompt)}>
+                        <Edit className="h-4 w-4 mr-2" /> Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setDeleteConfirm({ open: true, id: prompt.id })} className="text-destructive focus:text-destructive">
+                        <Trash2 className="h-4 w-4 mr-2" /> Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </motion.div>
             ))}

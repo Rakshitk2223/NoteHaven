@@ -13,6 +13,7 @@
 // for non-React call sites (e.g. formatCurrency in lib/ledger.ts).
 
 import { supabase } from '@/integrations/supabase/client';
+import { applyTheme, getCurrentTheme } from '@/lib/themes';
 
 export type Mode = 'light' | 'dark' | 'system';
 export type FontSize = 'sm' | 'md' | 'lg';
@@ -194,10 +195,11 @@ export function applyPreferencesToDOM(prefs: AppPreferences) {
       root.style.setProperty(v, accentHsl);
     }
   } else {
-    // Clear our overrides so the active theme's values win again.
-    for (const v of ['--primary', '--ring', '--sidebar-primary', '--sidebar-ring', '--glow']) {
-      root.style.removeProperty(v);
-    }
+    // No custom accent: re-apply the active theme's brand tokens. Simply removing
+    // the overrides would fall back to the stylesheet defaults and visibly change
+    // the theme (e.g. Netflix red → Aurora indigo) whenever an unrelated pref is
+    // toggled, since applyTheme writes --primary/--ring/--glow as inline styles.
+    applyTheme(getCurrentTheme(), resolveMode(getStoredMode()));
   }
 
   // Border radius scale.
