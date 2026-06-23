@@ -202,8 +202,8 @@ export function CalendarMiniWidget({
           {days}
         </div>
 
-        <div className="flex items-center justify-between pt-2">
-          <div className="flex gap-3 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full bg-primary" />
               <span className="text-muted-foreground">Tasks</span>

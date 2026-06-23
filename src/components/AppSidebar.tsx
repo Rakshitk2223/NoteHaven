@@ -302,7 +302,7 @@ const AppSidebar = () => {
 
         {/* Main Navigation */}
         <nav className={cn(
-          "flex-1 py-4 overflow-y-auto",
+          "flex-1 min-h-0 py-4 overflow-y-auto",
           isCollapsed ? "lg:px-2 lg:space-y-2" : "px-3 space-y-1"
         )}>
           {mainNavigation.map((item) => (

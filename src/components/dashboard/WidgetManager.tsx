@@ -15,6 +15,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog';
 import {
@@ -152,9 +153,12 @@ export function WidgetManager({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto overflow-x-hidden">
+        <DialogHeader className="text-left">
           <DialogTitle>Customize Dashboard</DialogTitle>
+          <DialogDescription>
+            Show, hide, resize and reorder the widgets on your dashboard.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
@@ -167,11 +171,13 @@ export function WidgetManager({
           </div>
 
           <div>
-            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-              <Eye className="h-4 w-4" />
-              Active Widgets ({activeWidgets.length})
+            <h3 className="text-sm font-medium mb-3 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="flex items-center gap-2">
+                <Eye className="h-4 w-4" />
+                Active Widgets ({activeWidgets.length})
+              </span>
               <span className="text-xs text-muted-foreground font-normal">
-                - Drag to reorder
+                Drag to reorder
               </span>
             </h3>
 
@@ -195,7 +201,7 @@ export function WidgetManager({
                       onDragOver={(e) => handleDragOver(e, globalIndex)}
                       onDragEnd={handleDragEnd}
                       className={cn(
-                        'flex items-center gap-3 p-3 bg-secondary/50 rounded-lg border transition-all',
+                        'flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 bg-secondary/50 rounded-lg border transition-all',
                         draggedIndex === globalIndex &&
                           'opacity-50 ring-2 ring-primary'
                       )}
@@ -217,9 +223,9 @@ export function WidgetManager({
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-8">
-                            <Maximize2 className="h-3.5 w-3.5 mr-1" />
-                            {sizeLabels[widget.size]}
+                          <Button variant="ghost" size="sm" className="h-8 px-2 flex-shrink-0">
+                            <Maximize2 className="h-3.5 w-3.5 sm:mr-1" />
+                            <span className="hidden sm:inline">{sizeLabels[widget.size]}</span>
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
@@ -265,7 +271,7 @@ export function WidgetManager({
                 All widgets are active!
               </p>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {availableWidgets.map((widget) => {
                   const meta = widgetMetadata[widget.type];
 
@@ -300,21 +306,21 @@ export function WidgetManager({
           </div>
         </div>
 
-        <DialogFooter className="sm:justify-between">
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between sm:gap-0">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => { onReset(); onClose(); }}
-            className="text-muted-foreground"
+            className="w-full text-muted-foreground sm:w-auto"
           >
             <RotateCcw className="h-4 w-4 mr-1" />
             Reset to default
           </Button>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose}>
+          <div className="flex w-full gap-2 sm:w-auto">
+            <Button variant="outline" onClick={onClose} className="flex-1 sm:flex-none">
               Cancel
             </Button>
-            <Button onClick={handleSave}>Save Changes</Button>
+            <Button onClick={handleSave} className="flex-1 sm:flex-none">Save Changes</Button>
           </div>
         </DialogFooter>
       </DialogContent>

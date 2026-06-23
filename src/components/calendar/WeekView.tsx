@@ -49,7 +49,8 @@ export const WeekView = ({ currentDate, events, onDateClick, onDateDoubleClick }
   };
 
   return (
-    <div className="bg-card rounded-lg border shadow-sm overflow-hidden">
+    <div className="bg-card rounded-lg border shadow-sm overflow-x-auto">
+      <div className="min-w-[640px]">
       {/* Header */}
       <div className="grid grid-cols-7 border-b">
         {eventsByDay.map(({ day }, index) => {
@@ -115,6 +116,7 @@ export const WeekView = ({ currentDate, events, onDateClick, onDateDoubleClick }
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );

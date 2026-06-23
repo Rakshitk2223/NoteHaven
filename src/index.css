@@ -354,6 +354,13 @@
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* Route entrance: opacity-only so the wrapper never holds a transform —
+   a persisted transform would make it a containing block for position:fixed
+   descendants (the AppSidebar), stretching the fixed rail to full page height. */
+@keyframes fadeInRoute {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 @keyframes fadeInScale {
   from { opacity: 0; transform: scale(0.97); }
   to   { opacity: 1; transform: scale(1); }
@@ -383,7 +390,7 @@
 .animate-fade-in-scale { animation: fadeInScale var(--dur-base) var(--ease-spring) forwards; }
 .animate-slide-in-left { animation: slideInFromLeft var(--dur-base) var(--ease-out) forwards; }
 .animate-slide-in-right{ animation: slideInFromRight var(--dur-base) var(--ease-out) forwards; }
-.animate-route         { animation: fadeIn var(--dur-base) var(--ease-out) forwards; }
+.animate-route         { animation: fadeInRoute var(--dur-base) var(--ease-out); }
 .animate-glow-pulse    { animation: glowPulse 2.4s ease-in-out infinite; }
 .animate-float         { animation: float 5s ease-in-out infinite; }
 

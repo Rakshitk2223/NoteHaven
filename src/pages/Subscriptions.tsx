@@ -462,11 +462,11 @@ const Subscriptions = () => {
                       <StaggerItem
                         key={sub.id}
                         hover={false}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                        className="flex flex-col gap-3 p-4 border rounded-lg hover:bg-muted/50 transition-colors sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div className="flex items-center gap-4 flex-1">
-                          <div 
-                            className="w-3 h-3 rounded-full"
+                        <div className="flex items-center gap-3 flex-1 min-w-0 flex-wrap sm:gap-4">
+                          <div
+                            className="w-3 h-3 rounded-full flex-shrink-0"
                             style={{ backgroundColor: statusColor }}
                           />
                           
@@ -492,7 +492,7 @@ const Subscriptions = () => {
                             </p>
                           </div>
                           
-                          <div className="text-right">
+                          <div className="text-left flex-shrink-0 sm:text-right">
                             <p className="text-sm font-medium">
                               {daysUntil === null ? 'No renewal date' :
                                daysUntil === 0 ? 'Renews today' :
@@ -515,7 +515,7 @@ const Subscriptions = () => {
                           </Badge>
                         </div>
                         
-                        <div className="flex items-center gap-1 ml-4">
+                        <div className="flex items-center gap-1 self-end flex-shrink-0 sm:self-auto sm:ml-4">
                           <Button
                             variant="ghost"
                             size="sm"

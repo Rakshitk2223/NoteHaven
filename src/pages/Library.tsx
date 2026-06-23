@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Code, MessageSquare, Search, ChevronDown, ChevronRight, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil, Library as LibraryIcon } from "lucide-react";
+import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Code, MessageSquare, Search, ChevronDown, ChevronRight, ChevronLeft, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil, Library as LibraryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -1038,23 +1038,28 @@ const SnippetsTab = () => {
 
   if (loading) {
     return (
-      <div className="flex gap-4 h-[calc(100vh-250px)]">
-        <div className="w-64 flex-shrink-0 space-y-2">
+      <div className="flex flex-col gap-4 md:flex-row md:h-[calc(100vh-250px)]">
+        <div className="w-full md:w-64 flex-shrink-0 space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
           ))}
         </div>
         <div className="flex-1">
-          <Skeleton className="h-full w-full" />
+          <Skeleton className="h-64 w-full md:h-full" />
         </div>
       </div>
     );
   }
 
+  // On mobile we show one pane at a time (master/detail). The detail pane
+  // (preview, or the create/edit form) takes over the screen once something
+  // is selected; a back button returns to the file list.
+  const showDetail = isCreating || isEditing || !!selectedSnippet;
+
   return (
     <>
-      <div className="flex gap-4 h-[calc(100vh-250px)]">
-        <div className="w-64 flex-shrink-0 border border-border rounded-lg overflow-hidden flex flex-col bg-card">
+      <div className="flex flex-col gap-4 md:flex-row md:h-[calc(100vh-250px)]">
+        <div className={`w-full md:w-64 flex-shrink-0 border border-border rounded-lg overflow-hidden flex-col bg-card h-[calc(100vh-250px)] md:h-auto ${showDetail ? "hidden md:flex" : "flex"}`}>
           <div className="p-3 border-b border-border space-y-2">
             <div className="flex gap-2">
               <Button size="sm" className="flex-1" onClick={() => startCreating()}>
@@ -1218,11 +1223,14 @@ const SnippetsTab = () => {
           </div>
         </div>
 
-        <div className="flex-1 border border-border rounded-lg overflow-hidden flex flex-col bg-card">
+        <div className={`flex-1 border border-border rounded-lg overflow-hidden flex-col bg-card h-[calc(100vh-250px)] md:h-auto ${showDetail ? "flex" : "hidden md:flex"}`}>
           {isCreating || isEditing ? (
             <div className="flex flex-col h-full">
               <div className="p-4 border-b border-border space-y-3">
                 <div className="flex items-center gap-3">
+                  <Button size="icon-sm" variant="ghost" onClick={cancelForm} className="md:hidden flex-shrink-0" aria-label="Back to files">
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
                   <Input
                     value={formData.title}
                     onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
@@ -1307,6 +1315,9 @@ const SnippetsTab = () => {
               <div className="p-4 border-b border-border">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                    <Button size="icon-sm" variant="ghost" onClick={() => setSelectedSnippet(null)} className="md:hidden flex-shrink-0" aria-label="Back to files">
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
                     {selectedSnippet.is_pinned && <Pin className="h-4 w-4 fill-current text-foreground flex-shrink-0" />}
                     {selectedSnippet.is_favorited && <Star className="h-4 w-4 fill-current text-warning flex-shrink-0" />}
                     <h2 className="text-lg font-semibold text-foreground truncate">

@@ -110,7 +110,7 @@ export const MonthView = ({
             <div
               onClick={() => onDateClick(day)}
               className={cn(
-                "min-h-[120px] lg:min-h-[140px] p-1.5 lg:p-2 border-r border-b cursor-pointer transition-all flex flex-col",
+                "min-h-[78px] sm:min-h-[110px] lg:min-h-[140px] p-1 sm:p-1.5 lg:p-2 border-r border-b cursor-pointer transition-all flex flex-col",
                 !isCurrentMonth && "bg-muted/30 text-muted-foreground",
                 isSelected && "bg-secondary ring-1 ring-primary",
                 isTodayDate && !isSelected && "bg-accent/30",

@@ -1109,10 +1109,10 @@ const Notes = () => {
                         value={titleValue}
                         onChange={(e) => handleTitleChange(e.target.value)}
                         placeholder="Note title..."
-                        className="text-base sm:text-lg md:text-xl font-semibold border-0 focus-visible:ring-0 px-0 w-full"
+                        className="text-base sm:text-lg md:text-xl font-semibold border-0 focus-visible:ring-0 px-3 w-full"
                       />
                       {/* Tags */}
-                      <div className="mt-2">
+                      <div className="mt-2 px-3">
                         <CompactTagSelector
                           selectedTags={currentNoteTags}
                           onChange={handleTagsChange}

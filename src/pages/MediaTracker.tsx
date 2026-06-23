@@ -396,6 +396,20 @@ const MediaListRow = ({
         <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
       </div>
 
+      {/* Mobile progress stepper — the desktop progress column is hidden < sm,
+          so surface a compact +/- here so episodes/chapters are editable on phones. */}
+      {progressField && (
+        <div className="flex flex-shrink-0 items-center gap-0.5 sm:hidden">
+          <Button size="icon-sm" variant="outline" className="h-8 w-8" disabled={isUpdating || curValue <= 0} onClick={() => onQuickUpdate(item, progressField, -1)} aria-label="Decrease progress">
+            <Minus className="h-4 w-4" />
+          </Button>
+          <span className="min-w-[1.75rem] text-center text-xs tabular-nums">{curValue}</span>
+          <Button size="icon-sm" variant="outline" className="h-8 w-8" disabled={isUpdating} onClick={() => onQuickUpdate(item, progressField, 1)} aria-label="Increase progress">
+            <PlusIcon className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-shrink-0 items-center gap-1 transition-opacity sm:opacity-60 sm:group-hover:opacity-100">
         <Button size="icon-sm" variant="ghost" className="h-8 w-8" onClick={() => onOpenDetails(item, 'edit')} aria-label={`Edit ${item.title}`} title="Edit">
@@ -474,6 +488,7 @@ const MediaTracker = () => {
   const [quickAddTitle, setQuickAddTitle] = useState('');
   const [quickAddType, setQuickAddType] = useState<MediaItem['type']>('');
   const [quickAddProgress, setQuickAddProgress] = useState('');
+  const [quickAddStatus, setQuickAddStatus] = useState<MediaItem['status'] | ''>('');
   const [formData, setFormData] = useState({
     title: "",
     type: "" as MediaItem['type'],
@@ -1297,9 +1312,9 @@ const MediaTracker = () => {
       const isReadable = readableTypes.includes(quickAddType);
       const isWatchable = watchableTypes.includes(quickAddType);
       
-      // Determine default status based on type
-      const defaultStatus = isReadable ? 'Reading' : 'Watching';
-      
+      // Use the chosen status, falling back to a sensible default for the type.
+      const status = quickAddStatus || (isReadable ? 'Reading' : 'Watching');
+
       const mediaData: {
         title: string;
         type: string;
@@ -1310,7 +1325,7 @@ const MediaTracker = () => {
       } = {
         title: quickAddTitle.trim(),
         type: quickAddType,
-        status: defaultStatus,
+        status,
         user_id: user.id
       };
       
@@ -1330,6 +1345,7 @@ const MediaTracker = () => {
       setQuickAddTitle('');
       setQuickAddType('' as MediaItem['type']);
       setQuickAddProgress('');
+      setQuickAddStatus('');
       refetch();
       toast({ title: 'Added!', description: `${quickAddTitle} has been added to your tracker` });
     } catch (e: unknown) {
@@ -2555,7 +2571,7 @@ const MediaTracker = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Type</Label>
-                      <Select value={quickAddType} onValueChange={(value) => setQuickAddType(value as MediaItem['type'])}>
+                      <Select value={quickAddType} onValueChange={(value) => { setQuickAddType(value as MediaItem['type']); setQuickAddStatus(''); }}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>
@@ -2591,6 +2607,25 @@ const MediaTracker = () => {
                       />
                     </div>
                   </div>
+
+                  <div className="space-y-2">
+                    <Label>Status</Label>
+                    <Select value={quickAddStatus} onValueChange={(value) => setQuickAddStatus(value as MediaItem['status'])}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={quickAddType ? (readableTypes.includes(quickAddType) ? 'Reading (default)' : 'Watching (default)') : 'Select status'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(readableTypes.includes(quickAddType)
+                          ? ['Reading', 'Plan to Read', 'Completed']
+                          : watchableTypes.includes(quickAddType)
+                          ? ['Watching', 'Plan to Watch', 'Completed']
+                          : [...VALID_STATUSES]
+                        ).map((s) => (
+                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
@@ -2608,7 +2643,7 @@ const MediaTracker = () => {
                       setFormData({
                         title: quickAddTitle,
                         type: carriedType,
-                        status: "" as MediaItem['status'],
+                        status: (quickAddStatus || "") as MediaItem['status'],
                         rating: "",
                         current_season: "",
                         current_episode: isWatchable ? quickAddProgress : "",

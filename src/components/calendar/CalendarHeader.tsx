@@ -73,9 +73,9 @@ export const CalendarHeader = ({
   return (
     <div className="space-y-4">
       {/* Main Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             <Button
               variant="ghost"
               size="icon"
@@ -94,17 +94,17 @@ export const CalendarHeader = ({
             </Button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <CalendarIcon className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-xl font-semibold min-w-[200px]">{getDisplayDate()}</h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <CalendarIcon className="hidden sm:block h-5 w-5 text-muted-foreground flex-shrink-0" />
+            <h2 className="text-base sm:text-xl font-semibold truncate">{getDisplayDate()}</h2>
           </div>
 
-          <Button variant="outline" size="sm" onClick={handleToday}>
+          <Button variant="outline" size="sm" onClick={handleToday} className="flex-shrink-0">
             Today
           </Button>
         </div>
 
-        <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+        <div className="flex items-center gap-1 bg-muted rounded-lg p-1 flex-shrink-0">
           <Button
             variant={view === 'month' ? 'default' : 'ghost'}
             size="sm"
@@ -123,7 +123,7 @@ export const CalendarHeader = ({
       </div>
 
       {/* Filters Legend */}
-      <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 bg-muted/50 rounded-lg">
         <span className="text-sm font-medium text-muted-foreground">Show:</span>
         {filterOrder.map((key) => (
           <div key={key} className="flex items-center space-x-2">

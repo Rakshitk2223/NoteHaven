@@ -227,8 +227,19 @@ const MoneyLedger = () => {
     </>
   );
 
+  const mobileActions = (
+    <Button
+      variant="gradient"
+      size="icon-sm"
+      onClick={() => { setNewEntry(emptyForm()); setIsAddOpen(true); }}
+      aria-label="Add entry"
+    >
+      <Plus className="h-4 w-4" />
+    </Button>
+  );
+
   return (
-    <PageShell title="Money Ledger" subtitle="Your real money in hand — income in, expenses out, cumulative" icon={Wallet} actions={actions}>
+    <PageShell title="Money Ledger" subtitle="Your real money in hand — income in, expenses out, cumulative" icon={Wallet} actions={actions} mobileActions={mobileActions}>
       {/* Add / Edit dialogs */}
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
         <DialogContent className="sm:max-w-[425px]">
