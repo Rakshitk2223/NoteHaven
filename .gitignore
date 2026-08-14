@@ -48,3 +48,6 @@ bun.lockb
 bun.lock
 yarn.lock
 pnpm-lock.yaml
+
+# Local data backups (contain real user rows — never commit)
+backups/

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp, Database, Upload, FileText } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp, Database, Upload, FileText, BarChart3, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,6 +66,14 @@ import { dateToYMD } from "@/lib/date-utils";
 import { refreshCoverImage } from "@/lib/media-refresh";
 import { fetchMediaMetadataBatch, removeCoverImage, acknowledgeNewContent, computeProgress, type MediaMeta } from "@/lib/media-metadata";
 import { Progress } from "@/components/ui/progress";
+import { ContinueShelf } from "@/components/media/ContinueShelf";
+import { AiringSoon } from "@/components/media/AiringSoon";
+import { GenreRail } from "@/components/media/GenreRail";
+import { LibraryStatsDialog } from "@/components/media/LibraryStatsDialog";
+import {
+  buildContinueQueue, buildAiringSoon, buildGenreCounts, itemHasGenre,
+  timeToFinish, episodeDataFreshness, type QueueEntry,
+} from "@/lib/media-insights";
 
 interface MediaItem {
   id: number;
@@ -459,6 +467,24 @@ const MediaTracker = () => {
   const [needsCoverOnly, setNeedsCoverOnly] = useState(false);
   // Quick "what should I watch?" filter: all | behind (progress < total) | new (new season dropped)
   const [progressFilter, setProgressFilter] = useState<'all' | 'behind' | 'new'>('all');
+
+  // Genre filtering replaces the tag selector media never used: media_tags held
+  // zero rows across the whole library, while genres are cached automatically.
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [genresExpanded, setGenresExpanded] = useState(false);
+  // The discovery rails are heavy on a 1,200-item library; let them be hidden.
+  const [showRails, setShowRails] = useState<boolean>(() => {
+    try { return localStorage.getItem('mediaShowRails') !== '0'; } catch { return true; }
+  });
+  const [statsOpen, setStatsOpen] = useState(false);
+
+  const toggleRails = useCallback(() => {
+    setShowRails((v) => {
+      const next = !v;
+      try { localStorage.setItem('mediaShowRails', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
   const [refreshLibraryOpen, setRefreshLibraryOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [tabsManageOpen, setTabsManageOpen] = useState(false);
@@ -716,11 +742,55 @@ const MediaTracker = () => {
     }).catch(err => console.error('Initial load error:', err));
   }, [mediaItems, imageUrls.size]);
 
+  /**
+   * Source data for the Continue / Airing rails.
+   *
+   * Deliberately NOT derived from `mediaItems`: that is a paginated slice of the
+   * grid (200 rows at a time, ordered by whatever the grid is sorted by, title
+   * A-Z by default). Building "what did I last watch" from it meant the rail
+   * could only ever see recently-touched items that happened to fall inside the
+   * first page alphabetically — so the show you actually just updated was
+   * usually missing.
+   *
+   * This asks the database the real question: my in-progress titles, most
+   * recently active first.
+   */
+  const { data: railItems = [] } = useQuery({
+    queryKey: ['mediaRails'],
+    queryFn: async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) return [] as MediaItem[];
+      const { data, error } = await supabase
+        .from('media_tracker')
+        .select('id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, has_new_content, last_known_total_episodes, last_known_total_seasons')
+        .eq('user_id', user.id)
+        .neq('status', 'Completed')
+        // last_activity_at is null for rows untouched since migration 11a, so
+        // fall back to updated_at rather than burying them.
+        .order('last_activity_at', { ascending: false, nullsFirst: false })
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .limit(150);
+      if (error) throw error;
+      return (data || []) as MediaItem[];
+    },
+    staleTime: 60 * 1000,
+  });
+
   // Fetch cached metadata (synopsis/totals/seasons/etc.) for loaded items in one
   // query. Tracked via a ref so each id is attempted at most once per mount.
   useEffect(() => {
-    if (mediaItems.length === 0) return;
-    const todo = mediaItems.filter((i) => !metadataAttemptedRef.current.has(i.id));
+    // Rail items are fetched separately and are often outside the loaded grid
+    // pages, so they need their metadata pulled too — otherwise Continue shows
+    // no totals and Airing Soon finds no air dates.
+    const candidates = [...mediaItems, ...railItems];
+    if (candidates.length === 0) return;
+    const seen = new Set<number>();
+    const todo = candidates.filter((i) => {
+      if (seen.has(i.id) || metadataAttemptedRef.current.has(i.id)) return false;
+      seen.add(i.id);
+      return true;
+    });
     if (todo.length === 0) return;
     todo.forEach((i) => metadataAttemptedRef.current.add(i.id));
     fetchMediaMetadataBatch(todo.map((i) => ({ id: i.id, title: i.title, type: i.type })))
@@ -728,7 +798,7 @@ const MediaTracker = () => {
         if (m.size) setMetadataMap((prev) => new Map([...prev, ...m]));
       })
       .catch((err) => console.error('Metadata load error:', err));
-  }, [mediaItems]);
+  }, [mediaItems, railItems]);
 
   // Persist a light projection of the metadata map so revisits are instant.
   useEffect(() => {
@@ -759,6 +829,25 @@ const MediaTracker = () => {
   useEffect(() => {
     queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
   }, [totalCount, queryClient]);
+
+
+  // Covers for rail items. They bypass the grid's lazy-loading observer (they are
+  // not grid rows), so without this the Continue shelf shows letter tiles.
+  const railCoversRef = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const todo = railItems.filter(
+      (i) => !i.cover_image && !imageUrlsRef.current.has(i.id) && !railCoversRef.current.has(i.id),
+    );
+    if (todo.length === 0) return;
+    todo.forEach((i) => railCoversRef.current.add(i.id));
+    fetchImagesFromSupabaseBatch(todo.map((i) => ({ id: i.id, title: i.title, type: i.type })))
+      .then((response) => {
+        const urls = new Map<number, string | null>();
+        response.results.forEach((r) => urls.set(r.id, r.imageUrl));
+        if (urls.size) setImageUrls((prev) => new Map([...prev, ...urls]));
+      })
+      .catch((err) => console.error('Rail cover load error:', err));
+  }, [railItems]);
 
   // Fetch group counts from database (separate from items query).
   // Paginated so libraries larger than PostgREST's 1000-row response cap are
@@ -892,8 +981,35 @@ const MediaTracker = () => {
     return filteredByTagsMediaItems.filter((item) => itemBelongsToCustomGroup(item.type, activeGroup));
   }, [filteredByTagsMediaItems, activeCategory, customGroups]);
 
+  // Derived rails + genre facets. All pure functions over data already loaded.
+  const genreCounts = useMemo(
+    () => buildGenreCounts(categoryFilteredItems, metadataMap),
+    [categoryFilteredItems, metadataMap],
+  );
+
+  const continueQueue = useMemo(
+    () => buildContinueQueue(railItems, metadataMap, 20),
+    [railItems, metadataMap],
+  );
+
+  const airingSoon = useMemo(
+    () => buildAiringSoon(railItems, metadataMap, 14),
+    [railItems, metadataMap],
+  );
+
+  const episodeFreshness = useMemo(
+    () => episodeDataFreshness(railItems, metadataMap),
+    [railItems, metadataMap],
+  );
+
   const finalItems = useMemo(() => {
     let base = categoryFilteredItems;
+
+    // Genres are AND-ed: "Action + Thriller" means both, matching how the tag
+    // filter behaved.
+    if (selectedGenres.length > 0) {
+      base = base.filter((i) => selectedGenres.every((g) => itemHasGenre(i.id, g, metadataMap)));
+    }
 
     // "Needs cover" = no persisted cover_image AND no resolved cover from the lazy loader.
     // Using the persisted column keeps the filter stable regardless of scroll position.
@@ -924,7 +1040,7 @@ const MediaTracker = () => {
     }
 
     return base;
-  }, [categoryFilteredItems, needsCoverOnly, imageUrls, progressFilter, sortBy, sortOrder, metadataMap]);
+  }, [categoryFilteredItems, needsCoverOnly, imageUrls, progressFilter, sortBy, sortOrder, metadataMap, selectedGenres]);
 
   // When "Needs cover" is on, resolve covers for the in-scope set (not just the
   // visible rows), in chunks, so every item actually missing artwork surfaces.
@@ -956,8 +1072,9 @@ const MediaTracker = () => {
     activeCategory !== 'all' ||
     needsCoverOnly ||
     progressFilter !== 'all' ||
-    selectedTags.length > 0
-  ), [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags]);
+    selectedTags.length > 0 ||
+    selectedGenres.length > 0
+  ), [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags, selectedGenres]);
 
   const resetAllFilters = useCallback(() => {
     setFilterStatus('All');
@@ -967,6 +1084,7 @@ const MediaTracker = () => {
     setNeedsCoverOnly(false);
     setProgressFilter('all');
     setSelectedTags([]);
+    setSelectedGenres([]);
   }, []);
 
   // Count of distinct active filter facets (for the Filters button badge).
@@ -978,8 +1096,9 @@ const MediaTracker = () => {
     if (needsCoverOnly) n += 1;
     if (progressFilter !== 'all') n += 1;
     n += selectedTags.length;
+    n += selectedGenres.length;
     return n;
-  }, [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags]);
+  }, [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags, selectedGenres]);
 
   const selectedItems = useMemo(() => {
     if (selectedIds.size === 0) return [];
@@ -1182,7 +1301,7 @@ const MediaTracker = () => {
   // Generic optimistic patch (status / rating / season / episode / chapter).
   // Updates the open detail item AND the React Query cache so the drawer and the
   // grid/list cards stay perfectly in sync — no refetch, instant feedback.
-  const patchMedia = async (
+  const patchMedia = useCallback(async (
     item: MediaItem,
     patch: { status?: MediaItem['status']; rating?: number | null; current_season?: number; current_episode?: number; current_chapter?: number },
   ) => {
@@ -1195,16 +1314,54 @@ const MediaTracker = () => {
         pages: old.pages.map((pg) => ({ ...pg, items: pg.items.map((i) => i.id === item.id ? ({ ...i, ...patch } as MediaItem) : i) })),
       } : old,
     );
+    // Keep the Continue shelf in step: it reads its own query, so without this a
+    // "+1" would not move the card until the next refetch.
+    queryClient.setQueryData<MediaItem[]>(['mediaRails'], (old) =>
+      old?.map((i) => (i.id === item.id ? ({ ...i, ...patch, last_activity_at: new Date().toISOString() } as MediaItem) : i)),
+    );
     try {
-      const { error } = await supabase.from('media_tracker').update({ ...patch, last_activity_at: new Date().toISOString() }).eq('id', item.id);
+      const { error } = await supabase
+        .from('media_tracker')
+        .update({ ...patch, last_activity_at: new Date().toISOString() })
+        .eq('id', item.id)
+        .eq('user_id', item.user_id);
       if (error) throw error;
     } catch (e: unknown) {
       queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
+      queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
       toast({ title: 'Update failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
     } finally {
       setUpdatingIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
     }
-  };
+  }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder, toast]);
+
+  /**
+   * "Watched next" from the Continue rail: advance one episode/chapter without
+   * opening anything. Rolls the season over when the current one is finished, so
+   * the rail keeps working past a season boundary instead of stalling at the
+   * last episode.
+   */
+  const advanceQueueEntry = useCallback((entry: QueueEntry) => {
+    const { item, meta } = entry;
+    if (READABLE_TYPES.includes(item.type)) {
+      patchMedia(item as MediaItem, { current_chapter: (item.current_chapter ?? 0) + 1 });
+      return;
+    }
+    if (!WATCHABLE_TYPES.includes(item.type)) return;
+
+    const season = item.current_season || 1;
+    const nextEp = (item.current_episode ?? 0) + 1;
+    const seasonSize = meta?.seasons?.find((sn) => sn.season_number === season)?.episode_count ?? null;
+
+    if (seasonSize && nextEp > seasonSize) {
+      const hasNextSeason = meta?.seasons?.some((sn) => sn.season_number === season + 1);
+      if (hasNextSeason) {
+        patchMedia(item as MediaItem, { current_season: season + 1, current_episode: 1 });
+        return;
+      }
+    }
+    patchMedia(item as MediaItem, { current_episode: nextEp });
+  }, [patchMedia]);
 
   // +/- a numeric progress field from the detail drawer (floors at 1).
   const bumpField = (item: MediaItem, field: 'current_season' | 'current_episode' | 'current_chapter', amount: number) => {
@@ -2257,18 +2414,33 @@ const MediaTracker = () => {
                                           const watched = isCurrent
                                             ? (editingItem.current_episode || 0) >= e.number
                                             : curSeason > s.season_number;
+                                          // Clicking an episode sets progress straight to it —
+                                          // the list showed every episode but was inert, so
+                                          // jumping to E14 meant tapping +1 fourteen times.
+                                          // Clicking the one you are already on steps back by
+                                          // one, which is the natural undo.
+                                          const target = watched && isCurrent && (editingItem.current_episode || 0) === e.number
+                                            ? e.number - 1
+                                            : e.number;
                                           return (
-                                            <li key={e.number} className="flex items-start gap-3 py-2">
-                                              <span className={cn('mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold tabular-nums', watched ? 'bg-[hsl(var(--success)/0.2)] text-[hsl(var(--success))]' : 'bg-muted text-muted-foreground')}>
-                                                {watched ? '✓' : e.number}
-                                              </span>
-                                              <div className="min-w-0 flex-1">
-                                                <div className="flex items-center justify-between gap-2">
-                                                  <span className={cn('truncate text-[13px] font-medium', watched && 'text-muted-foreground')}>{e.name || `Episode ${e.number}`}</span>
-                                                  <span className="flex-shrink-0 text-[11px] text-muted-foreground tabular-nums">{e.runtime ? `${e.runtime}m` : e.air_date ? e.air_date.slice(0, 10) : ''}</span>
+                                            <li key={e.number}>
+                                              <button
+                                                type="button"
+                                                onClick={() => patchMedia(editingItem, { current_season: s.season_number, current_episode: target })}
+                                                title={`Set progress to S${s.season_number} · E${e.number}`}
+                                                className="flex w-full items-start gap-3 rounded-md py-2 pr-1 text-left transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+                                              >
+                                                <span className={cn('mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold tabular-nums transition-colors', watched ? 'bg-[hsl(var(--success)/0.2)] text-[hsl(var(--success))]' : 'bg-muted text-muted-foreground')}>
+                                                  {watched ? '✓' : e.number}
+                                                </span>
+                                                <div className="min-w-0 flex-1">
+                                                  <div className="flex items-center justify-between gap-2">
+                                                    <span className={cn('truncate text-[13px] font-medium', watched && 'text-muted-foreground')}>{e.name || `Episode ${e.number}`}</span>
+                                                    <span className="flex-shrink-0 text-[11px] text-muted-foreground tabular-nums">{e.runtime ? `${e.runtime}m` : e.air_date ? e.air_date.slice(0, 10) : ''}</span>
+                                                  </div>
+                                                  {e.overview && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{e.overview}</p>}
                                                 </div>
-                                                {e.overview && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{e.overview}</p>}
-                                              </div>
+                                              </button>
                                             </li>
                                           );
                                         })}
@@ -2583,6 +2755,15 @@ const MediaTracker = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onClick={() => setStatsOpen(true)}>
+                      <BarChart3 className="h-4 w-4 mr-2" /> Library stats
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={toggleRails}>
+                      {showRails
+                        ? <><EyeOff className="h-4 w-4 mr-2" /> Hide Continue &amp; Airing</>
+                        : <><Eye className="h-4 w-4 mr-2" /> Show Continue &amp; Airing</>}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => setRefreshLibraryOpen(true)}>
                       <RefreshCw className="h-4 w-4 mr-2" /> Refresh Library…
                     </DropdownMenuItem>
@@ -2809,6 +2990,17 @@ const MediaTracker = () => {
             accept="application/json,.json"
             className="hidden"
             onChange={handleJsonImport}
+          />
+
+          <LibraryStatsDialog
+            open={statsOpen}
+            onOpenChange={setStatsOpen}
+            items={mediaItems}
+            metaMap={metadataMap}
+            onOpenItem={(id) => {
+              const target = mediaItems.find((m) => m.id === id);
+              if (target) openDetails(target, 'view');
+            }}
           />
 
           {/* Refresh Library sweep (covers / seasons / descriptions / ratings / status) */}
@@ -3177,6 +3369,50 @@ const MediaTracker = () => {
                 </div>
               </DialogContent>
             </Dialog>
+
+            {/* Discovery rails. Hidden while filtering — once you have narrowed the
+                library you have already answered "what should I watch". */}
+            {!loading && showRails && !hasActiveFilters && (
+              <>
+                <ContinueShelf
+                  entries={continueQueue}
+                  covers={imageUrls}
+                  onAdvance={advanceQueueEntry}
+                  onOpen={(id) => {
+                    // railItems first: a rail entry is frequently outside the
+                    // currently loaded grid pages.
+                    const target = railItems.find((m) => m.id === id) ?? mediaItems.find((m) => m.id === id);
+                    if (target) openDetails(target, 'view');
+                  }}
+                  busyIds={updatingIds}
+                />
+                <AiringSoon
+                  episodes={airingSoon}
+                  covers={imageUrls}
+                  freshness={episodeFreshness}
+                  onRefreshLibrary={() => setRefreshLibraryOpen(true)}
+                  onOpen={(id) => {
+                    const target = railItems.find((m) => m.id === id) ?? mediaItems.find((m) => m.id === id);
+                    if (target) openDetails(target, 'view');
+                  }}
+                />
+              </>
+            )}
+
+            {!loading && genreCounts.length > 0 && (
+              <GenreRail
+                genres={genreCounts}
+                selected={selectedGenres}
+                expanded={genresExpanded}
+                onExpandedChange={setGenresExpanded}
+                onToggle={(g) =>
+                  setSelectedGenres((prev) =>
+                    prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g],
+                  )
+                }
+                onClear={() => setSelectedGenres([])}
+              />
+            )}
 
             {loading ? (
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">

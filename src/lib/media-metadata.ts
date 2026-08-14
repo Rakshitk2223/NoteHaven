@@ -9,56 +9,23 @@
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
 import { mediaSearchGet } from '@/lib/edge-function';
+import type { MediaMeta, EpisodeDetail, SeasonInfo, CastMember } from '@/lib/media-progress';
 import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
+
+// Pure progress helpers + metadata shapes live in their own module so they can
+// be tested without the Supabase client. Re-exported here for existing callers.
+export {
+  computeProgress,
+  type SeasonInfo,
+  type EpisodeDetail,
+  type CastMember,
+  type MediaMeta,
+  type ProgressItem,
+  type ProgressInfo,
+} from '@/lib/media-progress';
 
 const READABLE = ['Manga', 'Manhwa', 'Manhua'];
 const WATCHABLE = ['Series', 'Anime', 'KDrama', 'JDrama'];
-
-export interface SeasonInfo {
-  season_number: number;
-  episode_count: number;
-  air_date: string | null;
-  name: string;
-}
-
-export interface EpisodeDetail {
-  season: number;
-  number: number;
-  name: string;
-  air_date: string | null;
-  runtime: number | null;
-  overview: string | null;
-}
-
-export interface CastMember {
-  name: string;
-  character: string | null;
-  image: string | null;
-}
-
-export interface MediaMeta {
-  description: string | null;
-  episodes: number | null;
-  chapters: number | null;
-  total_seasons: number | null;
-  seasons: SeasonInfo[] | null;
-  banner_image: string | null;
-  rating: number | null;        // external/community rating (0-10)
-  status: string | null;        // 'ongoing' | 'completed' | 'upcoming' | 'hiatus'
-  genres: string[] | null;
-  // V2: full per-episode list + cast (populated by the backfill / Refresh Library).
-  episodes_detail?: EpisodeDetail[] | null;
-  cast_members?: CastMember[] | null;
-  runtime?: number | null;       // typical episode/movie runtime in minutes
-}
-
-// Minimal shape of the tracker fields these helpers depend on.
-export interface ProgressItem {
-  type: string;
-  current_season?: number | null;
-  current_episode?: number | null;
-  current_chapter?: number | null;
-}
 
 const metaKey = (title: string, type: string) =>
   `${title.toLowerCase()}_${type.toLowerCase()}`;
@@ -185,6 +152,33 @@ export async function removeCoverImage(mediaId: number): Promise<boolean> {
   }
 }
 
+/**
+ * Soonest not-yet-aired episode date from a raw episodes_detail payload.
+ *
+ * Returns `undefined` when there is nothing to say (no usable episode data), so
+ * callers can leave release_date untouched, versus `null` which actively clears
+ * a stale date once a series has finished airing.
+ */
+function nextUnairedDate(raw: unknown): string | null | undefined {
+  const eps = parseJsonArray<EpisodeDetail>(raw);
+  if (!eps) return undefined;
+
+  const today = new Date();
+  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  let best: string | null = null;
+  let sawAnyDate = false;
+  for (const ep of eps) {
+    if (!ep?.air_date) continue;
+    sawAnyDate = true;
+    const d = String(ep.air_date).slice(0, 10);
+    if (d < todayYmd) continue;
+    if (!best || d < best) best = d;
+  }
+  // Episode dates existed but all are in the past → the show has finished; clear.
+  return sawAnyDate ? best : undefined;
+}
+
 // Ordered list of sources to try for a type's metadata, best-coverage first.
 // The refresh tries them in order and fills each blank field from the first
 // source that carries it — so one API missing a title (or rate-limiting) no
@@ -226,65 +220,6 @@ function mergeFill(into: Record<string, unknown>, from: Record<string, unknown>)
 }
 
 // ---- progress vs total -----------------------------------------------------
-
-export interface ProgressInfo {
-  kind: 'episode' | 'chapter' | 'none';
-  watched: number;      // episodes watched (across seasons) or chapters read
-  total: number;        // total episodes / chapters (0 when unknown)
-  pct: number;          // 0-100 (0 when total unknown)
-  behind: boolean;      // there is known content beyond the user's progress
-  caughtUp: boolean;    // user has reached the known total
-}
-
-/**
- * Compute progress-vs-total for bars/badges. For watchable items the watched
- * count sums completed prior seasons + the current episode; total is the sum of
- * all season episode counts (falls back to the flat `episodes` total).
- */
-export function computeProgress(item: ProgressItem, meta?: MediaMeta | null): ProgressInfo {
-  const isReadable = READABLE.includes(item.type);
-  const isWatchable = WATCHABLE.includes(item.type);
-
-  if (isReadable) {
-    const watched = item.current_chapter ?? 0;
-    const total = meta?.chapters ?? 0;
-    return buildProgress('chapter', watched, total);
-  }
-
-  if (isWatchable) {
-    const seasons = meta?.seasons ?? null;
-    const total = seasons?.length
-      ? seasons.reduce((sum, s) => sum + (s.episode_count || 0), 0)
-      : (meta?.episodes ?? 0);
-
-    let watched = item.current_episode ?? 0;
-    // Add episodes from fully-completed prior seasons.
-    if (seasons?.length && (item.current_season ?? 1) > 1) {
-      const priorSeasons = seasons.filter((s) => s.season_number < (item.current_season ?? 1));
-      watched += priorSeasons.reduce((sum, s) => sum + (s.episode_count || 0), 0);
-    }
-    return buildProgress('episode', watched, total);
-  }
-
-  // Movies / unknown types: no progress bar.
-  return { kind: 'none', watched: 0, total: 0, pct: 0, behind: false, caughtUp: false };
-}
-
-function buildProgress(kind: 'episode' | 'chapter', watched: number, total: number): ProgressInfo {
-  if (!total || total <= 0) {
-    return { kind, watched, total: 0, pct: 0, behind: false, caughtUp: false };
-  }
-  const clamped = Math.min(watched, total);
-  const pct = Math.round((clamped / total) * 100);
-  return {
-    kind,
-    watched,
-    total,
-    pct,
-    behind: watched < total,
-    caughtUp: watched >= total,
-  };
-}
 
 // ---- library refresh sweep -------------------------------------------------
 
@@ -501,6 +436,18 @@ async function refreshOne(
               patch.has_new_content = true;
               progress.newContent += 1;
             }
+
+            // Stamp the next unaired episode's date onto the tracker row.
+            //
+            // get_calendar_events has always SELECTed media_tracker.release_date
+            // (migration 18 added the column specifically for it) and the Calendar
+            // has always shown a "Media Releases" filter — but nothing in the app
+            // ever wrote the column, so that filter has never produced an event.
+            // The air dates were already being cached in episodes_detail; this
+            // just carries the soonest one across.
+            const nextAir = nextUnairedDate(top.episodes_detail);
+            if (nextAir !== undefined) patch.release_date = nextAir;
+
             if (Object.keys(patch).length > 0) {
               await supabase.from('media_tracker').update(patch).eq('id', item.id).eq('user_id', userId);
             }

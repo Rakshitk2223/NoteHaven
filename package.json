@@ -16,7 +16,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "backfill:covers": "tsx scripts/backfill-cover-images.ts",
-    "backfill:metadata": "tsx scripts/backfill-media-metadata.ts"
+    "backfill:metadata": "tsx scripts/backfill-media-metadata.ts",
+    "backup:media": "tsx scripts/backup-media.ts",
+    "backfill:releases": "tsx scripts/backfill-release-dates.ts",
+    "test:insights": "tsx scripts/__tests__/media-insights.test.ts"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",

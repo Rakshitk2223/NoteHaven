@@ -14,6 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { refreshCoverImage } from '@/lib/media-refresh';
 import { computeProgress, type MediaMeta } from '@/lib/media-metadata';
+import { timeToFinish } from '@/lib/media-insights';
 import { useToast } from '@/components/ui/use-toast';
 import { typeBadgeSoft, STATUS_DOT, AIRING_STYLE, AIRING_LABEL, fallbackStyle } from './media-style';
 
@@ -120,6 +121,13 @@ const MediaCardComponent = ({
     : '';
 
   const progress = computeProgress({ type, current_season, current_episode, current_chapter }, metadata);
+  // Cached runtimes turn "6 episodes left" into "2h 30m left" — the number you
+  // actually weigh when deciding what to start tonight.
+  const timeLeft = timeToFinish({ type, current_season, current_episode, current_chapter }, metadata);
+  // Unwatched content that already exists, distinct from `hasNewContent`
+  // (which means a new season appeared since you last looked).
+  const unwatched = progress.total > 0 ? progress.total - progress.watched : 0;
+  const isActive = status === 'Watching' || status === 'Reading';
   const airing = metadata?.status ? AIRING_LABEL[metadata.status] : null;
   const externalRating = metadata?.rating && metadata.rating > 0 ? metadata.rating : null;
   const genreLine = metadata?.genres?.slice(0, 3).join(' · ') || null;
@@ -226,6 +234,13 @@ const MediaCardComponent = ({
               <Sparkles className="h-3 w-3" /> New
             </span>
           )}
+          {/* How many episodes/chapters are waiting. computeProgress already knew
+              this; it was only ever used as a hidden filter, never shown. */}
+          {!hasNewContent && unwatched > 0 && isActive && (
+            <span className="rounded-md bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-primary shadow-lg backdrop-blur-sm">
+              {unwatched} left
+            </span>
+          )}
         </div>
 
         {/* Selection checkbox (top-right) — visible on hover/focus, always on touch */}
@@ -328,7 +343,10 @@ const MediaCardComponent = ({
                     {progress.kind === 'chapter' ? `Ch. ${progress.watched} / ${progress.total}` : `Ep ${progress.watched} / ${progress.total}`}
                     {metadata?.total_seasons ? ` · S${current_season || 1} of ${metadata.total_seasons}` : ''}
                   </span>
-                  <span className="tabular-nums">{progress.pct}%</span>
+                  <span className="flex items-center gap-1.5 tabular-nums">
+                    {timeLeft?.label && <span className="text-white/70">{timeLeft.label}</span>}
+                    {progress.pct}%
+                  </span>
                 </div>
                 <div className="h-1 w-full overflow-hidden rounded-full bg-white/25">
                   <div className="h-full rounded-full bg-primary" style={{ width: `${progress.pct}%` }} />
