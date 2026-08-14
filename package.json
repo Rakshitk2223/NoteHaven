@@ -19,7 +19,9 @@
     "backfill:metadata": "tsx scripts/backfill-media-metadata.ts",
     "backup:media": "tsx scripts/backup-media.ts",
     "backfill:releases": "tsx scripts/backfill-release-dates.ts",
-    "test:insights": "tsx scripts/__tests__/media-insights.test.ts"
+    "test:insights": "tsx scripts/__tests__/media-insights.test.ts",
+    "audit:coverage": "tsx scripts/audit-metadata-coverage.ts",
+    "smoke:apis": "tsx scripts/smoke-media-apis.ts"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",

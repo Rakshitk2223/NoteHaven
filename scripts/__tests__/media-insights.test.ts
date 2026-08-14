@@ -1,10 +1,10 @@
 import {
-  timeToFinish, formatDuration, buildContinueQueue, nextAiringEpisode,
+  nextUpLabel, timeToFinish, formatDuration, buildContinueQueue, nextAiringEpisode,
   buildAiringSoon, buildGenreCounts, buildLibraryStats, findDuplicates,
   normaliseTitle, airingDayLabel,
   type InsightItem, type MetaMap,
 } from '@/lib/media-insights';
-import type { MediaMeta } from '@/lib/media-progress';
+import { computeProgress, type MediaMeta } from '@/lib/media-progress';
 
 let pass = 0, fail = 0;
 const eq = (name: string, got: unknown, want: unknown) => {
@@ -87,6 +87,95 @@ console.log('\nbuildContinueQueue');
   const q = buildContinueQueue([item({ id: 5, type: 'Manga', status: 'Reading', current_chapter: 7 })],
     new Map([[5, meta({ chapters: 100 })]]));
   eq('manga next label', q[0].nextLabel, 'Ch. 8');
+}
+
+console.log('\nseason-only convention (S3 with no episode = 3 seasons done)');
+{
+  const threeSeasons = meta({ seasons: [
+    { season_number: 1, episode_count: 10, air_date: null, name: 'S1' },
+    { season_number: 2, episode_count: 10, air_date: null, name: 'S2' },
+    { season_number: 3, episode_count: 10, air_date: null, name: 'S3' },
+    { season_number: 4, episode_count: 10, air_date: null, name: 'S4' },
+  ]});
+  const legacy = item({ current_season: 3, current_episode: 0 });
+  eq('counts all completed seasons', computeProgress(legacy, threeSeasons).watched, 30);
+  eq('percentage reflects them', computeProgress(legacy, threeSeasons).pct, 75);
+  eq('marked as started', computeProgress(legacy, threeSeasons).started, true);
+  eq('next up is the following season', nextUpLabel(legacy, threeSeasons), 'S4 · E1');
+
+  const midSeason = item({ current_season: 3, current_episode: 4 });
+  eq('mid-season still counts priors + current', computeProgress(midSeason, threeSeasons).watched, 24);
+  eq('mid-season next episode', nextUpLabel(midSeason, threeSeasons), 'S3 · E5');
+
+  const lastSeasonDone = item({ current_season: 4, current_episode: 0 });
+  eq('finishing the last season is caught up', computeProgress(lastSeasonDone, threeSeasons).caughtUp, true);
+  eq('no further season to offer', nextUpLabel(lastSeasonDone, threeSeasons), 'Caught up');
+
+  // No cached season list: still started, still guesses the next season.
+  const noMeta = item({ current_season: 2, current_episode: 0 });
+  eq('season-only without metadata is started', computeProgress(noMeta, null).started, true);
+  eq('next season guessed without metadata', nextUpLabel(noMeta, null), 'S3 · E1');
+
+  eq('never started stays unstarted', computeProgress(item({}), threeSeasons).started, false);
+}
+
+console.log('\nbuildContinueQueue — bulk-backfill handling');
+{
+  // Mirrors the real library: one timestamp shared by most rows (migration 11a
+  // backfill) plus a handful of genuinely-touched items.
+  const BULK = '2026-06-22T13:08:52.843036+00:00';
+  const many = Array.from({ length: 20 }, (_, i) =>
+    item({ id: 100 + i, title: `Bulk ${String(i).padStart(2, '0')}`, current_episode: i + 1, last_activity_at: BULK }));
+  const real = item({ id: 1, title: 'Actually watched', current_episode: 2, last_activity_at: '2026-08-09T12:00:00Z' });
+  const m: MetaMap = new Map([[1, meta({ episodes: 50 })]]);
+  many.forEach((x) => m.set(x.id, meta({ episodes: 50 })));
+
+  const q = buildContinueQueue([...many, real], m, 5);
+  eq('genuinely touched item leads', q[0].item.title, 'Actually watched');
+  eq('touched flag set', q[0].touched, true);
+  eq('bulk items are not treated as touched', q[1].touched, false);
+  // Within the bulk tie, higher progress wins over arbitrary order.
+  ok('bulk tail ordered by progress', q[1].pct >= q[2].pct);
+}
+{
+  // Never-started items marked Watching should not appear.
+  const BULK = '2026-06-22T13:08:52.843036+00:00';
+  const items = [
+    item({ id: 1, title: 'Never started', current_episode: 0, last_activity_at: BULK }),
+    item({ id: 2, title: 'Never started 2', current_episode: 0, last_activity_at: BULK }),
+    item({ id: 3, title: 'Never started 3', current_episode: 0, last_activity_at: BULK }),
+    item({ id: 4, title: 'Never started 4', current_episode: 0, last_activity_at: BULK }),
+    item({ id: 5, title: 'Never started 5', current_episode: 0, last_activity_at: BULK }),
+    item({ id: 6, title: 'Never started 6', current_episode: 0, last_activity_at: BULK }),
+    item({ id: 7, title: 'Never started 7', current_episode: 0, last_activity_at: BULK }),
+    item({ id: 8, title: 'In progress', current_episode: 4, last_activity_at: BULK }),
+  ];
+  const m: MetaMap = new Map(items.map((i) => [i.id, meta({ episodes: 20 })]));
+  const q = buildContinueQueue(items, m);
+  eq('zero-progress bulk items excluded', q.map((e) => e.item.title), ['In progress']);
+}
+{
+  // A never-started item still shows if it has new content or a real timestamp.
+  const BULK = '2026-06-22T13:08:52.843036+00:00';
+  const items = [
+    ...Array.from({ length: 10 }, (_, i) => item({ id: 200 + i, title: `Pad ${i}`, current_episode: 0, last_activity_at: BULK })),
+    item({ id: 9, title: 'New season', current_episode: 0, has_new_content: true, last_activity_at: BULK }),
+    // ...but one you HAVE started, with new episodes, leads the rail.
+    item({ id: 10, title: 'Started + new', current_episode: 5, has_new_content: true, last_activity_at: BULK }),
+  ];
+  const m: MetaMap = new Map(items.map((i) => [i.id, meta({ episodes: 20 })]));
+  const q = buildContinueQueue(items, m);
+  eq('never-started + new content is excluded; started + new leads',
+    q.map((e) => e.item.title), ['Started + new']);
+}
+{
+  // With no bulk timestamp present, ordering stays plain recency.
+  const items = [
+    item({ id: 1, title: 'Older', current_episode: 1, last_activity_at: '2026-08-01T00:00:00Z' }),
+    item({ id: 2, title: 'Newer', current_episode: 1, last_activity_at: '2026-08-10T00:00:00Z' }),
+  ];
+  const m: MetaMap = new Map(items.map((i) => [i.id, meta({ episodes: 20 })]));
+  eq('no bulk -> pure recency', buildContinueQueue(items, m).map((e) => e.item.title), ['Newer', 'Older']);
 }
 
 console.log('\nnextAiringEpisode / buildAiringSoon');

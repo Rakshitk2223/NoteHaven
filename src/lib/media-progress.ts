@@ -63,6 +63,12 @@ export interface ProgressInfo {
   pct: number;          // 0-100 (0 when total unknown)
   behind: boolean;      // there is known content beyond the user's progress
   caughtUp: boolean;    // user has reached the known total
+  /**
+   * The user has begun this title. Distinct from `watched > 0`: a row recording
+   * only a completed season carries no episode count, and with no cached season
+   * data its watched total is 0 even though it was very much started.
+   */
+  started: boolean;
 }
 
 /**
@@ -77,7 +83,7 @@ export function computeProgress(item: ProgressItem, meta?: MediaMeta | null): Pr
   if (isReadable) {
     const watched = item.current_chapter ?? 0;
     const total = meta?.chapters ?? 0;
-    return buildProgress('chapter', watched, total);
+    return { ...buildProgress('chapter', watched, total), started: watched > 0 };
   }
 
   if (isWatchable) {
@@ -86,22 +92,41 @@ export function computeProgress(item: ProgressItem, meta?: MediaMeta | null): Pr
       ? seasons.reduce((sum, s) => sum + (s.episode_count || 0), 0)
       : (meta?.episodes ?? 0);
 
-    let watched = item.current_episode ?? 0;
-    // Add episodes from fully-completed prior seasons.
-    if (seasons?.length && (item.current_season ?? 1) > 1) {
-      const priorSeasons = seasons.filter((s) => s.season_number < (item.current_season ?? 1));
-      watched += priorSeasons.reduce((sum, s) => sum + (s.episode_count || 0), 0);
+    const curSeason = item.current_season ?? 0;
+    const curEp = item.current_episode ?? 0;
+    const sumSeasons = (upTo: number, inclusive: boolean) =>
+      (seasons ?? [])
+        .filter((s) => (inclusive ? s.season_number <= upTo : s.season_number < upTo))
+        .reduce((sum, s) => sum + (s.episode_count || 0), 0);
+
+    let watched: number;
+    if (curSeason >= 1 && curEp === 0) {
+      // Season recorded with no episode = that season was watched in full.
+      //
+      // This is how most of the library was tracked before per-episode numbers
+      // were kept: you finished a season and bumped the season number. Reading
+      // it literally as "season N, episode 0" understated 315 titles — someone
+      // three seasons deep showed as barely started, so progress bars, time-left
+      // and the Continue rail were all wrong for them.
+      watched = sumSeasons(curSeason, true);
+    } else {
+      watched = curEp;
+      if (seasons?.length && curSeason > 1) watched += sumSeasons(curSeason, false);
     }
-    return buildProgress('episode', watched, total);
+
+    const info = buildProgress('episode', watched, total);
+    // Season-only rows are "started" even when no season data exists to count
+    // their episodes, so watched can legitimately be 0 here.
+    return { ...info, started: curSeason >= 1 || curEp > 0 };
   }
 
   // Movies / unknown types: no progress bar.
-  return { kind: 'none', watched: 0, total: 0, pct: 0, behind: false, caughtUp: false };
+  return { kind: 'none', watched: 0, total: 0, pct: 0, behind: false, caughtUp: false, started: false };
 }
 
 function buildProgress(kind: 'episode' | 'chapter', watched: number, total: number): ProgressInfo {
   if (!total || total <= 0) {
-    return { kind, watched, total: 0, pct: 0, behind: false, caughtUp: false };
+    return { kind, watched, total: 0, pct: 0, behind: false, caughtUp: false, started: watched > 0 };
   }
   const clamped = Math.min(watched, total);
   const pct = Math.round((clamped / total) * 100);
@@ -112,5 +137,6 @@ function buildProgress(kind: 'episode' | 'chapter', watched: number, total: numb
     pct,
     behind: watched < total,
     caughtUp: watched >= total,
+    started: watched > 0,
   };
 }

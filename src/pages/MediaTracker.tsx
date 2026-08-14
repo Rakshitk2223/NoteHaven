@@ -53,7 +53,6 @@ import { useInView } from "react-intersection-observer";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
-import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { MediaCard } from "@/components/media/MediaCard";
 import { typeBadgeSoft, AIRING_STYLE, AIRING_LABEL, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/media-style";
@@ -529,7 +528,6 @@ const MediaTracker = () => {
 
   // Tags state
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [formTags, setFormTags] = useState<Tag[]>([]);
   const [editingItemTags, setEditingItemTags] = useState<Tag[]>([]);
   
@@ -957,14 +955,9 @@ const MediaTracker = () => {
     loadEditingItemTags();
   }, [editingItem]);
 
-  // Filter media items by selected tags
-  const filteredByTagsMediaItems = useMemo(() => {
-    if (selectedTags.length === 0) return mediaItems;
-    return mediaItems.filter(item => {
-      const itemTagNames = item.tags?.map(t => t.name) || [];
-      return selectedTags.every(tag => itemTagNames.includes(tag));
-    });
-  }, [mediaItems, selectedTags]);
+  // Tag filtering was removed with the tag filter UI — media_tags has never held
+  // a row, and genres cover the same axis without manual upkeep.
+  const filteredByTagsMediaItems = mediaItems;
 
   // Single-axis category filtering: 'all', a single type ('type:X'), or a custom group id.
   const categoryFilteredItems = useMemo(() => {
@@ -1072,9 +1065,8 @@ const MediaTracker = () => {
     activeCategory !== 'all' ||
     needsCoverOnly ||
     progressFilter !== 'all' ||
-    selectedTags.length > 0 ||
     selectedGenres.length > 0
-  ), [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags, selectedGenres]);
+  ), [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedGenres]);
 
   const resetAllFilters = useCallback(() => {
     setFilterStatus('All');
@@ -1083,7 +1075,6 @@ const MediaTracker = () => {
     setActiveCategory('all');
     setNeedsCoverOnly(false);
     setProgressFilter('all');
-    setSelectedTags([]);
     setSelectedGenres([]);
   }, []);
 
@@ -1095,10 +1086,9 @@ const MediaTracker = () => {
     if (activeCategory !== 'all') n += 1;
     if (needsCoverOnly) n += 1;
     if (progressFilter !== 'all') n += 1;
-    n += selectedTags.length;
     n += selectedGenres.length;
     return n;
-  }, [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedTags, selectedGenres]);
+  }, [filterStatus, searchTerm, activeCategory, needsCoverOnly, progressFilter, selectedGenres]);
 
   const selectedItems = useMemo(() => {
     if (selectedIds.size === 0) return [];
@@ -1215,7 +1205,7 @@ const MediaTracker = () => {
   // DB filtering. Tag filters can't be counted server-side here, so fall back to
   // the loaded count for those.
   const sweepScope = useMemo(() => {
-    if (selectedTags.length > 0) {
+    if (selectedGenres.length > 0) {
       const n = finalItems.length;
       return { count: n, label: `${n} filtered item${n === 1 ? '' : 's'}` };
     }
@@ -1233,7 +1223,7 @@ const MediaTracker = () => {
       ? `all ${count}`
       : `${count} ${catLabel}`;
     return { count, label: `${scope} item${count === 1 ? '' : 's'}` };
-  }, [selectedTags, finalItems, filterStatus, currentStats, activeCategory, customGroups]);
+  }, [selectedGenres, finalItems, filterStatus, currentStats, activeCategory, customGroups]);
 
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
@@ -1349,18 +1339,28 @@ const MediaTracker = () => {
     }
     if (!WATCHABLE_TYPES.includes(item.type)) return;
 
-    const season = item.current_season || 1;
-    const nextEp = (item.current_episode ?? 0) + 1;
-    const seasonSize = meta?.seasons?.find((sn) => sn.season_number === season)?.episode_count ?? null;
+    const season = item.current_season ?? 0;
+    const curEp = item.current_episode ?? 0;
 
+    // Season recorded with no episode means that season was completed, so the
+    // next thing to watch is the first episode of the following season. Adding
+    // 1 to the episode here would have dropped you back into episode 1 of a
+    // season you had already finished.
+    if (season >= 1 && curEp === 0) {
+      patchMedia(item as MediaItem, { current_season: season + 1, current_episode: 1 });
+      return;
+    }
+
+    const nextEp = curEp + 1;
+    const seasonSize = meta?.seasons?.find((sn) => sn.season_number === (season || 1))?.episode_count ?? null;
     if (seasonSize && nextEp > seasonSize) {
-      const hasNextSeason = meta?.seasons?.some((sn) => sn.season_number === season + 1);
+      const hasNextSeason = meta?.seasons?.some((sn) => sn.season_number === (season || 1) + 1);
       if (hasNextSeason) {
-        patchMedia(item as MediaItem, { current_season: season + 1, current_episode: 1 });
+        patchMedia(item as MediaItem, { current_season: (season || 1) + 1, current_episode: 1 });
         return;
       }
     }
-    patchMedia(item as MediaItem, { current_episode: nextEp });
+    patchMedia(item as MediaItem, { current_season: season || 1, current_episode: nextEp });
   }, [patchMedia]);
 
   // +/- a numeric progress field from the detail drawer (floors at 1).
@@ -1778,9 +1778,9 @@ const MediaTracker = () => {
         last_known_total_seasons: i.last_known_total_seasons,
       }));
 
-    // Tag filtering happens client-side on loaded items — can't express in the DB
-    // query, so honour it by sweeping just what's visible.
-    if (selectedTags.length > 0) return toSweep(finalItems);
+    // Genre filtering is client-side over cached metadata and can't be expressed
+    // as a DB query, so honour it by sweeping only what's visible.
+    if (selectedGenres.length > 0) return toSweep(finalItems);
 
     const { data: { session } } = await supabase.auth.getSession();
     const user = session?.user;
@@ -1817,7 +1817,7 @@ const MediaTracker = () => {
       from += chunk;
     }
     return toSweep(all);
-  }, [selectedTags, finalItems, imageUrls, activeCategory, customGroups, filterStatus, searchTerm]);
+  }, [selectedGenres, finalItems, imageUrls, activeCategory, customGroups, filterStatus, searchTerm]);
 
   // Remove a wrong cover → falls back to the letter-gradient placeholder.
   const handleRemoveCover = useCallback(async (item: MediaItem) => {
@@ -3018,60 +3018,25 @@ const MediaTracker = () => {
           />
 
           {/* Filters sheet (mobile + desktop) */}
+          {/*
+            Only the lenses that have no inline home.
+
+            Status and Sort used to live here as well as in the toolbar — the
+            exact same state driven from two places, so the sheet's copy could
+            only ever restate what the pills and the sort control already
+            showed. Tags went too: media_tags holds zero rows across all 1,258
+            titles, and the genre rail covers that axis using data the metadata
+            sweep fills in automatically.
+          */}
           <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
             <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
               <SheetHeader>
-                <SheetTitle>Filters &amp; sort</SheetTitle>
-                <SheetDescription>Refine and reorder your library.</SheetDescription>
+                <SheetTitle>More filters</SheetTitle>
+                <SheetDescription>
+                  Status, sort and genre are in the toolbar. These are the extra lenses.
+                </SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-5">
-                <div className="space-y-2">
-                  <Label>Status</Label>
-                  <Select value={filterStatus} onValueChange={setFilterStatus}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="All">All statuses</SelectItem>
-                      <SelectItem value="Active">Active (Watching / Reading)</SelectItem>
-                      <SelectItem value="Planned">Planned</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label>Sort by</Label>
-                  <div className="flex gap-2">
-                    <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="title">Title</SelectItem>
-                        <SelectItem value="rating">My rating</SelectItem>
-                        <SelectItem value="ext_rating">Source rating</SelectItem>
-                        <SelectItem value="pct_complete">% complete</SelectItem>
-                        <SelectItem value="updated_at">Recently updated</SelectItem>
-                        <SelectItem value="created_at">Date added</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as 'asc' | 'desc')}>
-                      <SelectTrigger className="w-[130px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="asc">{sortBy === 'title' ? 'A → Z' : 'Ascending'}</SelectItem>
-                        <SelectItem value="desc">{sortBy === 'title' ? 'Z → A' : 'Descending'}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <Separator />
-
                 <div className="space-y-2">
                   <Label>Show</Label>
                   <Select value={progressFilter} onValueChange={(v) => setProgressFilter(v as typeof progressFilter)}>
@@ -3095,20 +3060,6 @@ const MediaTracker = () => {
                   </div>
                   <Switch checked={needsCoverOnly} onCheckedChange={setNeedsCoverOnly} aria-label="Toggle needs cover filter" />
                 </div>
-
-                {availableTags.length > 0 && (
-                  <>
-                    <Separator />
-                    <div className="space-y-2">
-                      <Label>Tags</Label>
-                      <TagFilter
-                        availableTags={availableTags}
-                        selectedTags={selectedTags}
-                        onChange={setSelectedTags}
-                      />
-                    </div>
-                  </>
-                )}
               </div>
               <SheetFooter className="mt-6">
                 <Button variant="outline" onClick={resetAllFilters} disabled={!hasActiveFilters}>Reset filters</Button>
@@ -3279,14 +3230,14 @@ const MediaTracker = () => {
                     </button>
                   </Badge>
                 )}
-                {selectedTags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="gap-1 pr-1">
-                    {tag}
+                {selectedGenres.map((genre) => (
+                  <Badge key={genre} variant="secondary" className="gap-1 pr-1">
+                    {genre}
                     <button
                       type="button"
-                      onClick={() => setSelectedTags((prev) => prev.filter((t) => t !== tag))}
+                      onClick={() => setSelectedGenres((prev) => prev.filter((g) => g !== genre))}
                       className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
-                      aria-label={`Clear ${tag} tag filter`}
+                      aria-label={`Clear ${genre} genre filter`}
                     >
                       <X className="h-3 w-3" />
                     </button>

@@ -187,6 +187,9 @@ interface AniListMedia {
   chapters?: number | null;
   averageScore?: number | null;
   status?: string;
+  countryOfOrigin?: string | null;
+  format?: string | null;
+  duration?: number | null;
   genres?: string[];
 }
 
@@ -248,6 +251,8 @@ interface TMDBDetails {
   seasons?: TMDBSeason[];
   number_of_seasons?: number | null;
   number_of_episodes?: number | null;
+  runtime?: number | null;              // movies
+  episode_run_time?: number[] | null;   // series
 }
 
 interface WikidataSearchEntity {
@@ -266,7 +271,7 @@ interface MediaMetadataRow {
 // MangaUpdates API for manga/manhwa/manhua
 async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
   try {
-    const response = await fetch('https://api.mangaupdates.com/v1/series/search', {
+    const response = await pacedFetch('mangaupdates', 'https://api.mangaupdates.com/v1/series/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -314,7 +319,7 @@ async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
 // MangaDex API for manga/manhwa/manhua covers
 async function searchMangaDex(query: string): Promise<MediaResult[]> {
   try {
-    const response = await fetch(
+    const response = await pacedFetch('mangadex',
       `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=5&includes[]=cover_art`
     );
 
@@ -338,7 +343,7 @@ async function searchMangaDex(query: string): Promise<MediaResult[]> {
 
       return {
         title,
-        type: 'manga',
+        type: mangadexMediaType(manga.attributes?.originalLanguage),
         cover_image: coverImage,
         banner_image: null,
         description: (manga.attributes?.description?.en || '').substring(0, 500),
@@ -366,7 +371,7 @@ async function searchMangaDex(query: string): Promise<MediaResult[]> {
 // TVmaze API for TV shows (K-drama, J-drama, series)
 async function searchTVmaze(query: string): Promise<MediaResult[]> {
   try {
-    const response = await fetch(
+    const response = await pacedFetch('tvmaze',
       `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`
     );
 
@@ -432,7 +437,7 @@ function stripHtml(html: string | null | undefined, max: number): string | null 
 // fetch (`embed[]=episodes&embed[]=cast`).
 async function fetchTVmazeSeasons(showId: number): Promise<MediaEnrichment | null> {
   try {
-    const res = await fetch(`https://api.tvmaze.com/shows/${showId}?embed[]=episodes&embed[]=cast`);
+    const res = await pacedFetch('tvmaze', `https://api.tvmaze.com/shows/${showId}?embed[]=episodes&embed[]=cast`);
     if (!res.ok) return null;
     const show = await res.json();
     const episodes: TVmazeEpisode[] = show?._embedded?.episodes || [];
@@ -502,7 +507,7 @@ async function searchAniList(query: string, type: string): Promise<MediaResult[]
     const searchType = type === 'anime' ? 'ANIME' : type === 'manga' ? 'MANGA' : null;
     if (!searchType) return [];
 
-    const response = await fetch('https://graphql.anilist.co', {
+    const response = await pacedFetch('anilist', 'https://graphql.anilist.co', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -530,6 +535,16 @@ async function searchAniList(query: string, type: string): Promise<MediaResult[]
                 averageScore
                 status
                 genres
+                # Needed to distinguish manhwa (KR) and manhua (CN/TW) from
+                # Japanese manga: AniList files all three under MediaType MANGA,
+                # so without these every Korean webtoon came back typed "manga"
+                # and a manhwa entry could be answered with the anime's art.
+                countryOfOrigin
+                format
+                # Typical episode length. Without it every anime reported no
+                # runtime, so "time left to finish" had nothing to work with
+                # across the largest part of the library.
+                duration
               }
             }
           }
@@ -556,7 +571,10 @@ async function searchAniList(query: string, type: string): Promise<MediaResult[]
         : null;
       return {
         title: item.title.english || item.title.romaji || item.title.native || query,
-        type,
+        // Not the coarse search type: AniList files manga, manhwa and manhua all
+        // under MANGA, and reporting them all as "manga" is what let a manhwa
+        // lookup be satisfied by the wrong medium.
+        type: anilistMediaType(searchType, item.countryOfOrigin),
         cover_image: item.coverImage?.extraLarge || item.coverImage?.large || '',
         banner_image: item.bannerImage || null,
         description: item.description?.replace(/<[^>]*>/g, '').substring(0, 500) || '',
@@ -572,13 +590,126 @@ async function searchAniList(query: string, type: string): Promise<MediaResult[]
         mal_id: null,
         episodes_detail: null,
         cast_members: null,
-        runtime: null,
+        runtime: typeof item.duration === 'number' && item.duration > 0 ? item.duration : null,
       };
     });
   } catch (error) {
     console.error('AniList error:', error);
     return [];
   }
+}
+
+/**
+ * Our media type for an AniList entry.
+ *
+ * AniList exposes only ANIME and MANGA as MediaType; the distinction between
+ * manga, manhwa and manhua lives in countryOfOrigin.
+ */
+function anilistMediaType(searchType: string, countryOfOrigin?: string | null): string {
+  if (searchType === 'ANIME') return 'anime';
+  switch ((countryOfOrigin || '').toUpperCase()) {
+    case 'KR': return 'manhwa';
+    case 'CN':
+    case 'TW': return 'manhua';
+    default:   return 'manga';
+  }
+}
+
+/** Our media type for a MangaDex entry, from its original language. */
+function mangadexMediaType(originalLanguage?: string | null): string {
+  switch ((originalLanguage || '').toLowerCase()) {
+    case 'ko': return 'manhwa';
+    case 'zh':
+    case 'zh-hk':
+    case 'zh-ro': return 'manhua';
+    default: return 'manga';
+  }
+}
+
+/**
+ * How well a result matches the medium the user asked for.
+ *
+ * The cover endpoint fans out to every applicable source in parallel and used to
+ * take whichever result landed in slot 0 — so a title that exists as both an
+ * anime and a manhwa (Solo Leveling being the obvious one) could be answered
+ * with the wrong medium's artwork depending purely on which API replied first.
+ * Ranking by type match makes the requested medium win.
+ */
+function typeMatchScore(resultType: string, requested: string | null): number {
+  if (!requested || requested === 'all') return 0;
+  const r = (resultType || '').toLowerCase();
+  const q = requested.toLowerCase();
+  if (r === q) return 100;
+
+  // Same family, wrong dialect — much better than a different medium entirely.
+  const comics = ['manga', 'manhwa', 'manhua'];
+  const live = ['series', 'kdrama', 'jdrama'];
+  if (comics.includes(r) && comics.includes(q)) return 40;
+  if (live.includes(r) && live.includes(q)) return 40;
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Per-source rate limiting + 429 handling
+// ---------------------------------------------------------------------------
+//
+// The client sweeps the library with 5 concurrent workers, all of which hit the
+// same upstream API for a given media type. AniList's free tier is 1 request per
+// second, so five workers were running five times over the limit — and because
+// nothing inspected the status code, a 429 fell through the generic `!res.ok`
+// branch and was reported to the user as "no match". Titles looked missing from
+// the source when they had simply been throttled.
+//
+// Each source gets a minimum spacing between calls (serialised per isolate) and
+// one retry that honours Retry-After.
+
+/** Minimum ms between requests to each upstream. */
+const SOURCE_SPACING_MS: Record<string, number> = {
+  anilist: 1100,   // documented 1 req/s — leave headroom
+  jikan: 400,      // ~3 req/s and 60/min
+  mangadex: 250,
+  mangaupdates: 250,
+  tvmaze: 250,
+  tmdb: 60,        // generous, but do not hammer it
+  wikidata: 300,
+  fanart: 250,
+};
+
+const lastCallAt: Record<string, number> = {};
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Wait until this source's spacing has elapsed since its previous call. */
+async function paceSource(source: string): Promise<void> {
+  const spacing = SOURCE_SPACING_MS[source] ?? 200;
+  const prev = lastCallAt[source] ?? 0;
+  const wait = prev + spacing - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastCallAt[source] = Date.now();
+}
+
+/**
+ * fetch() with per-source pacing and a single Retry-After-aware retry on 429.
+ * Returns the Response either way — callers keep their existing !res.ok checks,
+ * but now only see a 429 if the retry also failed.
+ */
+async function pacedFetch(source: string, input: string, init?: RequestInit): Promise<Response> {
+  await paceSource(source);
+  let res = await fetch(input, init);
+
+  if (res.status === 429) {
+    const header = res.headers.get('Retry-After');
+    const headerMs = header ? Number(header) * 1000 : NaN;
+    // Cap the wait: an upstream asking for a minute would stall the whole sweep.
+    const backoff = Math.min(Number.isFinite(headerMs) ? headerMs : 2000, 5000);
+    console.warn(`${source}: 429, retrying in ${backoff}ms`);
+    await sleep(backoff);
+    lastCallAt[source] = Date.now();
+    res = await fetch(input, init);
+    if (res.status === 429) console.warn(`${source}: still rate-limited after retry`);
+  }
+
+  return res;
 }
 
 // Polite delay between Jikan calls (Jikan rate-limits ~3 req/s).
@@ -592,7 +723,7 @@ async function fetchJikanEpisodes(malId: number): Promise<EpisodeDetail[] | null
     const all: EpisodeDetail[] = [];
     for (let page = 1; page <= 3; page++) {
       if (page > 1) await jikanSleep();
-      const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`);
+      const res = await pacedFetch('jikan', `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`);
       if (!res.ok) break;
       const json: JikanEpisodesResponse = await res.json();
       const list = Array.isArray(json?.data) ? json.data : [];
@@ -620,7 +751,7 @@ async function fetchJikanEpisodes(malId: number): Promise<EpisodeDetail[] | null
 // Any failure → null (never throws).
 async function fetchJikanCast(malId: number): Promise<CastMember[] | null> {
   try {
-    const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/characters`);
+    const res = await pacedFetch('jikan', `https://api.jikan.moe/v4/anime/${malId}/characters`);
     if (!res.ok) return null;
     const json: JikanCharactersResponse = await res.json();
     const list = Array.isArray(json?.data) ? json.data : [];
@@ -642,7 +773,7 @@ async function searchJikan(query: string, type: string): Promise<MediaResult[]> 
     const typeParam = type === 'anime' ? 'anime' : type === 'manga' ? 'manga' : null;
     if (!typeParam) return [];
 
-    const response = await fetch(
+    const response = await pacedFetch('jikan',
       `https://api.jikan.moe/v4/${typeParam}?q=${encodeURIComponent(query)}&limit=10`
     );
 
@@ -705,7 +836,7 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
     if (!apiKey) return [];
 
     const searchType = type === 'movie' ? 'movie' : 'tv';
-    const response = await fetch(
+    const response = await pacedFetch('tmdb',
       `https://api.themoviedb.org/3/search/${searchType}?api_key=${apiKey}&query=${encodeURIComponent(query)}&page=1`
     );
 
@@ -759,13 +890,16 @@ async function fetchTMDBDetails(id: number, isMovie: boolean, apiKey: string): P
   try {
     if (!apiKey) return null;
     const endpoint = isMovie ? 'movie' : 'tv';
-    const res = await fetch(`https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${apiKey}`);
+    const res = await pacedFetch('tmdb', `https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${apiKey}`);
     if (!res.ok) return null;
     const d: TMDBDetails = await res.json();
 
     const genres = Array.isArray(d.genres) ? d.genres.map((g) => g.name).filter((n): n is string => Boolean(n)) : null;
     if (isMovie) {
-      return { genres, status: mapTMDBStatus(d.status) };
+      // TMDB returns the feature length on the movie details endpoint; it was
+      // being discarded, which is why every movie showed no runtime.
+      const movieRuntime = typeof d.runtime === 'number' && d.runtime > 0 ? d.runtime : null;
+      return { genres, status: mapTMDBStatus(d.status), runtime: movieRuntime };
     }
 
     // Drop "Season 0" (specials) so counts reflect real seasons.
@@ -780,12 +914,18 @@ async function fetchTMDBDetails(id: number, isMovie: boolean, apiKey: string): P
           }))
       : null;
 
+    // episode_run_time is an array of typical lengths; the first is the norm.
+    const epRuntime = Array.isArray(d.episode_run_time)
+      ? d.episode_run_time.find((n) => typeof n === 'number' && n > 0) ?? null
+      : null;
+
     return {
       total_seasons: d.number_of_seasons ?? (seasons?.length || null),
       seasons: seasons && seasons.length ? seasons : null,
       episodes: d.number_of_episodes || null,
       genres,
       status: mapTMDBStatus(d.status),
+      runtime: epRuntime,
     };
   } catch (error) {
     console.error('TMDB details error:', error);
@@ -798,7 +938,7 @@ async function fetchTMDBDetails(id: number, isMovie: boolean, apiKey: string): P
 // Resolves an entity via wbsearchentities, then reads its image (P18) from Commons.
 async function searchWikidata(query: string, type: string): Promise<MediaResult[]> {
   try {
-    const searchRes = await fetch(
+    const searchRes = await pacedFetch('wikidata',
       `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=en&format=json&limit=5&type=item&origin=*`,
       { headers: { 'Accept': 'application/json' } }
     );
@@ -810,7 +950,7 @@ async function searchWikidata(query: string, type: string): Promise<MediaResult[
 
     // Walk top candidates until one has a P18 image claim.
     for (const candidate of candidates.slice(0, 3)) {
-      const claimsRes = await fetch(
+      const claimsRes = await pacedFetch('wikidata',
         `https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${candidate.id}&property=P18&format=json&origin=*`,
         { headers: { 'Accept': 'application/json' } }
       );
@@ -862,7 +1002,7 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
     // Step 1: resolve a TMDB id for the title.
     const isMovie = type === 'movie';
     const tmdbSearchType = isMovie ? 'movie' : 'tv';
-    const tmdbRes = await fetch(
+    const tmdbRes = await pacedFetch('tmdb',
       `https://api.themoviedb.org/3/search/${tmdbSearchType}?api_key=${tmdbKey}&query=${encodeURIComponent(query)}&page=1`
     );
     if (!tmdbRes.ok) return [];
@@ -872,7 +1012,7 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
 
     // Step 2: fetch artwork from Fanart.tv by TMDB id.
     const fanartEndpoint = isMovie ? 'movies' : 'tv';
-    const fanartRes = await fetch(
+    const fanartRes = await pacedFetch('fanart',
       `https://webservice.fanart.tv/v3/${fanartEndpoint}/${tmdbId}?api_key=${fanartKey}`
     );
     if (!fanartRes.ok) return [];
@@ -1252,12 +1392,24 @@ Deno.serve(async (req) => {
 
     // Remove duplicates by title
     const seen = new Set<string>();
-    const uniqueResults = allResults.filter(item => {
+    let uniqueResults = allResults.filter(item => {
       const key = `${item.title.toLowerCase()}_${item.type}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
+
+    // Rank by how well each result matches the requested medium, so callers that
+    // take results[0] get the right one. Previously the winner was whichever
+    // source happened to resolve first, which is why a title that exists as both
+    // an anime and a manhwa could come back with the wrong artwork.
+    // Stable within a score band, so source priority still breaks ties.
+    if (normalizedType && normalizedType !== 'all') {
+      uniqueResults = uniqueResults
+        .map((item, index) => ({ item, index, score: typeMatchScore(item.type, normalizedType) }))
+        .sort((a, b) => b.score - a.score || a.index - b.index)
+        .map((x) => x.item);
+    }
 
     const duration = Date.now() - startTime;
     console.log(`✅ API search complete in ${duration}ms. Found ${uniqueResults.length} results from: ${sources.join(', ') || 'none'}`);

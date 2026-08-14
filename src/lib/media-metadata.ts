@@ -191,10 +191,32 @@ function nextUnairedDate(raw: unknown): string | null | undefined {
 //   - kdrama/jdrama/series: TVmaze has thin K-drama coverage. TMDB now leads.
 function metadataSourcesFor(type: string): string[] {
   const t = type.toLowerCase();
+
+  // Anime: AniList returns synopsis + episode count + genres + rating in one
+  // GraphQL call and is the most reliable of the keyless sources. Jikan follows
+  // for per-episode names and cast, which AniList does not carry.
   if (t === 'anime') return ['anilist', 'jikan'];
-  if (['manga', 'manhwa', 'manhua'].includes(t)) return ['anilist', 'jikan', 'mangadex', 'mangaupdates'];
+
+  // Japanese manga: MAL/AniList catalogue it thoroughly, so they lead.
+  if (t === 'manga') return ['anilist', 'jikan', 'mangadex', 'mangaupdates'];
+
+  // Korean manhwa / Chinese manhua: the specialists lead.
+  //
+  // These used to share the Japanese-manga order, which put AniList and Jikan
+  // first — but both are anime-first catalogues that treat manhwa and manhua as
+  // second-class, so a lot of Korean titles came back unmatched or with a wrong
+  // fuzzy hit. MangaUpdates has catalogued this material for two decades and
+  // explicitly records series type (manga/manhwa/manhua), and MangaDex carries
+  // the chapter data. AniList/Jikan stay on as a backstop for the crossovers.
+  if (t === 'manhwa' || t === 'manhua') return ['mangaupdates', 'mangadex', 'anilist', 'jikan'];
+
+  // Live action TV: TMDB leads for images, synopsis and credits (TVmaze's
+  // K-drama coverage is thin), TVmaze fills in the per-episode schedule it does
+  // better than anyone — which is what the Airing Soon rail runs on.
   if (['kdrama', 'jdrama', 'series'].includes(t)) return ['tmdb', 'tvmaze'];
-  return ['tmdb']; // movie
+
+  // Movies: TMDB, with Wikidata as a keyless backstop for obscure titles.
+  return ['tmdb', 'wikidata'];
 }
 
 // True when `top` already carries non-empty values for every field the user

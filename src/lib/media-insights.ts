@@ -118,6 +118,8 @@ export interface QueueEntry {
   behind: boolean;
   /** New season/episodes appeared since the user last looked. */
   isNew: boolean;
+  /** last_activity_at reflects a real interaction, not a bulk backfill. */
+  touched: boolean;
 }
 
 /** Recency of the last interaction, for ordering the queue. */
@@ -125,6 +127,59 @@ function activityTime(item: InsightItem): number {
   const raw = item.last_activity_at || item.updated_at || item.created_at;
   const t = raw ? new Date(raw).getTime() : 0;
   return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * The timestamp shared by a bulk write, if there is one.
+ *
+ * Migration 11a added last_activity_at and backfilled every existing row with a
+ * single NOW(), so in this library 869 of 925 in-progress items carry the exact
+ * same value. Treating that as "recently watched" produced a Continue rail
+ * that was correct for its first few entries and then dissolved into an
+ * 800-way tie broken by whatever order Postgres happened to return — which
+ * reads as "why is this here, I've never watched it".
+ *
+ * Any timestamp shared by more than a quarter of the set cannot be a real
+ * interaction, so we treat it as "no signal" rather than as recency.
+ */
+function bulkTimestamp(items: InsightItem[]): string | null {
+  if (items.length < 8) return null;
+  const counts = new Map<string, number>();
+  for (const i of items) {
+    if (!i.last_activity_at) continue;
+    counts.set(i.last_activity_at, (counts.get(i.last_activity_at) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestN = 0;
+  for (const [ts, n] of counts) if (n > bestN) { best = ts; bestN = n; }
+  return bestN > items.length * 0.25 ? best : null;
+}
+
+/**
+ * Where to pick up, honouring the season-only convention.
+ *
+ * `S3` with no episode means season 3 was finished, so the next thing to watch
+ * is season 4 episode 1 — not season 3 episode 1, which is what a literal
+ * reading produced and which sent you back to re-watch a season you had
+ * already completed.
+ */
+export function nextUpLabel(item: InsightItem, meta?: MediaMeta | null): string {
+  if (READABLE.includes(item.type)) return `Ch. ${(item.current_chapter ?? 0) + 1}`;
+  if (!WATCHABLE.includes(item.type)) return 'Continue';
+
+  const curSeason = item.current_season ?? 0;
+  const curEp = item.current_episode ?? 0;
+
+  if (curSeason >= 1 && curEp === 0) {
+    const seasons = meta?.seasons ?? null;
+    const hasNext = seasons?.some((sn) => sn.season_number === curSeason + 1);
+    // With no season list we cannot confirm a season N+1 exists, but the row
+    // still says season N is done, so N+1 is the honest guess.
+    if (hasNext || !seasons?.length) return `S${curSeason + 1} · E1`;
+    return 'Caught up';
+  }
+
+  return `S${curSeason || 1} · E${curEp + 1}`;
 }
 
 /**
@@ -140,10 +195,11 @@ export function buildContinueQueue(
   metaMap: MetaMap,
   limit = 20,
 ): QueueEntry[] {
+  const active = items.filter((i) => isActive(i.status));
+  const bulk = bulkTimestamp(active);
   const entries: QueueEntry[] = [];
 
-  for (const item of items) {
-    if (!isActive(item.status)) continue;
+  for (const item of active) {
     const meta = metaMap.get(item.id) ?? null;
     const prog = computeProgress(item, meta);
 
@@ -152,30 +208,50 @@ export function buildContinueQueue(
     const totalKnown = prog.total > 0;
     if (totalKnown && !prog.behind) continue;
 
-    const isReadable = READABLE.includes(item.type);
+    const started = prog.started;
+    const isNew = Boolean(item.has_new_content);
+    // Real interaction, as opposed to the bulk backfill value.
+    const touched = Boolean(item.last_activity_at) && item.last_activity_at !== bulk;
+
+    // "Continue" means resume something under way. An item sitting at episode 0
+    // with no recorded interaction was never started — 315 titles in this
+    // library are marked Watching but untouched, and they were crowding out the
+    // things actually in progress.
+    //
+    // has_new_content deliberately does NOT rescue a never-started title: the
+    // flag fires when the episode count grew, which for something you have not
+    // opened means your backlog got bigger, not that there is anything to
+    // resume. Surfacing "Money Heist · S1 E1" under Continue is precisely the
+    // "why is this here" case.
+    if (!started && !touched) continue;
+
     const remaining = totalKnown ? prog.total - prog.watched : 0;
 
-    const nextLabel = isReadable
-      ? `Ch. ${(item.current_chapter ?? 0) + 1}`
-      : WATCHABLE.includes(item.type)
-        ? `S${item.current_season || 1} · E${(item.current_episode ?? 0) + 1}`
-        : 'Continue';
-
     entries.push({
+      nextLabel: nextUpLabel(item, meta),
       item,
       meta,
-      nextLabel,
       remaining,
       timeLeft: timeToFinish(item, meta),
       pct: prog.pct,
       behind: prog.behind,
-      isNew: Boolean(item.has_new_content),
+      isNew,
+      touched,
     });
   }
 
+  // Tiered, because raw recency is meaningless once most rows share a
+  // backfilled timestamp:
+  //   1. new episodes appeared
+  //   2. genuinely interacted with, newest first
+  //   3. everything else by how far in you are — being 80% through something
+  //      is a better reason to surface it than an arbitrary tie-break.
   entries.sort((a, b) => {
     if (a.isNew !== b.isNew) return a.isNew ? -1 : 1;
-    return activityTime(b.item) - activityTime(a.item);
+    if (a.touched !== b.touched) return a.touched ? -1 : 1;
+    if (a.touched && b.touched) return activityTime(b.item) - activityTime(a.item);
+    if (b.pct !== a.pct) return b.pct - a.pct;
+    return a.item.title.localeCompare(b.item.title);
   });
 
   return entries.slice(0, limit);
