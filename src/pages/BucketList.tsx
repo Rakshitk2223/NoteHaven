@@ -226,9 +226,12 @@ const BucketList = () => {
     setSaving(true);
     try {
       // Auto-fetch a hero image on first save if none was chosen (best-effort).
+      // Time-boxed hard: this sits between the user pressing Save and the row
+      // being written, and Openverse is a free public API that can be slow.
+      // Missing the image is fine — the card falls back to its category gradient.
       let d = draft;
       if (!d.image_url.trim()) {
-        const url = await suggestImage(d.title);
+        const url = await suggestImage(d.title, 3000);
         if (url) d = { ...d, image_url: url };
       }
       if (editing) {

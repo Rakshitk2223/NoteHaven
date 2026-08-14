@@ -1,7 +1,8 @@
-import { format, startOfWeek, addDays, isSameDay, isToday, getDay } from 'date-fns';
+import { format, startOfWeek, addDays, isToday, getDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_ICONS } from '@/lib/calendar';
+import { dateToYMD } from '@/lib/date-utils';
 import { 
   CheckSquare, 
   Cake, 
@@ -16,7 +17,6 @@ interface WeekViewProps {
   currentDate: Date;
   events: CalendarEvent[];
   onDateClick: (date: Date) => void;
-  onDateDoubleClick?: (date: Date) => void;
 }
 
 const iconComponents = {
@@ -34,14 +34,16 @@ const getEventIcon = (type: string) => {
   return IconComponent || AlertCircle;
 };
 
-export const WeekView = ({ currentDate, events, onDateClick, onDateDoubleClick }: WeekViewProps) => {
+export const WeekView = ({ currentDate, events, onDateClick }: WeekViewProps) => {
   const weekStart = startOfWeek(currentDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
-  const eventsByDay = days.map(day => ({
-    day,
-    events: events.filter(e => isSameDay(new Date(e.date), day)),
-  }));
+  // Compare date strings, not Dates: `new Date('2026-08-14')` is UTC midnight,
+  // which lands on the previous day for any viewer west of UTC.
+  const eventsByDay = days.map(day => {
+    const key = dateToYMD(day);
+    return { day, events: events.filter(e => e.date.slice(0, 10) === key) };
+  });
 
   const isWeekend = (day: Date) => {
     const dayOfWeek = getDay(day);
@@ -89,10 +91,19 @@ export const WeekView = ({ currentDate, events, onDateClick, onDateDoubleClick }
           return (
             <div
               key={day.toISOString()}
+              role="button"
+              tabIndex={0}
+              aria-label={`${format(day, 'EEEE, MMMM d')}${dayEvents.length ? ` — ${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''}` : ''}`}
               onClick={() => onDateClick(day)}
-              onDoubleClick={() => onDateDoubleClick?.(day)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onDateClick(day);
+                }
+              }}
               className={cn(
                 "border-r last:border-r-0 p-2 cursor-pointer hover:bg-muted/30 transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
                 isToday(day) && "bg-accent/10",
                 isWeekendDay && "bg-muted/40"
               )}

@@ -52,6 +52,9 @@ const MoneyLedger = () => {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+  // Lets you find the entries that sit in the "Unassigned + subs" tile instead
+  // of any account — otherwise they are invisible in the transaction list.
+  const [unassignedOnly, setUnassignedOnly] = useState(false);
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -121,10 +124,13 @@ const MoneyLedger = () => {
   const rows = useMemo<Row[]>(() => {
     const entryRows: Row[] = monthEntries
       .filter((e) => filterType === 'all' || e.type === filterType)
+      .filter((e) => !unassignedOnly || (e.account_id == null && e.to_account_id == null))
       .map((e) => ({ kind: 'entry', date: e.transaction_date, entry: e }));
+    // Subscription charges are derived, not rows — they belong to no account by
+    // definition, so they stay visible while filtering for unassigned.
     const subRows: Row[] = filterType === 'income' ? [] : monthSubs.map((c) => ({ kind: 'sub', date: c.date, charge: c }));
     return [...entryRows, ...subRows].sort((a, b) => b.date.localeCompare(a.date));
-  }, [monthEntries, monthSubs, filterType]);
+  }, [monthEntries, monthSubs, filterType, unassignedOnly]);
 
   // ---- mutations ----
   const buildPayload = (f: LedgerEntryFormData) => {
@@ -138,15 +144,26 @@ const MoneyLedger = () => {
       is_recurring: false,
       recurring_interval: null,
       notes: null,
-      bucket_id: null,
-      from_bucket_id: null,
+      // bucket_id / from_bucket_id are gone as of migration 20 — the
+      // envelope-budgeting feature was removed and nothing referenced them.
       account_id: f.account_id ? parseInt(f.account_id) : null,
       to_account_id: isTransfer && f.to_account_id ? parseInt(f.to_account_id) : null,
     };
   };
 
   const validate = (f: LedgerEntryFormData) => {
-    if (!f.amount) { toast({ title: 'Missing amount', description: 'Enter an amount.', variant: 'destructive' }); return false; }
+    // A bare truthiness check let "abc" through as NaN, and "-500" through as a
+    // negative expense — which *raises* money in hand. Both write junk into a
+    // financial record, so parse properly.
+    const amount = parseFloat(f.amount);
+    if (!f.amount.trim() || !Number.isFinite(amount) || amount <= 0) {
+      toast({
+        title: 'Invalid amount',
+        description: 'Enter a number greater than zero.',
+        variant: 'destructive',
+      });
+      return false;
+    }
     if (f.type === 'transfer') {
       if (!f.account_id || !f.to_account_id || f.account_id === f.to_account_id) {
         toast({ title: 'Invalid transfer', description: 'Pick two different accounts.', variant: 'destructive' });
@@ -324,10 +341,22 @@ const MoneyLedger = () => {
           })}
           {Math.abs(otherBalance) >= 0.01 && (
             <StaggerItem hover={false}>
-              <div className="zen-card w-full p-3" title="Entries not assigned to an account + subscription charges">
+              <button
+                type="button"
+                onClick={() => setUnassignedOnly((v) => !v)}
+                aria-pressed={unassignedOnly}
+                className={cn(
+                  'zen-card w-full p-3 text-left transition-colors',
+                  unassignedOnly ? 'ring-1 ring-primary' : 'hover:border-border-strong',
+                )}
+                title="Money not attributed to any account, plus derived subscription charges. Click to list the entries."
+              >
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Repeat className="h-3.5 w-3.5" /><span>Unassigned + subs</span></div>
                 <div className={cn('mt-1 text-lg font-bold tabular-nums', otherBalance < 0 ? 'text-destructive' : 'text-foreground')}>{formatCurrency(otherBalance)}</div>
-              </div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {unassignedOnly ? 'Showing these below' : 'Click to review'}
+                </div>
+              </button>
             </StaggerItem>
           )}
           <StaggerItem hover={false}>

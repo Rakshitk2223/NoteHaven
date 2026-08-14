@@ -96,7 +96,12 @@ export default defineConfig(({ mode }) => ({
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
           if (id.includes("@tiptap") || id.includes("prosemirror")) return "editor";
-          if (id.includes("@codemirror") || id.includes("@lezer") || /[\\/]codemirror[\\/]/.test(id)) return "codemirror";
+          // Language grammars are imported on demand by CodeEditor. Leaving them
+          // out of the forced "codemirror" chunk lets Rollup emit one small lazy
+          // chunk per language instead of bundling all 18 into the core editor.
+          if (id.includes("@codemirror/lang-") || id.includes("@codemirror/legacy-modes")) return undefined;
+          if (id.includes("@lezer/")) return undefined;
+          if (id.includes("@codemirror") || /[\\/]codemirror[\\/]/.test(id)) return "codemirror";
           if (id.includes("recharts") || id.includes("d3-") || id.includes("victory")) return "charts";
           if (id.includes("framer-motion")) return "motion";
           if (id.includes("lucide-react")) return "icons";

@@ -102,12 +102,15 @@ export async function loadWidgets(): Promise<DashboardWidget[]> {
       .select('preference_value')
       .eq('user_id', user.id)
       .eq('preference_key', PREFERENCE_KEY)
-      .single();
+      // maybeSingle: a first-time user has no row, and .single() turned that
+      // normal case into a 406 on every dashboard load.
+      .maybeSingle();
 
     if (error || !data) return DEFAULT_WIDGETS;
 
     const parsed = data.preference_value as unknown as DashboardWidget[];
-    
+    if (!Array.isArray(parsed)) return DEFAULT_WIDGETS;
+
     const validTypes = new Set(DEFAULT_WIDGETS.map(w => w.type));
     const validWidgets = parsed.filter(w => validTypes.has(w.type));
     

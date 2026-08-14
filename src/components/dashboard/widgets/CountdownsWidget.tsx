@@ -10,6 +10,7 @@ import {
   DialogTrigger
 } from '@/components/ui/dialog';
 import { WidgetWrapper } from '../WidgetWrapper';
+import { parseYMD } from '@/lib/date-utils';
 import type { WidgetProps } from '@/lib/dashboard';
 
 interface Countdown {
@@ -21,7 +22,8 @@ interface Countdown {
 interface CountdownsWidgetProps extends WidgetProps {
   countdowns: Countdown[];
   onAdd: (name: string, date: string) => Promise<void>;
-  onDelete: (id: number) => Promise<void>;
+  /** Asks the page to delete — the page owns the confirmation step. */
+  onDelete: (id: number) => void;
 }
 
 export function CountdownsWidget({
@@ -46,11 +48,16 @@ export function CountdownsWidget({
     setIsOpen(false);
   };
 
+  // Whole calendar days between today and the event, both taken as local dates.
+  // `new Date('2026-08-14')` parses as UTC midnight, so comparing it against a
+  // local `now` reported today's events as "Tomorrow" for the first 5½ hours of
+  // every IST day. parseYMD keeps both sides in local time.
   const calculateDays = (dateStr: string) => {
-    const target = new Date(dateStr);
+    const target = parseYMD(dateStr.slice(0, 10));
     const now = new Date();
-    const diff = target.getTime() - now.getTime();
-    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diff = target.getTime() - today.getTime();
+    return Math.max(0, Math.round(diff / (1000 * 60 * 60 * 24)));
   };
 
   const emptyState = (
@@ -138,7 +145,8 @@ export function CountdownsWidget({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label={`Delete countdown ${countdown.event_name}`}
+                className="h-7 w-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                 onClick={() => onDelete(countdown.id)}
               >
                 <Trash2 className="h-4 w-4 text-destructive" />

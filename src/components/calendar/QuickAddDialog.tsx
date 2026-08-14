@@ -138,8 +138,19 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
     day: 'numeric',
   });
 
+  // Clear the form on close — reopening for a different day used to show the
+  // text you'd abandoned on the previous one.
+  const handleOpenChange = (next: boolean) => {
+    if (!next) {
+      setTaskText('');
+      setBirthdayName('');
+      setBirthdayYear('');
+    }
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Add Event for {formattedDate}</DialogTitle>
@@ -197,9 +208,15 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
               <Label htmlFor="birthday-name">Person's Name</Label>
               <Input
                 id="birthday-name"
-                placeholder="Who's birthday is it?"
+                placeholder="Whose birthday is it?"
                 value={birthdayName}
+                maxLength={100}
                 onChange={(e) => setBirthdayName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isLoading && birthdayName.trim()) {
+                    handleAddBirthday();
+                  }
+                }}
               />
             </div>
             <div className="space-y-2">

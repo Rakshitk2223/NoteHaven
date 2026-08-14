@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isToday, getDay } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { CalendarEvent } from '@/types/calendar';
-import { groupEventsByDate, EVENT_LABELS, EVENT_ICONS } from '@/lib/calendar';
+import { groupEventsByDate, EVENT_ICONS } from '@/lib/calendar';
+import { dateToYMD } from '@/lib/date-utils';
 import {
   HoverCard,
   HoverCardContent,
@@ -99,8 +100,7 @@ export const MonthView = ({
       {/* Calendar Grid */}
       <div className="grid grid-cols-7 auto-rows-fr">
         {days.map(day => {
-          const dateKey = day.toDateString();
-          const dayEvents = eventsByDay.get(dateKey) || [];
+          const dayEvents = eventsByDay.get(dateToYMD(day)) || [];
           const isCurrentMonth = isSameMonth(day, currentDate);
           const isSelected = selectedDate && isSameDay(day, selectedDate);
           const isTodayDate = isToday(day);
@@ -108,9 +108,19 @@ export const MonthView = ({
 
           const dayCellContent = (
             <div
+              role="button"
+              tabIndex={0}
+              aria-label={`${format(day, 'EEEE, MMMM d')}${dayEvents.length ? ` — ${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''}` : ''}`}
               onClick={() => onDateClick(day)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onDateClick(day);
+                }
+              }}
               className={cn(
                 "min-h-[78px] sm:min-h-[110px] lg:min-h-[140px] p-1 sm:p-1.5 lg:p-2 border-r border-b cursor-pointer transition-all flex flex-col",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset",
                 !isCurrentMonth && "bg-muted/30 text-muted-foreground",
                 isSelected && "bg-secondary ring-1 ring-primary",
                 isTodayDate && !isSelected && "bg-accent/30",

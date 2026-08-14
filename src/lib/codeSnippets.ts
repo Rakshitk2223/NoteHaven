@@ -1,6 +1,10 @@
 import { supabase } from '@/integrations/supabase/client';
 import { createTag, setSnippetTags, type Tag } from '@/lib/tags';
 
+// Masking lives in its own dependency-free module so it can be tested outside
+// the browser; re-exported here so existing import sites keep working.
+export { maskEnvValues, maskSecrets, looksLikeSecrets } from '@/lib/secret-mask';
+
 export interface CodeSnippet {
   id: number;
   user_id: string;
@@ -52,25 +56,6 @@ export const SUPPORTED_LANGUAGES = [
 export function getLanguageLabel(value: string): string {
   const lang = SUPPORTED_LANGUAGES.find(l => l.value === value);
   return lang?.label || value;
-}
-
-/**
- * Mask the values in a .env-style document while keeping keys, comments and
- * blank lines visible. Used to avoid leaking secrets in the snippet viewer.
- *   API_KEY=abc123   ->   API_KEY=••••••••
- */
-export function maskEnvValues(code: string): string {
-  return code
-    .split('\n')
-    .map((line) => {
-      const trimmed = line.trimStart();
-      if (!trimmed || trimmed.startsWith('#')) return line;
-      const match = line.match(/^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_.]*\s*=)(.*)$/);
-      if (!match) return line;
-      const [, keyPart, value] = match;
-      return value.trim().length === 0 ? line : `${keyPart}••••••••`;
-    })
-    .join('\n');
 }
 
 /** Default file extensions used to suggest a filename per language. */

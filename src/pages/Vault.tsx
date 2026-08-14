@@ -238,9 +238,17 @@ const Vault = () => {
 
     if (clean.length) {
       setUploading(true);
+      // `namesHere` only covers files already stored, so dropping two different
+      // files that happen to share a filename put both in `clean` and created
+      // two identically-named rows in the same folder. De-duplicate within the
+      // batch too, using the same "name (n)" scheme as conflict resolution.
+      const takenInBatch = new Set(namesHere);
       for (const f of clean) {
+        const name = uniqueName(f.name, takenInBatch);
+        takenInBatch.add(name);
+        namesUsedRef.current.add(name);
         try {
-          await uploadFile(f, currentFolderId);
+          await uploadFile(f, currentFolderId, name);
           batchStats.current.added++;
         } catch (e) {
           batchStats.current.errors.push(e instanceof Error ? e.message : `Failed to upload ${f.name}`);

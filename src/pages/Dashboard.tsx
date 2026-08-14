@@ -98,7 +98,6 @@ interface LedgerSummaryData {
 
 const Dashboard = () => {
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [widgets, setWidgets] = useState<DashboardWidget[]>(DEFAULT_WIDGETS);
   const [widgetsLoaded, setWidgetsLoaded] = useState(false);
   const [isManagerOpen, setIsManagerOpen] = useState(false);
@@ -141,12 +140,15 @@ const Dashboard = () => {
   const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
-      setIsRefreshing(true);
 
       const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) throw new Error('User not authenticated');
+      const userId = session?.user?.id;
+      if (!userId) throw new Error('User not authenticated');
 
+      // allSettled, not all: a single failing table used to reject the whole
+      // batch and leave every widget blank. Each widget now degrades alone.
+      // Everything runs in one wave — stats/tags/renewals/ledger used to be
+      // awaited one after another, adding four sequential round trips.
       const [
         tasksResult,
         notesResult,
@@ -154,57 +156,60 @@ const Dashboard = () => {
         promptsResult,
         pinnedResult,
         countdownResult,
-        birthdaysResult
-      ] = await Promise.all([
-        fetchPendingTasks(),
-        fetchRecentNotes(),
-        fetchWatchingMedia(),
-        fetchFavoritePrompts(),
-        fetchPinnedItems(),
-        fetchCountdowns(),
-        fetchBirthdays()
+        birthdaysResult,
+        statsResult,
+        tagsResult,
+        renewalsResult,
+        ledgerResult
+      ] = await Promise.allSettled([
+        fetchPendingTasks(userId),
+        fetchRecentNotes(userId),
+        fetchWatchingMedia(userId),
+        fetchFavoritePrompts(userId),
+        fetchPinnedItems(userId),
+        fetchCountdowns(userId),
+        fetchBirthdays(userId),
+        fetchStats(userId),
+        fetchUserTags(),
+        getUpcomingRenewals(30),
+        fetchLedgerSummary()
       ]);
 
-      setTasks(tasksResult);
-      setNotes(notesResult);
-      setMedia(mediaResult);
-      setPrompts(promptsResult);
-      setPinnedItems(pinnedResult);
-      setCountdowns(countdownResult);
-      setBirthdays(birthdaysResult);
+      const value = <T,>(r: PromiseSettledResult<T>, label: string, fallback: T): T => {
+        if (r.status === 'fulfilled') return r.value;
+        console.error(`Dashboard: failed to load ${label}`, r.reason);
+        return fallback;
+      };
 
-      const statsResult = await fetchStats();
-      setStats(statsResult);
+      const tasksData = value(tasksResult, 'tasks', [] as Task[]);
+      const birthdaysData = value(birthdaysResult, 'birthdays', [] as Birthday[]);
+      const renewalsData = value(renewalsResult, 'renewals', [] as UpcomingRenewal[]);
+      const countdownsData = value(countdownResult, 'countdowns', [] as Countdown[]);
 
-      try {
-        const tagsData = await fetchUserTags();
-        setTags(tagsData);
-      } catch (err) {
-        console.error('Failed to fetch tags:', err);
-      }
+      setTasks(tasksData);
+      setNotes(value(notesResult, 'notes', [] as Note[]));
+      setMedia(value(mediaResult, 'media', [] as MediaItem[]));
+      setPrompts(value(promptsResult, 'prompts', [] as Prompt[]));
+      setPinnedItems(value(pinnedResult, 'pinned items', [] as PinnedItem[]));
+      setCountdowns(countdownsData);
+      setBirthdays(birthdaysData);
+      setStats(value(statsResult, 'stats', { prompts: 0, media: 0, tasks: 0, completedTasks: 0, notes: 0 }));
+      setTags(value(tagsResult, 'tags', [] as Tag[]));
+      setRenewals(renewalsData);
+      setLedgerData(ledgerResult.status === 'fulfilled' ? ledgerResult.value : null);
 
-      let renewalsResult: UpcomingRenewal[] = [];
-      try {
-        renewalsResult = await getUpcomingRenewals(30);
-        setRenewals(renewalsResult);
-      } catch (err) {
-        console.error('Failed to fetch renewals:', err);
-      }
-
-      try {
-        const ledger = await fetchLedgerSummary();
-        setLedgerData(ledger);
-      } catch (err) {
-        console.error('Failed to fetch ledger:', err);
-      }
-
-      const events = generateCalendarEvents(
-        tasksResult,
-        birthdaysResult,
-        renewalsResult,
-        countdownResult
+      setCalendarEvents(
+        generateCalendarEvents(tasksData, birthdaysData, renewalsData, countdownsData)
       );
-      setCalendarEvents(events);
+
+      // Only shout if the whole page is useless; individual gaps are logged above.
+      const failures = [
+        tasksResult, notesResult, mediaResult, promptsResult, pinnedResult,
+        countdownResult, birthdaysResult, statsResult
+      ].filter((r) => r.status === 'rejected');
+      if (failures.length === 8) {
+        throw failures[0].status === 'rejected' ? failures[0].reason : new Error('Load failed');
+      }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
       toast({
@@ -215,7 +220,6 @@ const Dashboard = () => {
       });
     } finally {
       setLoading(false);
-      setIsRefreshing(false);
     }
   }, [toast]);
 
@@ -232,15 +236,11 @@ const Dashboard = () => {
     initWidgets();
   }, []);
 
-  const fetchPendingTasks = async (): Promise<Task[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
-
+  const fetchPendingTasks = async (userId: string): Promise<Task[]> => {
     const { data, error } = await supabase
       .from('tasks')
       .select('id, task_text, is_completed, due_date')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .eq('is_completed', false)
       .order('created_at', { ascending: false })
       .limit(10);
@@ -249,15 +249,11 @@ const Dashboard = () => {
     return data || [];
   };
 
-  const fetchRecentNotes = async (): Promise<Note[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
-
+  const fetchRecentNotes = async (userId: string): Promise<Note[]> => {
     const { data, error } = await supabase
       .from('notes')
       .select('id, title, updated_at')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('updated_at', { ascending: false })
       .limit(10);
 
@@ -265,18 +261,14 @@ const Dashboard = () => {
     return data || [];
   };
 
-  const fetchWatchingMedia = async (): Promise<MediaItem[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
-
+  const fetchWatchingMedia = async (userId: string): Promise<MediaItem[]> => {
     // 'Reading' is the status every manga/manhwa/manhua row uses, so filtering
     // on 'Watching' alone hid half the library from its own widget (audit BUG-10).
     const base = () =>
       supabase
         .from('media_tracker')
         .select('id, title, type')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .in('status', ['Watching', 'Reading'])
         .limit(10);
 
@@ -294,15 +286,11 @@ const Dashboard = () => {
     return data || [];
   };
 
-  const fetchFavoritePrompts = async (): Promise<Prompt[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
-
+  const fetchFavoritePrompts = async (userId: string): Promise<Prompt[]> => {
     const { data, error } = await supabase
       .from('prompts')
       .select('id, title')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .eq('is_favorited', true)
       .order('created_at', { ascending: false })
       .limit(10);
@@ -311,30 +299,26 @@ const Dashboard = () => {
     return data || [];
   };
 
-  const fetchPinnedItems = async (): Promise<PinnedItem[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
-
+  const fetchPinnedItems = async (userId: string): Promise<PinnedItem[]> => {
     const [notesPinned, tasksPinned, promptsPinned] = await Promise.all([
       supabase
         .from('notes')
         .select('id, title, updated_at')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('is_pinned', true)
         .order('updated_at', { ascending: false })
         .limit(5),
       supabase
         .from('tasks')
         .select('id, task_text, updated_at')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('is_pinned', true)
         .order('updated_at', { ascending: false })
         .limit(5),
       supabase
         .from('prompts')
         .select('id, title, created_at')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('is_pinned', true)
         .order('created_at', { ascending: false })
         .limit(5)
@@ -364,68 +348,62 @@ const Dashboard = () => {
         ...promptsPinned.data.map((p) => ({
           id: p.id,
           type: 'prompt' as const,
-          title: p.title || 'Prompt'
+          title: p.title || 'Prompt',
+          // Prompts have no updated_at; without this the sort below compared
+          // NaN and scattered pinned prompts to arbitrary positions.
+          updated_at: p.created_at ?? undefined
         }))
       );
 
     return items
-      .sort(
-        (a, b) =>
-          new Date(b.updated_at || '').getTime() -
-          new Date(a.updated_at || '').getTime()
-      )
+      .sort((a, b) => {
+        const at = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const bt = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return bt - at;
+      })
       .slice(0, 8);
   };
 
-  const fetchStats = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
+  // Counts come back in the Content-Range header with head:true — no row bodies
+  // cross the wire. This used to download every task, note, media and prompt row
+  // just to read .length, and re-ran on every task completion.
+  const fetchStats = async (userId: string) => {
+    const head = { count: 'exact' as const, head: true };
 
-    const [tasksResult, notesResult, mediaResult, promptsResult] =
+    const [tasksResult, completedResult, notesResult, mediaResult, promptsResult] =
       await Promise.all([
-        supabase.from('tasks').select('is_completed').eq('user_id', user.id),
-        supabase.from('notes').select('id').eq('user_id', user.id),
-        supabase.from('media_tracker').select('id').eq('user_id', user.id),
-        supabase.from('prompts').select('id').eq('user_id', user.id)
+        supabase.from('tasks').select('*', head).eq('user_id', userId),
+        supabase.from('tasks').select('*', head).eq('user_id', userId).eq('is_completed', true),
+        supabase.from('notes').select('*', head).eq('user_id', userId),
+        supabase.from('media_tracker').select('*', head).eq('user_id', userId),
+        supabase.from('prompts').select('*', head).eq('user_id', userId)
       ]);
 
-    const tasks = tasksResult.data || [];
-    const completedTasks = tasks.filter((t) => t.is_completed).length;
-
     return {
-      tasks: tasks.length,
-      completedTasks,
-      notes: notesResult.data?.length || 0,
-      media: mediaResult.data?.length || 0,
-      prompts: promptsResult.data?.length || 0
+      tasks: tasksResult.count ?? 0,
+      completedTasks: completedResult.count ?? 0,
+      notes: notesResult.count ?? 0,
+      media: mediaResult.count ?? 0,
+      prompts: promptsResult.count ?? 0
     };
   };
 
-  const fetchCountdowns = async (): Promise<Countdown[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
-
+  const fetchCountdowns = async (userId: string): Promise<Countdown[]> => {
     const { data, error } = await supabase
       .from('countdowns')
       .select('id, event_name, event_date')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('event_date', { ascending: true });
 
     if (error) throw error;
     return data || [];
   };
 
-  const fetchBirthdays = async (): Promise<Birthday[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) throw new Error('User not authenticated');
-
+  const fetchBirthdays = async (userId: string): Promise<Birthday[]> => {
     const { data, error } = await supabase
       .from('birthdays')
       .select('id, name, date_of_birth')
-      .eq('user_id', user.id);
+      .eq('user_id', userId);
 
     if (error) throw error;
     return data || [];
@@ -457,7 +435,6 @@ const Dashboard = () => {
   ): CalendarEvent[] => {
     const events: CalendarEvent[] = [];
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     // Tasks only mark the calendar when they actually have a due date.
     tasks.forEach((task) => {
@@ -512,8 +489,8 @@ const Dashboard = () => {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) throw new Error('User not authenticated');
+      const userId = session?.user?.id;
+      if (!userId) throw new Error('User not authenticated');
 
       setTasks((prev) => prev.filter((task) => task.id !== taskId));
 
@@ -521,7 +498,7 @@ const Dashboard = () => {
         .from('tasks')
         .update({ is_completed: true })
         .eq('id', taskId)
-        .eq('user_id', user.id);
+        .eq('user_id', userId);
 
       if (error) throw error;
 
@@ -530,8 +507,8 @@ const Dashboard = () => {
         description: 'Great job on completing that task!'
       });
 
-      const newStats = await fetchStats();
-      setStats(newStats);
+      // The counts are derivable — no need to re-query for one checkbox.
+      setStats((prev) => ({ ...prev, completedTasks: prev.completedTasks + 1 }));
     } catch (error) {
       if (taskToComplete) {
         setTasks((prev) => [taskToComplete, ...prev]);
@@ -548,35 +525,58 @@ const Dashboard = () => {
 
   const handleAddCountdown = async (name: string, date: string) => {
     const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) return;
+    const userId = session?.user?.id;
+    if (!userId) return;
 
     const { data, error } = await supabase
       .from('countdowns')
       .insert([
-        { user_id: user.id, event_name: name, event_date: date }
+        { user_id: userId, event_name: name, event_date: date }
       ])
       .select()
       .single();
 
-    if (!error && data) {
-      setCountdowns((prev) =>
-        [...prev, data].sort(
-          (a, b) =>
-            new Date(a.event_date).getTime() - new Date(b.event_date).getTime()
-        )
-      );
+    if (error || !data) {
+      toast({
+        title: 'Error',
+        description: 'Failed to add countdown',
+        variant: 'destructive'
+      });
+      return;
     }
+
+    setCountdowns((prev) =>
+      [...prev, data].sort((a, b) => a.event_date.localeCompare(b.event_date))
+    );
+    // Keep the mini-calendar in step with the new event.
+    setCalendarEvents((prev) => [
+      ...prev,
+      { date: data.event_date.slice(0, 10), type: 'countdown', label: data.event_name }
+    ]);
   };
 
   const handleDeleteCountdown = async (id: number) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) return;
+
+    const removed = countdowns.find((c) => c.id === id);
+
     const { error } = await supabase
       .from('countdowns')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('user_id', userId);
 
     if (!error) {
       setCountdowns((prev) => prev.filter((c) => c.id !== id));
+      if (removed) {
+        setCalendarEvents((prev) =>
+          prev.filter(
+            (e) => !(e.type === 'countdown' && e.label === removed.event_name)
+          )
+        );
+      }
       toast({
         title: 'Deleted',
         description: 'Countdown deleted successfully'
@@ -669,6 +669,7 @@ const Dashboard = () => {
             {...commonProps}
             prompts={prompts}
             onViewAll={() => navigate('/library')}
+            onPromptClick={(id) => navigate(`/library?prompt=${id}`)}
           />
         );
 
@@ -683,7 +684,7 @@ const Dashboard = () => {
                   navigate(`/tasks?task=${item.id}`);
                   break;
                 case 'prompt':
-                  navigate('/library');
+                  navigate(`/library?prompt=${item.id}`);
                   break;
                 case 'note':
                   navigate(`/notes?note=${item.id}`);
@@ -698,7 +699,8 @@ const Dashboard = () => {
           <TagsWidget
             {...commonProps}
             tags={tags}
-            onTagClick={(tag) => navigate(`/notes?tag=${encodeURIComponent(tag.name)}`)}
+            // /notes never read a ?tag= param — the tag landing page is /tags/:name.
+            onTagClick={(tag) => navigate(`/tags/${encodeURIComponent(tag.name)}`)}
           />
         );
 
@@ -708,7 +710,9 @@ const Dashboard = () => {
             {...commonProps}
             countdowns={countdowns}
             onAdd={handleAddCountdown}
-            onDelete={handleDeleteCountdown}
+            // Route through the confirm dialog below — the trash icon used to
+            // delete on a single click while this dialog sat unreachable.
+            onDelete={(id) => setDeleteConfirm({ open: true, id })}
           />
         );
 
@@ -735,7 +739,9 @@ const Dashboard = () => {
           <CalendarMiniWidget
             {...commonProps}
             events={calendarEvents}
-            onDateClick={(date) => navigate(`/calendar?date=${date.toISOString().split('T')[0]}`)}
+            // dateToYMD, not toISOString: local midnight in IST is the previous
+            // day in UTC, so every date link used to land a day early.
+            onDateClick={(date) => navigate(`/calendar?date=${dateToYMD(date)}`)}
             onViewFull={() => navigate('/calendar')}
           />
         );
@@ -755,10 +761,14 @@ const Dashboard = () => {
   };
 
   const visibleWidgets = useMemo(() => {
+    // Don't paint DEFAULT_WIDGETS while the saved layout is still in flight —
+    // a customised dashboard used to render the stock layout then snap.
+    if (!widgetsLoaded) return [];
     return widgets
       .filter((w) => w.visible)
+      .slice()
       .sort((a, b) => a.position - b.position);
-  }, [widgets]);
+  }, [widgets, widgetsLoaded]);
 
   const completionRate =
     stats.tasks > 0 ? Math.round((stats.completedTasks / stats.tasks) * 100) : 0;
@@ -800,18 +810,32 @@ const Dashboard = () => {
 
   return (
     <PageShell title={pageTitle} icon={LayoutDashboard} actions={headerActions} mobileActions={optionsMenu}>
-      <Stagger
-        className={cn(
-          'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4',
-          fillSpace ? 'grid-flow-row-dense gap-5 [grid-auto-rows:4px]' : 'gap-4 sm:gap-5'
-        )}
-      >
-        {visibleWidgets.map((widget) => (
-          <MasonryItem key={widget.id} fill={fillSpace} className={sizeClasses[widget.size]}>
-            {renderWidget(widget)}
-          </MasonryItem>
-        ))}
-      </Stagger>
+      {!widgetsLoaded ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className={cn(
+                'zen-card loading-shimmer h-48',
+                i === 0 ? 'col-span-1 md:col-span-2 lg:col-span-4' : 'col-span-1 md:col-span-2'
+              )}
+            />
+          ))}
+        </div>
+      ) : (
+        <Stagger
+          className={cn(
+            'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4',
+            fillSpace ? 'grid-flow-row-dense gap-5 [grid-auto-rows:4px]' : 'gap-4 sm:gap-5'
+          )}
+        >
+          {visibleWidgets.map((widget) => (
+            <MasonryItem key={widget.id} fill={fillSpace} className={sizeClasses[widget.size]}>
+              {renderWidget(widget)}
+            </MasonryItem>
+          ))}
+        </Stagger>
+      )}
 
       <WidgetManager
         isOpen={isManagerOpen}

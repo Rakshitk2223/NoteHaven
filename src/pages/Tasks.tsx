@@ -30,6 +30,33 @@ interface Task {
   tags?: Tag[];
 }
 
+/**
+ * Whole days from today to a `YYYY-MM-DD` due date, in local time.
+ * Negative = overdue, 0 = today.
+ */
+function daysUntilDue(due: string): number {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((parseYMD(due.slice(0, 10)).getTime() - today.getTime()) / 86_400_000);
+}
+
+/** Due today is not overdue — it used to render in the same alarming red. */
+function dueDateClass(due: string): string {
+  const d = daysUntilDue(due);
+  if (d < 0) return 'text-xs font-medium text-destructive';
+  if (d === 0) return 'text-xs font-medium text-warning';
+  return 'text-xs font-medium text-muted-foreground';
+}
+
+function dueDateLabel(due: string): string {
+  const d = daysUntilDue(due);
+  if (d === 0) return 'Due today';
+  if (d === 1) return 'Due tomorrow';
+  if (d === -1) return 'Overdue by 1 day';
+  if (d < 0) return `Overdue by ${Math.abs(d)} days`;
+  return `Due ${formatDateForDisplay(due)}`;
+}
+
 const Tasks = () => {
   const location = useLocation();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -92,22 +119,31 @@ const Tasks = () => {
     }
   };
 
-  // After tasks load or location changes, if ?task=ID is present, attempt to scroll to it
+  // Scroll to and flash the task named by ?task=ID, once per link. The timers
+  // used to be left dangling on unmount, and the highlight re-fired on every
+  // subsequent state change because `tasks` is in the dependency list.
+  const highlightedTaskRef = useRef<string | null>(null);
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const taskIdParam = params.get('task');
-    if (!taskIdParam) return;
+    const taskIdParam = new URLSearchParams(location.search).get('task');
+    if (!taskIdParam || tasks.length === 0) return;
+    if (highlightedTaskRef.current === taskIdParam) return;
     const idNum = Number(taskIdParam);
     if (!Number.isFinite(idNum)) return;
-    // slight delay to ensure DOM rendered
-    setTimeout(() => {
+    highlightedTaskRef.current = taskIdParam;
+
+    let clearTimer: ReturnType<typeof setTimeout> | undefined;
+    const scrollTimer = setTimeout(() => {
       const el = document.querySelector(`#task-${idNum}`) as HTMLElement | null;
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('ring-2','ring-primary');
-        setTimeout(() => el.classList.remove('ring-2','ring-primary'), 1500);
-      }
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-primary');
+      clearTimer = setTimeout(() => el.classList.remove('ring-2', 'ring-primary'), 1500);
     }, 200);
+
+    return () => {
+      clearTimeout(scrollTimer);
+      if (clearTimer) clearTimeout(clearTimer);
+    };
   }, [location.search, tasks]);
 
   const fetchTasks = async () => {
@@ -203,8 +239,6 @@ const Tasks = () => {
       fetchTags(); // Refresh available tags
       toast({ title: 'Task added', description: 'Your task has been created successfully.' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to add task';
-      setError(message);
       toast({ title: 'Error', description: 'Failed to add task. Please try again.', variant: 'destructive' });
     }
   };
@@ -227,8 +261,6 @@ const Tasks = () => {
           : task
       ));
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update task';
-      setError(message);
       toast({ title: 'Error', description: 'Failed to update task. Please try again.', variant: 'destructive' });
     }
   };
@@ -244,8 +276,6 @@ const Tasks = () => {
 
       setTasks(tasks.map(t => t.id === task.id ? { ...t, is_pinned: !task.is_pinned } : t));
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update pin';
-      setError(message);
       toast({ title: 'Error', description: 'Failed to update pin status.', variant: 'destructive' });
     }
   };
@@ -268,12 +298,29 @@ const Tasks = () => {
       setTasks(tasks.filter(task => task.id !== taskId));
       toast({ title: 'Deleted', description: 'Task deleted successfully' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete task';
-      setError(message);
       toast({ title: 'Error', description: 'Failed to delete task', variant: 'destructive' });
     } finally {
       setDeleteConfirm({ open: false, id: null });
     }
+  };
+
+  // Open the edit dialog seeded from the task.
+  //
+  // The DatePicker is driven by `editDueObj`, which the old inline handlers
+  // never set — so an existing due date showed as "No due date", and whatever
+  // date you last picked leaked into the next task you opened.
+  const openEdit = (task: Task) => {
+    setEditTask(task);
+    setEditText(task.task_text);
+    setEditDue(task.due_date || '');
+    setEditDueObj(task.due_date ? parseYMD(task.due_date.slice(0, 10)) : undefined);
+  };
+
+  const closeEdit = () => {
+    setEditTask(null);
+    setEditTaskTags([]);
+    setEditDue('');
+    setEditDueObj(undefined);
   };
 
   // Filter tasks by selected tags
@@ -362,6 +409,19 @@ const Tasks = () => {
                   description="Add your first task using the field above to get started."
                 />
               </div>
+            ) : todoTasks.length === 0 && completedTasks.length === 0 ? (
+              <div className="zen-card p-4 sm:p-8">
+                <EmptyState
+                  icon={ListTodo}
+                  title="No tasks match these tags"
+                  description="No task carries every tag you've selected. Clear a tag to widen the search."
+                  action={
+                    <Button variant="secondary" onClick={() => setSelectedTags([])}>
+                      Clear tag filter
+                    </Button>
+                  }
+                />
+              </div>
             ) : (
               <div className="space-y-8">
                 {/* To-Do Section */}
@@ -419,20 +479,8 @@ const Tasks = () => {
                               <span className="break-words">{task.task_text}</span>
                             </span>
                             {task.due_date && (
-                              <span className={(() => {
-                                const today = new Date();
-                                today.setHours(0,0,0,0);
-                                // Parse YYYY-MM-DD string as local date by using UTC to avoid timezone issues
-                                const [year, month, day] = task.due_date.split('-').map(Number);
-                                const due = new Date(year, month - 1, day);
-                                const diff = due.getTime() - today.getTime();
-                                const isPastOrToday = diff <= 0;
-                                return `text-xs font-medium ${isPastOrToday ? 'text-destructive' : 'text-muted-foreground'}`;
-                              })()}>
-                                Due {(() => {
-                                  const [year, month, day] = task.due_date.split('-').map(Number);
-                                  return new Date(year, month - 1, day).toLocaleDateString();
-                                })()}
+                              <span className={dueDateClass(task.due_date)}>
+                                {dueDateLabel(task.due_date)}
                               </span>
                             )}
                             {/* Tags (show on hover) */}
@@ -457,7 +505,7 @@ const Tasks = () => {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => { setEditTask(task); setEditText(task.task_text); setEditDue(task.due_date || ""); }}
+                              onClick={() => openEdit(task)}
                               className="h-8 w-8 p-0 touch-manipulation"
                               title="Edit"
                             >
@@ -552,7 +600,7 @@ const Tasks = () => {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => { setEditTask(task); setEditText(task.task_text); setEditDue(task.due_date || ""); }}
+                            onClick={() => openEdit(task)}
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
@@ -571,7 +619,7 @@ const Tasks = () => {
                 )}
               </div>
             )}
-      <Dialog open={!!editTask} onOpenChange={(o) => { if (!o) { setEditTask(null); setEditTaskTags([]); } }}>
+      <Dialog open={!!editTask} onOpenChange={(o) => { if (!o) closeEdit(); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Task</DialogTitle>
@@ -601,7 +649,7 @@ const Tasks = () => {
               />
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setEditTask(null); setEditTaskTags([]); }}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={closeEdit}>Cancel</Button>
               <Button size="sm" disabled={!editText.trim()} onClick={async () => {
                 if (!editTask) return;
                 try {
@@ -625,8 +673,7 @@ const Tasks = () => {
                   }
                   
                   setTasks(prev => prev.map(t => t.id === editTask.id ? { ...t, task_text: editText.trim(), due_date: editDue || null, tags: editTaskTags } : t));
-                  setEditTask(null);
-                  setEditTaskTags([]);
+                  closeEdit();
                   fetchTags();
                   toast({ title: 'Task updated', description: 'Your task changes have been saved.' });
                 } catch (e) {

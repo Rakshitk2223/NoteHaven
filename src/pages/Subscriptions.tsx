@@ -43,7 +43,9 @@ const Subscriptions = () => {
     amount: '',
     billing_cycle: 'monthly' as 'monthly' | 'yearly',
     category_id: '',
-    start_date: new Date().toISOString().split('T')[0],
+    // dateToYMD, matching resetForm below. toISOString() is UTC, so before
+    // 05:30 IST this defaulted the start date to yesterday.
+    start_date: dateToYMD(new Date()),
     end_date: '',
     status: 'active' as 'active' | 'renew' | 'cancel',
     notes: ''
@@ -121,10 +123,22 @@ const Subscriptions = () => {
 
   const handleSubmit = async () => {
     try {
-      if (!formData.name || !formData.amount || !formData.category_id) {
+      if (!formData.name.trim() || !formData.category_id) {
         toast({
           title: 'Missing fields',
           description: 'Please fill in all required fields',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      // The old check was `!formData.amount`, which let "abc" through as NaN and
+      // "-9" through as a negative recurring charge.
+      const amount = parseFloat(formData.amount);
+      if (!formData.amount.trim() || !Number.isFinite(amount) || amount <= 0) {
+        toast({
+          title: 'Invalid amount',
+          description: 'Enter a number greater than zero.',
           variant: 'destructive'
         });
         return;
@@ -140,10 +154,19 @@ const Subscriptions = () => {
         return;
       }
 
+      if (formData.start_date && formData.end_date && formData.end_date < formData.start_date) {
+        toast({
+          title: 'Dates out of order',
+          description: 'The end date is before the start date.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
       const refDate = formData.start_date || formData.end_date;
       const subscriptionData = {
-        name: formData.name,
-        amount: parseFloat(formData.amount),
+        name: formData.name.trim(),
+        amount,
         billing_cycle: formData.billing_cycle,
         category_id: parseInt(formData.category_id),
         start_date: formData.start_date || null,
@@ -158,8 +181,11 @@ const Subscriptions = () => {
         await updateSubscription(editingSubscription.id, subscriptionData);
         toast({ title: 'Subscription updated' });
       } else {
+        // Migration 15 retired the subscription->ledger triggers; the ledger now
+        // *derives* charges from the subscription instead of materialising a row.
+        // This toast used to promise a ledger entry that is never written.
         await createSubscription(subscriptionData);
-        toast({ title: 'Subscription added', description: 'Entry created in Money Ledger' });
+        toast({ title: 'Subscription added', description: 'Its charges now show in Money Ledger' });
       }
 
       setIsAddDialogOpen(false);

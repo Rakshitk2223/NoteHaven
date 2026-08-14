@@ -27,12 +27,21 @@ export const EVENT_ICONS: Record<CalendarEventType, string> = {
   note: 'FileText',
 };
 
+/**
+ * Buckets events by their calendar day, keyed on the raw `YYYY-MM-DD` string.
+ *
+ * The key used to be `new Date(event.date).toDateString()`, which parses a
+ * date-only string as UTC midnight and then formats it in local time — so
+ * every event shifted a day for any viewer west of UTC. Comparing the plain
+ * date strings sidesteps timezones entirely. Callers key lookups with
+ * `dateToYMD(day)`.
+ */
 export function groupEventsByDate<T extends { date: string }>(
   events: T[]
 ): Map<string, T[]> {
   const map = new Map<string, T[]>();
   events.forEach((event) => {
-    const dateKey = new Date(event.date).toDateString();
+    const dateKey = event.date.slice(0, 10);
     if (!map.has(dateKey)) {
       map.set(dateKey, []);
     }
@@ -40,7 +49,4 @@ export function groupEventsByDate<T extends { date: string }>(
   });
   return map;
 }
-
-
-
 

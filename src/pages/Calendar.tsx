@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import AppSidebar from '@/components/AppSidebar';
 import { MonthView } from '@/components/calendar/MonthView';
 import { WeekView } from '@/components/calendar/WeekView';
@@ -7,21 +8,46 @@ import { DayDetailModal } from '@/components/calendar/DayDetailModal';
 import { QuickAddDialog } from '@/components/calendar/QuickAddDialog';
 import { useCalendar } from '@/hooks/useCalendar';
 import type { CalendarView } from '@/types/calendar';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { Button } from '@/components/ui/button';
 import { Loader2, CalendarX, Menu } from 'lucide-react';
+import { parseYMD } from '@/lib/date-utils';
+
+/** `?date=YYYY-MM-DD`, ignoring anything that isn't a real date. */
+function readDateParam(raw: string | null): Date | null {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const parsed = parseYMD(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 const Calendar = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = useState<CalendarView>('month');
-  const [currentDate, setCurrentDate] = useState(new Date());
+  // Seed straight from the URL so a ?date= link lands on the right month
+  // instead of flashing today's and then jumping.
+  const [currentDate, setCurrentDate] = useState(
+    () => readDateParam(new URLSearchParams(window.location.search).get('date')) ?? new Date()
+  );
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [quickAddDate, setQuickAddDate] = useState<Date | null>(null);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
-  const isMobile = useIsMobile();
   const { toggle: toggleSidebar } = useSidebar();
 
-  const { events, loading, filters, setFilters, refetch } = useCalendar(currentDate, view);
+  const { events, loading, error, filters, setFilters, refetch } = useCalendar(currentDate, view);
+
+  // Open the day detail for a ?date= link once its events have loaded, then
+  // drop the param so paging around doesn't keep snapping back to it.
+  const consumedDateParam = useRef(false);
+  useEffect(() => {
+    if (consumedDateParam.current || loading) return;
+    const target = readDateParam(searchParams.get('date'));
+    if (!target) return;
+    consumedDateParam.current = true;
+    setSelectedDate(target);
+    const next = new URLSearchParams(searchParams);
+    next.delete('date');
+    setSearchParams(next, { replace: true });
+  }, [loading, searchParams, setSearchParams]);
 
   const handleDateClick = (date: Date) => {
     setSelectedDate(date);
@@ -73,6 +99,17 @@ const Calendar = () => {
             {loading ? (
               <div className="flex items-center justify-center h-[400px]">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : error ? (
+              /* A failed fetch used to render as "no events match your
+                 filters", which sent you hunting through the checkboxes. */
+              <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground">
+                <CalendarX className="h-16 w-16 mb-4 opacity-50 text-destructive" />
+                <p className="text-lg font-medium text-foreground">Couldn't load your calendar</p>
+                <p className="text-sm max-w-sm text-center mt-1">{error}</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+                  Try again
+                </Button>
               </div>
             ) : !hasActiveFilters ? (
               <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground">

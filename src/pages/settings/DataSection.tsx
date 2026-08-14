@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { dateToYMD } from '@/lib/date-utils';
 import { IMAGE_CACHE_PREFIXES } from '@/lib/image-cache';
 import { SettingsSection, SettingRow } from '@/components/settings/primitives';
 
@@ -113,7 +114,8 @@ export function DataSection() {
       const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'notehaven_export.json';
+      // Dated so successive backups don't collide as "notehaven_export (1).json".
+      a.href = url; a.download = `notehaven_export_${dateToYMD(new Date())}.json`;
       document.body.appendChild(a); a.click(); a.remove();
       // Revoke after the download has started — revoking synchronously can
       // cancel it in some browsers.
@@ -127,7 +129,7 @@ export function DataSection() {
           variant: 'destructive',
         });
       } else {
-        toast({ title: 'Export ready', description: 'Downloaded notehaven_export.json' });
+        toast({ title: 'Export ready', description: `Downloaded notehaven_export_${dateToYMD(new Date())}.json` });
       }
     } catch (e) {
       toast({ title: 'Export failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' });
@@ -135,6 +137,17 @@ export function DataSection() {
   }, [toast]);
 
   const onPickImport = (file: File) => {
+    // Reading an arbitrarily large file into memory locks the tab. A full
+    // NoteHaven export of a big library is a few MB.
+    const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
+    if (file.size > MAX_IMPORT_BYTES) {
+      toast({
+        title: 'File too large',
+        description: `${formatBytes(file.size)} exceeds the 25 MB import limit.`,
+        variant: 'destructive',
+      });
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       try {

@@ -204,9 +204,14 @@ const mapMeals = (meals: MealDbMeal[] | null | undefined): MealHit[] =>
     area: m.strArea ?? '',
   }));
 
+/** TheMealDB is a free keyless API with no uptime guarantee — never wait forever. */
+const MEALDB_TIMEOUT_MS = 8000;
+
 async function mealDbGet(path: string): Promise<MealDbMeal[]> {
   try {
-    const res = await fetch(`https://www.themealdb.com/api/json/v1/1/${path}`);
+    const res = await fetch(`https://www.themealdb.com/api/json/v1/1/${path}`, {
+      signal: AbortSignal.timeout(MEALDB_TIMEOUT_MS),
+    });
     if (!res.ok) return [];
     const json = await res.json();
     return json?.meals ?? [];
@@ -230,7 +235,11 @@ export async function searchMeals(query: string): Promise<MealHit[]> {
   const byIngredient = mapMeals(await mealDbGet(`filter.php?i=${encodeURIComponent(q.replace(/\s+/g, '_'))}`));
   if (byIngredient.length) return byIngredient;
 
-  for (const word of q.split(/\s+/).filter((w) => w.length > 2)) {
+  // Cap the per-word fallback. "chicken tikka masala biryani" used to issue six
+  // sequential round trips before giving up; three attempts is plenty and keeps
+  // the worst case bounded.
+  const words = q.split(/\s+/).filter((w) => w.length > 2).slice(0, 3);
+  for (const word of words) {
     const hits = mapMeals(await mealDbGet(`filter.php?i=${encodeURIComponent(word)}`));
     if (hits.length) return hits;
   }
@@ -244,7 +253,9 @@ export async function mealsByArea(area: string): Promise<MealHit[]> {
 
 export async function importMeal(id: string): Promise<RecipeDraft | null> {
   try {
-    const res = await fetch(`https://www.themealdb.com/api/json/v1/1/lookup.php?i=${encodeURIComponent(id)}`);
+    const res = await fetch(`https://www.themealdb.com/api/json/v1/1/lookup.php?i=${encodeURIComponent(id)}`, {
+      signal: AbortSignal.timeout(MEALDB_TIMEOUT_MS),
+    });
     if (!res.ok) return null;
     const json = await res.json();
     const m: MealDbMeal | undefined = json?.meals?.[0];
@@ -275,13 +286,14 @@ export async function importMeal(id: string): Promise<RecipeDraft | null> {
 // --------------------------------------------
 // Keyless image suggestion for hand-written recipes (Openverse). Best-effort.
 // --------------------------------------------
-export async function suggestRecipeImage(query: string): Promise<string | null> {
+export async function suggestRecipeImage(query: string, timeoutMs = 6000): Promise<string | null> {
   const q = query.trim();
   if (!q) return null;
   try {
     const res = await fetch(
       `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q + ' food dish')}&page_size=12&mature=false&aspect_ratio=wide`,
-      { headers: { Accept: 'application/json' } },
+      // Deadline for the same reason as mealDbGet — this can sit in a save path.
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) },
     );
     if (!res.ok) return null;
     const json = await res.json();

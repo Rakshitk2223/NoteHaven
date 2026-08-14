@@ -76,9 +76,13 @@ deploy-edge-function.sh
 context/                  # frontend.md, backend.md (architecture docs)
 ```
 
-The `supabase/` folder is git-tracked: `config.toml`, the `media-search` edge function, and the SQL migrations (`01`→`19`). Highlights: `06` adds `ledger_buckets` (**now unused** — the ledger moved to accounts in `13`); `07` adds `snippet_folders`; `08`/`09` extend media metadata with seasons + per-episode/cast data; `10` adds the private `vault` Storage bucket; `11a` media activity stamps, `11b` the public `avatars` bucket; `12` fixes the signup triggers; `13` adds `ledger_accounts`; `15` retires the subscription→ledger triggers; `16` bucket list; `17` recipes; **`18` reconciles columns that existed in production but in no migration**; **`19` is the security hardening pass** (share-link RPCs, IDOR fixes, `media_metadata` write policy). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
+The `supabase/` folder is git-tracked: `config.toml`, the `media-search` edge function, and the SQL migrations. (`supabase/.temp/` is CLI cache — untracked.)
 
-Migrations are applied **by hand in the Supabase SQL editor**, in filename order. There is no migration runner, so `18` and `19` must be run explicitly.
+**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it. New changes go in their own numbered file (`21_*.sql` next).
+
+Migrations are applied **by hand in the Supabase SQL editor**, in filename order — there is no migration runner. `00` and `20` must be run explicitly on a new project. `00` is already live on the production database; `20` is not (see below).
+
+`00_baseline_schema.sql` plus `src/integrations/supabase/types.ts` are the schema source of truth.
 
 ---
 
@@ -106,11 +110,11 @@ Migrations are applied **by hand in the Supabase SQL editor**, in filename order
 
 These are real, current, and worth knowing before you touch related code.
 
-1. **Migrations 18 + 19 must be applied.** A 2026-08 audit found the live database had drifted from the migration folder in two dangerous ways: the share-link policies on `notes` had lost their share-id predicate (making any shared note world-readable), and `get_calendar_events` / `get_upcoming_renewals` were `SECURITY DEFINER` with an unchecked `p_user_id` (cross-tenant reads). `19_security_hardening.sql` fixes both. See `audit-report.html` and `AUDIT_VERIFY.sql`.
+1. **The 2026-08 security drift is fixed and verified.** The live database had drifted in two dangerous ways: the share-link policies on `notes` had lost their share-id predicate (making any shared note world-readable), and `get_calendar_events` / `get_upcoming_renewals` were `SECURITY DEFINER` with an unchecked `p_user_id` (cross-tenant reads). Both are closed — confirmed against production on 2026-08-14: `notes` now carries only `auth.uid() = user_id` policies, and both RPCs check `auth.uid()`. Re-verify any time with `docs/audit/AUDIT_ONE_SHOT.sql` (one statement, 20 sections — the Supabase editor only renders the *last* result set, so multi-statement audit scripts silently discard everything above). Background: `docs/audit/audit-report.html`.
 2. **Note sharing goes through RPCs, not tables.** `SharedNote.tsx` calls `get_shared_note(share_id)` / `update_shared_note(...)`. Recipients cannot read `shared_notes` or `notes` directly, by design — don't "simplify" it back to a table query.
 3. **The edge function verifies JWTs.** Call it via `lib/edge-function.ts` (`mediaSearchGet`), which attaches the session token. A bare `fetch()` will 401.
 4. **`media_metadata` is a shared, cross-tenant cache** with no `user_id`. Writes are limited to `authenticated`. Treat anything read from it as untrusted third-party data.
-5. **`ledger_buckets` is dead.** The table and its columns still exist, but the envelope-budgeting UI was removed — `MoneyLedger.buildPayload` hardcodes `bucket_id: null`. Either wire it back up or drop the schema; don't half-use it.
+5. **`ledger_buckets` is retired.** The envelope-budgeting UI was removed long ago. `20_data_cleanup.sql` drops the table and the two `ledger_entries` columns; the code and `types.ts` no longer reference them. Confirmed safe first — zero entries referenced a bucket. **Run migration 20 before deploying**, or leave the dead table in place; do not half-apply.
 6. **`/prompts` is a working alias** that renders `Library` (same as `/library`).
 7. **Responsive/mobile**: `PageShell` renders the `lg:hidden` hamburger header for migrated content pages (bespoke full-height pages — Notes/MediaTracker/Calendar — keep their own). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` and `ui/sheet.tsx` are mobile-safe, so prefer those defaults over per-dialog width hacks.
 8. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components.
@@ -137,3 +141,7 @@ These are real, current, and worth knowing before you touch related code.
 - `context/frontend.md` — full frontend map (routing, pages, components, styling, state, data layer).
 - `context/backend.md` — Supabase schema, RPCs, RLS, edge function, cover-image subsystem.
 - `README.md` — setup, deployment, troubleshooting.
+- `docs/BACKLOG.md` — proposed enhancements per feature area.
+- `docs/PENDING_FIXES.md` — known open items.
+- `docs/audit/AUDIT_ONE_SHOT.sql` — single-statement live-database health check.
+- `docs/archive/` — completed trackers and superseded dumps, kept for reference.

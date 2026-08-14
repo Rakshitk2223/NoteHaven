@@ -60,6 +60,9 @@ import { typeBadgeSoft, AIRING_STYLE, AIRING_LABEL, type CustomGroup, type Activ
 import { CustomGroupBuilder } from "@/components/media/CustomGroupBuilder";
 import { RefreshLibraryDialog } from "@/components/media/RefreshLibraryDialog";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
+import { mediaSearchGet } from "@/lib/edge-function";
+import { devLog } from "@/lib/logger";
+import { dateToYMD } from "@/lib/date-utils";
 import { refreshCoverImage } from "@/lib/media-refresh";
 import { fetchMediaMetadataBatch, removeCoverImage, acknowledgeNewContent, computeProgress, type MediaMeta } from "@/lib/media-metadata";
 import { Progress } from "@/components/ui/progress";
@@ -90,26 +93,13 @@ const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
 
-const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
-
+// Must go through mediaSearchGet: the edge function verifies the JWT, so the
+// bare fetch this used to do now 401s and every new item was added coverless.
 async function fetchCoverImage(title: string, type: string): Promise<string | null> {
-  try {
-    const url = new URL(EDGE_FUNCTION_URL);
-    url.searchParams.set('q', title);
-    url.searchParams.set('type', type.toLowerCase());
-    url.searchParams.set('limit', '1');
-
-    const response = await fetch(url.toString());
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    if (data.success && data.results?.[0]?.cover_image) {
-      return data.results[0].cover_image;
-    }
-  } catch (error) {
-    console.error(`Failed to fetch cover for ${title}:`, error);
-  }
-  return null;
+  const data = await mediaSearchGet({ q: title, type: type.toLowerCase(), limit: 1 }) as
+    | { success?: boolean; results?: Array<{ cover_image?: string }> }
+    | null;
+  return data?.results?.[0]?.cover_image ?? null;
 }
 
 // Normalize media item to ensure valid types and statuses
@@ -667,15 +657,22 @@ const MediaTracker = () => {
   const visibleItemsRef = useRef<Set<number>>(new Set());
   const loadTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
+  // Mirror of imageUrls for the lazy-load callback. Reading the state directly
+  // made fetchVisibleImages — and therefore scheduleImageLoad — a new function
+  // on every resolved cover, which re-ran the observer effect on every visible
+  // row each time a batch landed.
+  const imageUrlsRef = useRef(imageUrls);
+  useEffect(() => { imageUrlsRef.current = imageUrls; }, [imageUrls]);
+
   const fetchVisibleImages = useCallback(() => {
     if (mediaItems.length === 0) return;
 
     const visible = mediaItems.filter(item => visibleItemsRef.current.has(item.id));
-    const unloaded = visible.filter(item => !imageUrls.has(item.id));
+    const unloaded = visible.filter(item => !imageUrlsRef.current.has(item.id));
 
     if (unloaded.length === 0) return;
 
-    console.log(` lazy loading ${unloaded.length} visible covers...`);
+    devLog(`lazy loading ${unloaded.length} visible covers...`);
     fetchImagesFromSupabaseBatch(
       unloaded.map(item => ({ id: item.id, title: item.title, type: item.type }))
     ).then((response) => {
@@ -688,7 +685,7 @@ const MediaTracker = () => {
       setImageUrls(prev => new Map([...prev, ...newUrlMap]));
       setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
     }).catch(err => console.error('Lazy load error:', err));
-  }, [mediaItems, imageUrls]);
+  }, [mediaItems]);
 
   const scheduleImageLoad = useCallback((itemId: number, visible: boolean) => {
     if (visible) {
@@ -1249,7 +1246,8 @@ const MediaTracker = () => {
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `notehaven_media_${new Date().toISOString().slice(0, 10)}.json`;
+      // Local date — toISOString() stamps yesterday's date for most of an IST day.
+      a.href = url; a.download = `notehaven_media_${dateToYMD(new Date())}.json`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       toast({ title: 'Export started', description: `${items.length} items — download should begin shortly.` });
     } catch (e: unknown) {
@@ -1374,6 +1372,11 @@ const MediaTracker = () => {
         throw new Error('User not authenticated');
       }
 
+      // Trim: `required` on the input accepts whitespace, and a padded title
+      // both duplicates existing rows and breaks the cover/metadata lookup.
+      const title = formData.title.trim();
+      if (!title) throw new Error('Title is required');
+
       const isReadable = readableTypes.includes(formData.type);
       const isWatchable = watchableTypes.includes(formData.type);
       const mediaData: {
@@ -1386,7 +1389,7 @@ const MediaTracker = () => {
         current_chapter: number | null;
         user_id: string;
       } = {
-        title: formData.title,
+        title,
         type: formData.type,
         status: formData.status,
         rating: formData.rating ? parseInt(formData.rating) : null,
@@ -1415,12 +1418,13 @@ const MediaTracker = () => {
 
       // Fetch and store cover image in background (non-blocking)
       if (newMedia) {
-        fetchCoverImage(formData.title, formData.type).then((coverUrl) => {
+        fetchCoverImage(title, formData.type).then((coverUrl) => {
           if (coverUrl) {
             supabase
               .from('media_tracker')
               .update({ cover_image: coverUrl })
               .eq('id', newMedia.id)
+              .eq('user_id', user.id)
               .then(() => {
                 // Update local state
                 setImageUrls((prev) => new Map([...prev, [newMedia.id, coverUrl]]));
@@ -1460,6 +1464,9 @@ const MediaTracker = () => {
     if (!editingItem) return;
 
     try {
+      const title = formData.title.trim();
+      if (!title) throw new Error('Title is required');
+
       const isReadable = readableTypes.includes(formData.type);
       const isWatchable = watchableTypes.includes(formData.type);
       const mediaData: {
@@ -1471,7 +1478,7 @@ const MediaTracker = () => {
         current_episode: number | null;
         current_chapter: number | null;
       } = {
-        title: formData.title,
+        title,
         type: formData.type,
         status: formData.status,
         rating: formData.rating ? parseInt(formData.rating) : null,
@@ -1490,7 +1497,8 @@ const MediaTracker = () => {
       const { error } = await supabase
         .from('media_tracker')
         .update({ ...mediaData, last_activity_at: new Date().toISOString() })
-        .eq('id', editingItem.id);
+        .eq('id', editingItem.id)
+        .eq('user_id', editingItem.user_id);
 
       if (error) {
         throw error;
@@ -1767,6 +1775,20 @@ const MediaTracker = () => {
   const handleJsonImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    // Reading an arbitrarily large file into memory locks the tab; a real
+    // library export is well under this.
+    const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+    if (file.size > MAX_IMPORT_BYTES) {
+      toast({
+        title: 'File too large',
+        description: `${(file.size / 1024 / 1024).toFixed(1)} MB exceeds the 10 MB import limit.`,
+        variant: 'destructive',
+      });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setIsImporting(true);
     try {
       const text = await file.text();
@@ -1812,19 +1834,47 @@ const MediaTracker = () => {
         cover_image: string | null;
         user_id: string;
       }
+      // Rows whose title was blank, so the count in the summary adds up.
+      let skipped = 0;
+
       for (let i = 0; i < data.length; i += batchSize) {
-        const slice = data.slice(i, i + batchSize).map((item) => item as Record<string, unknown>);
-        const batch: ImportItem[] = slice.map((record) => ({
-          title: String(record.title || ''),
-          type: String(record.type || 'Movie'),
-          status: String(record.status || 'Plan to Read'),
-          rating: typeof record.rating === 'number' ? record.rating : null,
-          current_season: typeof record.current_season === 'number' ? record.current_season : null,
-          current_episode: typeof record.current_episode === 'number' ? record.current_episode : null,
-          current_chapter: typeof record.current_chapter === 'number' ? record.current_chapter : null,
-          cover_image: typeof record.cover_image === 'string' ? record.cover_image : null,
-          user_id: user.id,
-        }));
+        const slice = data
+          .slice(i, i + batchSize)
+          .map((item) => item as Record<string, unknown>)
+          // An untitled row is unusable: it can't be searched, matched to a
+          // cover, or meaningfully displayed.
+          .filter((record) => {
+            const ok = String(record.title ?? '').trim().length > 0;
+            if (!ok) skipped += 1;
+            return ok;
+          });
+        if (slice.length === 0) continue;
+
+        const batch: ImportItem[] = slice.map((record) => {
+          // Coerce to the canonical sets. An unrecognised type used to be
+          // written through verbatim, producing rows that matched no tab and
+          // polluted the per-type counts.
+          const rawType = String(record.type ?? '');
+          const type = (VALID_TYPES as readonly string[]).includes(rawType) ? rawType : 'Movie';
+          const rawStatus = String(record.status ?? '');
+          const status = (VALID_STATUSES as readonly string[]).includes(rawStatus)
+            ? rawStatus
+            // Default by type rather than always "Plan to Read", which made
+            // every imported movie look like something you meant to read.
+            : READABLE_TYPES.includes(type) ? 'Plan to Read' : 'Plan to Watch';
+
+          return {
+            title: String(record.title).trim(),
+            type,
+            status,
+            rating: typeof record.rating === 'number' ? record.rating : null,
+            current_season: typeof record.current_season === 'number' ? record.current_season : null,
+            current_episode: typeof record.current_episode === 'number' ? record.current_episode : null,
+            current_chapter: typeof record.current_chapter === 'number' ? record.current_chapter : null,
+            cover_image: typeof record.cover_image === 'string' ? record.cover_image : null,
+            user_id: user.id,
+          };
+        });
         const { data: inserted, error } = await supabase.from('media_tracker').insert(batch).select('id, title');
         if (error || !inserted) {
           console.error('Batch insert failed', error);
@@ -1855,11 +1905,12 @@ const MediaTracker = () => {
           console.error('Tag restore failed for batch', tagErr);
         }
       }
+      const skippedNote = skipped > 0 ? ` ${skipped} row${skipped > 1 ? 's' : ''} skipped (no title).` : '';
       if (failedImports.length === 0) {
-        toast({ title: 'Import Complete', description: `${successfulImports.length} items were successfully imported.` });
+        toast({ title: 'Import Complete', description: `${successfulImports.length} items were successfully imported.${skippedNote}` });
       } else {
         const failedTitles = failedImports.map(i => i.title).filter(Boolean).slice(0, 20).join(', ');
-        toast({ title: 'Import Partially Complete', description: `${successfulImports.length} items imported. ${failedImports.length} failed. Failed titles: ${failedTitles}${failedImports.length>20?', ...':''}`, variant: 'destructive' });
+        toast({ title: 'Import Partially Complete', description: `${successfulImports.length} items imported. ${failedImports.length} failed.${skippedNote} Failed titles: ${failedTitles}${failedImports.length>20?', ...':''}`, variant: 'destructive' });
       }
   refetch();
     } catch (e: unknown) {

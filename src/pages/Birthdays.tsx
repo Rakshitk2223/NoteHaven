@@ -76,9 +76,19 @@ const Birthdays = () => {
 
   const handleAdd = async () => {
     if (!newName.trim() || selectedYear === null || selectedMonth === null || selectedDay === null) return;
-    
-    const dateString = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`;
-    
+
+    // Clamp the day to the selected month. Picking Jan 31 and then switching to
+    // February left selectedDay at 31, which built "2000-02-31" and came back as
+    // a raw Postgres "date/time field value out of range" error.
+    const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
+    const day = Math.min(selectedDay, lastDay);
+
+    const dateString = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+    // Captured before the reset below clears editingId — the success toast used
+    // to read it afterwards and so always said "added", even on an edit.
+    const wasEditing = editingId != null;
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
@@ -108,7 +118,7 @@ const Birthdays = () => {
       setSelectedMonth(null);
       setSelectedDay(null);
       setShowModal(false);
-      toast({ title: editingId ? 'Birthday updated' : 'Birthday added', variant: 'default' });
+      toast({ title: wasEditing ? 'Birthday updated' : 'Birthday added', variant: 'default' });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'An error occurred';
       toast({ title: 'Error', description: message, variant: 'destructive' });
@@ -179,6 +189,21 @@ const Birthdays = () => {
       b.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [birthdays, searchQuery]);
+
+  // Changing the year or month can invalidate the chosen day (Jan 31 -> Feb).
+  // Clamp it so the dropdown never displays a day the month doesn't have.
+  const clampDay = (year: number, month: number, day: number | null) =>
+    day === null ? null : Math.min(day, new Date(year, month, 0).getDate());
+
+  const selectYear = (year: number) => {
+    setSelectedYear(year);
+    if (selectedMonth !== null) setSelectedDay((d) => clampDay(year, selectedMonth, d));
+  };
+
+  const selectMonth = (month: number) => {
+    setSelectedMonth(month);
+    if (selectedYear !== null) setSelectedDay((d) => clampDay(selectedYear, month, d));
+  };
 
   const openAddModal = () => {
     setEditingId(null);
@@ -394,7 +419,7 @@ const Birthdays = () => {
               <label className="text-sm font-medium">Date of Birth</label>
               <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <div className="space-y-1">
-                  <Select value={selectedYear?.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
+                  <Select value={selectedYear?.toString()} onValueChange={(v) => selectYear(Number(v))}>
                     <SelectTrigger className="h-10 sm:h-11"><SelectValue placeholder="Year" /></SelectTrigger>
                     <SelectContent className="max-h-[300px]">
                       {years.map(year => (
@@ -409,7 +434,7 @@ const Birthdays = () => {
                 <div className="space-y-1">
                   <Select
                     value={selectedMonth?.toString()}
-                    onValueChange={(v) => setSelectedMonth(Number(v))}
+                    onValueChange={(v) => selectMonth(Number(v))}
                     disabled={!selectedYear}
                   >
                     <SelectTrigger className="h-10 sm:h-11">

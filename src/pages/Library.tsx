@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Code, MessageSquare, Search, ChevronDown, ChevronRight, ChevronLeft, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil, Library as LibraryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PageShell } from "@/components/PageShell";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/use-toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +51,8 @@ import {
   SUPPORTED_LANGUAGES,
   LANGUAGE_EXTENSIONS,
   getLanguageLabel,
-  maskEnvValues,
+  maskSecrets,
+  looksLikeSecrets,
   fetchSnippets,
   createSnippet,
   updateSnippet,
@@ -76,14 +80,40 @@ interface Prompt {
 
 const TAB_STORAGE_KEY = 'library-active-tab';
 
+/** Shared height for the snippets master/detail panes (was inlined 3×). */
+const PANE_HEIGHT = 'h-[calc(100dvh-250px)] min-h-[24rem]';
+
+// localStorage can throw outright (Safari private mode), and this runs inside a
+// useState initialiser — an unguarded read would crash the page during render.
+const readStoredTab = (): string => {
+  try {
+    const v = localStorage.getItem(TAB_STORAGE_KEY);
+    return v === 'snippets' || v === 'prompts' ? v : 'prompts';
+  } catch {
+    return 'prompts';
+  }
+};
+
 const Library = () => {
+  // Deep links: /library?tab=snippets&snippet=12 and /library?prompt=7.
+  // TagView links here by id, so the target has to survive into the tab.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paramTab = searchParams.get('tab');
+  const paramPrompt = searchParams.get('prompt');
+  const paramSnippet = searchParams.get('snippet');
+
   const [activeTab, setActiveTab] = useState<string>(() => {
-    return localStorage.getItem(TAB_STORAGE_KEY) || 'prompts';
+    if (paramTab === 'snippets' || paramTab === 'prompts') return paramTab;
+    if (paramSnippet) return 'snippets';
+    if (paramPrompt) return 'prompts';
+    return readStoredTab();
   });
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);
-    localStorage.setItem(TAB_STORAGE_KEY, value);
+    try { localStorage.setItem(TAB_STORAGE_KEY, value); } catch { /* ignore */ }
+    // Drop a stale deep-link target when the user navigates away by hand.
+    if (paramPrompt || paramSnippet || paramTab) setSearchParams({}, { replace: true });
   };
 
   return (
@@ -111,49 +141,103 @@ const Library = () => {
         </TabsList>
 
         <TabsContent value="prompts">
-          <PromptsTab />
+          <PromptsTab focusId={paramPrompt ? Number(paramPrompt) : null} />
         </TabsContent>
 
         <TabsContent value="snippets">
-          <SnippetsTab />
+          <SnippetsTab focusId={paramSnippet ? Number(paramSnippet) : null} />
         </TabsContent>
       </Tabs>
     </PageShell>
   );
 };
 
-const PromptsTab = () => {
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
+// Always fetch the FULL set; category/search/tag filtering is client-side so the
+// category tabs stay stable (filtering used to re-query by category and then
+// derive the tab list from the filtered result — which made the other tabs vanish).
+async function loadPrompts(): Promise<Prompt[]> {
+  const { data, error } = await supabase
+    .from('prompts')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  let loaded = (data || []) as Prompt[];
+
+  const promptIds = loaded.map(p => p.id);
+  if (promptIds.length > 0) {
+    const { data: promptTagsData } = await supabase
+      .from('prompt_tags')
+      .select('prompt_id, tags(*)')
+      .in('prompt_id', promptIds);
+
+    const tagsByPrompt: Record<number, Tag[]> = {};
+    (promptTagsData as { prompt_id: number; tags: Tag | null }[] | null)?.forEach((item) => {
+      if (!item.tags) return;
+      if (!tagsByPrompt[item.prompt_id]) tagsByPrompt[item.prompt_id] = [];
+      tagsByPrompt[item.prompt_id].push(item.tags);
+    });
+
+    loaded = loaded.map(prompt => ({ ...prompt, tags: tagsByPrompt[prompt.id] || [] }));
+  }
+  return loaded;
+}
+
+type PromptSort = 'newest' | 'oldest' | 'title';
+
+const PromptsTab = ({ focusId }: { focusId: number | null }) => {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // React Query keeps both tabs warm across switches — Radix unmounts the
+  // inactive TabsContent, so useState+useEffect refetched everything each time.
+  const { data: prompts = [], isLoading: loading } = useQuery({
+    queryKey: ['prompts'],
+    queryFn: loadPrompts,
+  });
+  const { data: availableTags = [] } = useQuery({
+    queryKey: ['tags'],
+    queryFn: fetchUserTags,
+  });
+
+  const refreshPrompts = () => queryClient.invalidateQueries({ queryKey: ['prompts'] });
+  const refreshTags = () => queryClient.invalidateQueries({ queryKey: ['tags'] });
+  /** Patch one prompt in the cache — avoids a full refetch for a toggle. */
+  const patchPrompt = (id: number, patch: Partial<Prompt>) =>
+    queryClient.setQueryData<Prompt[]>(['prompts'], (old) =>
+      (old || []).map(p => (p.id === id ? { ...p, ...patch } : p)));
+
   const [activeFilter, setActiveFilter] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [favOnly, setFavOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<PromptSort>('newest');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [formData, setFormData] = useState({ title: "", prompt_text: "", category: "" });
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
-  const { toast } = useToast();
 
-  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [formTags, setFormTags] = useState<Tag[]>([]);
   const [editingPromptTags, setEditingPromptTags] = useState<Tag[]>([]);
 
-  useEffect(() => {
-    fetchPrompts();
-    fetchTags();
-  }, []);
+  const categories = useMemo(
+    () => Array.from(new Set(
+      prompts.map(p => p.category?.trim()).filter((c): c is string => !!c),
+    )),
+    [prompts],
+  );
 
-  const fetchTags = async () => {
-    try {
-      const tags = await fetchUserTags();
-      setAvailableTags(tags);
-    } catch (err) {
-      console.error('Failed to fetch tags:', err);
-    }
-  };
+  // Deep link from TagView: /library?prompt=<id> scrolls to and highlights it.
+  useEffect(() => {
+    if (!focusId || loading) return;
+    const el = document.getElementById(`prompt-${focusId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('ring-2', 'ring-primary');
+    const t = setTimeout(() => el.classList.remove('ring-2', 'ring-primary'), 2000);
+    return () => clearTimeout(t);
+  }, [focusId, loading, prompts]);
 
   useEffect(() => {
     const loadEditingPromptTags = async () => {
@@ -169,60 +253,13 @@ const PromptsTab = () => {
     loadEditingPromptTags();
   }, [editingPrompt]);
 
-  // Always fetch the FULL set; category/search/tag filtering is client-side so the
-  // category tabs stay stable (filtering used to re-query by category and then
-  // derive the tab list from the filtered result — which made the other tabs vanish).
-  const fetchPrompts = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error } = await supabase
-        .from('prompts')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      let loaded = data || [];
-
-      const promptIds = loaded.map(p => p.id);
-      if (promptIds.length > 0) {
-        const { data: promptTagsData } = await supabase
-          .from('prompt_tags')
-          .select('prompt_id, tags(*)')
-          .in('prompt_id', promptIds);
-
-        const tagsByPrompt: Record<number, Tag[]> = {};
-        (promptTagsData as { prompt_id: number; tags: Tag | null }[] | null)?.forEach((item) => {
-          if (!item.tags) return;
-          if (!tagsByPrompt[item.prompt_id]) tagsByPrompt[item.prompt_id] = [];
-          tagsByPrompt[item.prompt_id].push(item.tags);
-        });
-
-        loaded = loaded.map(prompt => ({
-          ...prompt,
-          tags: tagsByPrompt[prompt.id] || []
-        }));
-      }
-
-      setPrompts(loaded);
-
-      const unique = Array.from(
-        new Set(
-          loaded
-            .map(p => p.category?.trim())
-            .filter((c): c is string => !!c && c.length > 0)
-        )
-      );
-      setCategories(unique);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch prompts';
-      setError(message);
-      toast({ title: 'Error', description: 'Failed to load prompts.', variant: 'destructive' });
-    } finally {
-      setLoading(false);
+  /** Resolve any unsaved (negative-id) tags to real rows, then link them. */
+  const persistTags = async (promptId: number, tags: Tag[]) => {
+    const resolved: Tag[] = [];
+    for (const tag of tags) {
+      resolved.push(tag.id < 0 ? await createTag(tag.name, tag.color) : tag);
     }
+    await setPromptTags(promptId, resolved.map(t => t.id));
   };
 
   const handleCreatePrompt = async () => {
@@ -234,33 +271,26 @@ const PromptsTab = () => {
 
       const { data: newPrompt, error } = await supabase
         .from('prompts')
-        .insert([{ ...formData, user_id: user.id }])
+        .insert([{
+          title: formData.title,
+          prompt_text: formData.prompt_text,
+          // Store NULL rather than '' for "no category" so the column has one
+          // representation of empty instead of two.
+          category: formData.category.trim() || null,
+          user_id: user.id,
+        }])
         .select()
         .single();
 
       if (error) throw error;
 
-      if (formTags.length > 0 && newPrompt) {
-        const tagsToSave: Tag[] = [];
-        for (const tag of formTags) {
-          if (tag.id < 0) {
-            const created = await createTag(tag.name, tag.color);
-            tagsToSave.push(created);
-          } else {
-            tagsToSave.push(tag);
-          }
-        }
-        await setPromptTags(newPrompt.id, tagsToSave.map(t => t.id));
-      }
+      if (formTags.length > 0 && newPrompt) await persistTags(newPrompt.id, formTags);
 
-      setIsModalOpen(false);
-      setFormData({ title: "", prompt_text: "", category: "" });
-      setFormTags([]);
-      fetchPrompts();
-      fetchTags();
+      closeModal();
+      refreshPrompts();
+      refreshTags();
+      toast({ title: 'Created', description: 'Prompt added.' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to create prompt';
-      setError(message);
       toast({ title: 'Error', description: 'Failed to create prompt.', variant: 'destructive' });
     }
   };
@@ -271,35 +301,22 @@ const PromptsTab = () => {
     try {
       const { error } = await supabase
         .from('prompts')
-        .update(formData)
+        .update({
+          title: formData.title,
+          prompt_text: formData.prompt_text,
+          category: formData.category.trim() || null,
+        })
         .eq('id', editingPrompt.id);
 
       if (error) throw error;
 
-      if (editingPromptTags.length > 0) {
-        const tagsToSave: Tag[] = [];
-        for (const tag of editingPromptTags) {
-          if (tag.id < 0) {
-            const created = await createTag(tag.name, tag.color);
-            tagsToSave.push(created);
-          } else {
-            tagsToSave.push(tag);
-          }
-        }
-        await setPromptTags(editingPrompt.id, tagsToSave.map(t => t.id));
-      } else {
-        await setPromptTags(editingPrompt.id, []);
-      }
+      await persistTags(editingPrompt.id, editingPromptTags);
 
-      setIsModalOpen(false);
-      setEditingPrompt(null);
-      setEditingPromptTags([]);
-      setFormData({ title: "", prompt_text: "", category: "" });
-      fetchPrompts();
-      fetchTags();
+      closeModal();
+      refreshPrompts();
+      refreshTags();
+      toast({ title: 'Updated', description: 'Prompt saved.' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update prompt';
-      setError(message);
       toast({ title: 'Error', description: 'Failed to update prompt.', variant: 'destructive' });
     }
   };
@@ -309,18 +326,12 @@ const PromptsTab = () => {
     if (!id) return;
 
     try {
-      const { error } = await supabase
-        .from('prompts')
-        .delete()
-        .eq('id', id);
-
+      const { error } = await supabase.from('prompts').delete().eq('id', id);
       if (error) throw error;
 
-      setPrompts(prompts.filter(prompt => prompt.id !== id));
+      queryClient.setQueryData<Prompt[]>(['prompts'], (old) => (old || []).filter(p => p.id !== id));
       toast({ title: 'Deleted', description: 'Prompt deleted successfully' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete prompt';
-      setError(message);
       toast({ title: 'Error', description: 'Failed to delete prompt.', variant: 'destructive' });
     } finally {
       setDeleteConfirm({ open: false, id: null });
@@ -332,49 +343,28 @@ const PromptsTab = () => {
       await navigator.clipboard.writeText(promptText);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
+      toast({ title: 'Copied', description: 'Prompt copied to clipboard.' });
     } catch (err) {
-      setError('Failed to copy to clipboard');
       toast({ title: 'Error', description: 'Clipboard copy failed.', variant: 'destructive' });
     }
   };
 
   const handleToggleFavorite = async (prompt: Prompt) => {
-    try {
-      const newFavoriteStatus = !prompt.is_favorited;
-
-      const { error } = await supabase
-        .from('prompts')
-        .update({ is_favorited: newFavoriteStatus })
-        .eq('id', prompt.id);
-
-      if (error) throw error;
-
-      setPrompts(prompts.map(p =>
-        p.id === prompt.id
-          ? { ...p, is_favorited: newFavoriteStatus }
-          : p
-      ));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update favorite status';
-      setError(message);
+    const next = !prompt.is_favorited;
+    patchPrompt(prompt.id, { is_favorited: next });  // optimistic
+    const { error } = await supabase.from('prompts').update({ is_favorited: next }).eq('id', prompt.id);
+    if (error) {
+      patchPrompt(prompt.id, { is_favorited: !next }); // roll back
       toast({ title: 'Error', description: 'Could not update favorite status.', variant: 'destructive' });
     }
   };
 
   const handleTogglePin = async (prompt: Prompt) => {
-    try {
-      const newPinned = !prompt.is_pinned;
-      const { error } = await supabase
-        .from('prompts')
-        .update({ is_pinned: newPinned })
-        .eq('id', prompt.id);
-
-      if (error) throw error;
-
-      setPrompts(prompts.map(p => p.id === prompt.id ? { ...p, is_pinned: newPinned } : p));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update pin status';
-      setError(message);
+    const next = !prompt.is_pinned;
+    patchPrompt(prompt.id, { is_pinned: next });
+    const { error } = await supabase.from('prompts').update({ is_pinned: next }).eq('id', prompt.id);
+    if (error) {
+      patchPrompt(prompt.id, { is_pinned: !next });
       toast({ title: 'Error', description: 'Could not update pin status.', variant: 'destructive' });
     }
   };
@@ -385,7 +375,21 @@ const PromptsTab = () => {
     setIsModalOpen(true);
   };
 
-  const handleModalClose = () => {
+  const openCreateModal = () => {
+    setEditingPrompt(null);
+    setEditingPromptTags([]);
+    setFormData({ title: "", prompt_text: "", category: "" });
+    setFormTags([]);
+    setIsModalOpen(true);
+  };
+
+  /**
+   * Full reset. This must run for EVERY close path — Esc, backdrop click and the
+   * ✕ all go through Dialog's onOpenChange, which previously only flipped
+   * `isModalOpen`. `editingPrompt` survived, so the next "Add Prompt" reopened
+   * in edit mode pre-filled with the last prompt, and saving overwrote it.
+   */
+  const closeModal = () => {
     setIsModalOpen(false);
     setEditingPrompt(null);
     setFormData({ title: "", prompt_text: "", category: "" });
@@ -406,6 +410,7 @@ const PromptsTab = () => {
   const filteredPrompts = useMemo(() => {
     let list = prompts;
     if (activeFilter !== 'All') list = list.filter(p => (p.category?.trim() || '') === activeFilter);
+    if (favOnly) list = list.filter(p => p.is_favorited);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(p => p.title.toLowerCase().includes(q) || p.prompt_text.toLowerCase().includes(q));
@@ -416,8 +421,21 @@ const PromptsTab = () => {
         return selectedTags.every(tag => promptTagNames.includes(tag));
       });
     }
-    return list;
-  }, [prompts, activeFilter, searchQuery, selectedTags]);
+
+    // Sort here rather than in the JSX — this used to run .slice().sort() on
+    // every render, including every keystroke in the search box.
+    const bySort = (a: Prompt, b: Prompt) => {
+      if (sortBy === 'title') return a.title.localeCompare(b.title);
+      const at = new Date(a.created_at).getTime();
+      const bt = new Date(b.created_at).getTime();
+      return sortBy === 'oldest' ? at - bt : bt - at;
+    };
+    return [...list].sort(
+      (a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0) || bySort(a, b),
+    );
+  }, [prompts, activeFilter, favOnly, searchQuery, selectedTags, sortBy]);
+
+  const favCount = useMemo(() => prompts.filter(p => p.is_favorited).length, [prompts]);
 
   // Slim Media-style filter pill.
   const filterPill = (active: boolean) =>
@@ -459,7 +477,18 @@ const PromptsTab = () => {
             </button>
           )}
         </div>
-        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <Select value={sortBy} onValueChange={(v) => setSortBy(v as PromptSort)}>
+          <SelectTrigger className="h-9 w-[140px] flex-shrink-0 rounded-full" aria-label="Sort prompts">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="newest">Newest first</SelectItem>
+            <SelectItem value="oldest">Oldest first</SelectItem>
+            <SelectItem value="title">Title A–Z</SelectItem>
+          </SelectContent>
+        </Select>
+        {/* Close through closeModal() on every path, not just Cancel. */}
+        <Dialog open={isModalOpen} onOpenChange={(open) => { if (open) openCreateModal(); else closeModal(); }}>
           <DialogTrigger asChild>
             <Button variant="gradient" className="h-9 flex-shrink-0 rounded-full">
               <Plus className="h-4 w-4 mr-2" />
@@ -516,7 +545,7 @@ const PromptsTab = () => {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={handleModalClose}
+                  onClick={closeModal}
                 >
                   Cancel
                 </Button>
@@ -529,18 +558,23 @@ const PromptsTab = () => {
         </Dialog>
       </div>
 
-      {error && (
-        <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
-          {error}
-        </div>
-      )}
-
       {/* Category filter tabs — dynamic, stable, switch instantly (client-side) */}
       <div className="mb-4 -mx-1 overflow-x-auto scrollbar-hide px-1">
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => setActiveFilter('All')} className={filterPill(activeFilter === 'All')}>
             <span>All</span>
             <span className="text-xs tabular-nums opacity-70">{prompts.length}</span>
+          </button>
+          {/* Favourites were toggleable but never filterable. */}
+          <button
+            type="button"
+            onClick={() => setFavOnly(v => !v)}
+            className={filterPill(favOnly)}
+            aria-pressed={favOnly}
+          >
+            <Star className={`h-3.5 w-3.5 ${favOnly ? 'fill-current' : ''}`} />
+            <span>Favorites</span>
+            <span className="text-xs tabular-nums opacity-70">{favCount}</span>
           </button>
           {categories.map(cat => (
             <button key={cat} type="button" onClick={() => setActiveFilter(cat)} className={filterPill(activeFilter === cat)}>
@@ -578,15 +612,27 @@ const PromptsTab = () => {
         </div>
       ) : prompts.length === 0 ? (
         <div className="zen-card p-4 sm:p-8 text-center">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/15 text-primary">
+            <MessageSquare className="h-7 w-7" />
+          </div>
           <p className="text-muted-foreground mb-4">
-            You haven't created any prompts yet. Click 'Add Prompt' to start!
+            No prompts yet. Save one you reuse and it'll be a click away.
           </p>
+          <Button onClick={openCreateModal}>
+            <Plus className="h-4 w-4 mr-2" /> Create your first prompt
+          </Button>
         </div>
       ) : filteredPrompts.length === 0 ? (
         <div className="zen-card p-4 sm:p-8 text-center">
           <p className="text-muted-foreground mb-4">
             No prompts match your filters.
           </p>
+          <Button
+            variant="outline"
+            onClick={() => { setActiveFilter('All'); setFavOnly(false); setSearchQuery(''); setSelectedTags([]); }}
+          >
+            Clear filters
+          </Button>
         </div>
       ) : (
         <motion.div
@@ -605,10 +651,8 @@ const PromptsTab = () => {
           }}
         >
           {filteredPrompts
-            .slice()
-            .sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
             .map((prompt) => (
-              <motion.div key={prompt.id} className="zen-card p-5 zen-shadow hover:zen-shadow-lg transition-all duration-300 ease-out relative group flex flex-col"
+              <motion.div key={prompt.id} id={`prompt-${prompt.id}`} className="zen-card p-5 zen-shadow hover:zen-shadow-lg transition-all duration-300 ease-out relative group flex flex-col"
                 variants={{
                   hidden: { opacity: 0, y: 12, scale: 0.95 },
                   show: {
@@ -705,20 +749,48 @@ const PromptsTab = () => {
 
 const UNFILED_KEY = 'unfiled';
 
-const SnippetsTab = () => {
-  const [snippets, setSnippets] = useState<CodeSnippet[]>([]);
-  const [folders, setFolders] = useState<SnippetFolder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  const { data: snippets = [], isLoading: loading } = useQuery({
+    queryKey: ['snippets'],
+    queryFn: fetchSnippets,
+  });
+  const { data: folders = [] } = useQuery({
+    queryKey: ['snippetFolders'],
+    queryFn: fetchFolders,
+  });
+  const { data: availableTags = [] } = useQuery({
+    queryKey: ['tags'],
+    queryFn: fetchUserTags,
+  });
+
+  const setSnippetsCache = (fn: (old: CodeSnippet[]) => CodeSnippet[]) =>
+    queryClient.setQueryData<CodeSnippet[]>(['snippets'], (old) => fn(old || []));
+  const setFoldersCache = (fn: (old: SnippetFolder[]) => SnippetFolder[]) =>
+    queryClient.setQueryData<SnippetFolder[]>(['snippetFolders'], (old) => fn(old || []));
+  const refreshSnippets = () => queryClient.invalidateQueries({ queryKey: ['snippets'] });
+  const refreshTags = () => queryClient.invalidateQueries({ queryKey: ['tags'] });
+
   const [selectedSnippet, setSelectedSnippet] = useState<CodeSnippet | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [favOnly, setFavOnly] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [revealSecret, setRevealSecret] = useState(false);
-  const { toast } = useToast();
+
+  // Search scans every snippet's full body, so debounce it — this used to run
+  // over the whole library on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput), 180);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const [formData, setFormData] = useState<{ title: string; code: string; language: string; folder_id: number | null; filename: string; description: string }>({
     title: '', code: '', language: 'javascript', folder_id: null, filename: '', description: '',
@@ -729,67 +801,48 @@ const SnippetsTab = () => {
   });
   const [folderDeleteConfirm, setFolderDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
 
-  const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [formTags, setFormTags] = useState<Tag[]>([]);
 
+  // Auto-select: the deep-link target if present, else the first snippet.
   useEffect(() => {
-    loadSnippets();
-    loadFolders();
-    loadTags();
-  }, []);
+    if (loading || selectedSnippet || isCreating || isEditing) return;
+    if (snippets.length === 0) return;
+    const target = focusId ? snippets.find(s => s.id === focusId) : null;
+    setSelectedSnippet(target || snippets[0]);
+  }, [loading, snippets, focusId, selectedSnippet, isCreating, isEditing]);
 
   // Reset the secret-reveal toggle whenever the viewed snippet changes.
   useEffect(() => {
     setRevealSecret(false);
   }, [selectedSnippet?.id]);
 
-  const loadTags = async () => {
-    try {
-      const tags = await fetchUserTags();
-      setAvailableTags(tags);
-    } catch (err) {
-      console.error('Failed to fetch tags:', err);
+  // Pre-lowercased haystack per snippet, rebuilt only when the list changes —
+  // not on every keystroke, which is what `s.code.toLowerCase()` inside the
+  // filter used to do across the entire library.
+  const haystacks = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const s of snippets) {
+      m.set(s.id, [s.title, s.language, s.filename || '', s.description || '', s.code]
+        .join('\n').toLowerCase());
     }
-  };
-
-  const loadFolders = async () => {
-    try {
-      const data = await fetchFolders();
-      setFolders(data);
-    } catch (err) {
-      console.error('Failed to fetch folders:', err);
-    }
-  };
-
-  const loadSnippets = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await fetchSnippets();
-      setSnippets(data);
-      if (data.length > 0 && !selectedSnippet) {
-        setSelectedSnippet(data[0]);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch snippets';
-      setError(message);
-      toast({ title: 'Error', description: 'Failed to load code snippets.', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
+    return m;
+  }, [snippets]);
 
   const filteredSnippets = useMemo(() => {
-    if (!searchQuery.trim()) return snippets;
-    const q = searchQuery.toLowerCase();
-    return snippets.filter(s =>
-      s.title.toLowerCase().includes(q) ||
-      s.language.toLowerCase().includes(q) ||
-      (s.filename || '').toLowerCase().includes(q) ||
-      (s.description || '').toLowerCase().includes(q) ||
-      s.code.toLowerCase().includes(q)
-    );
-  }, [snippets, searchQuery]);
+    let list = snippets;
+    if (favOnly) list = list.filter(s => s.is_favorited);
+    if (selectedTags.length > 0) {
+      list = list.filter(s => {
+        const names = s.tags?.map(t => t.name) || [];
+        return selectedTags.every(t => names.includes(t));
+      });
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (q) list = list.filter(s => (haystacks.get(s.id) || '').includes(q));
+    return list;
+  }, [snippets, searchQuery, haystacks, favOnly, selectedTags]);
+
+  const favCount = useMemo(() => snippets.filter(s => s.is_favorited).length, [snippets]);
 
   // Group snippets by folder. Every folder is shown (even when empty) so empty
   // projects are visible; "Unfiled" only appears when it has files. While
@@ -850,8 +903,8 @@ const SnippetsTab = () => {
       );
       setIsCreating(false);
       resetForm();
-      await loadSnippets();
-      await loadTags();
+      await refreshSnippets();
+      refreshTags();
       setSelectedSnippet({ ...newSnippet, tags: formTags });
       toast({ title: 'Created', description: 'Code snippet created successfully.' });
     } catch (err) {
@@ -874,8 +927,8 @@ const SnippetsTab = () => {
       await updateSnippet(selectedSnippet.id, patch, formTags);
       setIsEditing(false);
       resetForm();
-      await loadSnippets();
-      await loadTags();
+      await refreshSnippets();
+      refreshTags();
       // Keep the viewer in sync with the edits (loadSnippets refreshes the list
       // but not the currently-selected object reference).
       setSelectedSnippet(prev => (prev ? { ...prev, ...patch, tags: formTags } : null));
@@ -889,7 +942,7 @@ const SnippetsTab = () => {
     if ((snippet.folder_id ?? null) === folderId) return;
     try {
       await moveSnippetToFolder(snippet.id, folderId);
-      setSnippets(prev => prev.map(s => (s.id === snippet.id ? { ...s, folder_id: folderId } : s)));
+      setSnippetsCache(prev => prev.map(s => (s.id === snippet.id ? { ...s, folder_id: folderId } : s)));
       if (selectedSnippet?.id === snippet.id) {
         setSelectedSnippet(prev => (prev ? { ...prev, folder_id: folderId } : null));
       }
@@ -912,13 +965,13 @@ const SnippetsTab = () => {
     try {
       if (folderModal.mode === 'create') {
         const created = await createFolder(name, folderModal.color);
-        setFolders(prev => [...prev, created].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name)));
+        setFoldersCache(prev => [...prev, created].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name)));
         // If a snippet form is open, drop the new file straight into this folder.
         if (isCreating || isEditing) setFormData(prev => ({ ...prev, folder_id: created.id }));
       } else if (folderModal.id) {
         const id = folderModal.id;
         await updateFolder(id, { name, color: folderModal.color });
-        setFolders(prev => prev.map(f => (f.id === id ? { ...f, name, color: folderModal.color } : f)));
+        setFoldersCache(prev => prev.map(f => (f.id === id ? { ...f, name, color: folderModal.color } : f)));
       }
       setFolderModal({ open: false, mode: 'create', id: null, name: '', color: TAG_COLORS[0].value });
       toast({ title: folderModal.mode === 'create' ? 'Folder created' : 'Folder updated' });
@@ -934,9 +987,9 @@ const SnippetsTab = () => {
     if (!id) return;
     try {
       await deleteFolder(id);
-      setFolders(prev => prev.filter(f => f.id !== id));
+      setFoldersCache(prev => prev.filter(f => f.id !== id));
       // Files keep existing; the DB FK (ON DELETE SET NULL) moves them to Unfiled.
-      setSnippets(prev => prev.map(s => (s.folder_id === id ? { ...s, folder_id: null } : s)));
+      setSnippetsCache(prev => prev.map(s => (s.folder_id === id ? { ...s, folder_id: null } : s)));
       if (selectedSnippet?.folder_id === id) {
         setSelectedSnippet(prev => (prev ? { ...prev, folder_id: null } : null));
       }
@@ -957,7 +1010,7 @@ const SnippetsTab = () => {
       if (selectedSnippet?.id === id) {
         setSelectedSnippet(null);
       }
-      setSnippets(prev => prev.filter(s => s.id !== id));
+      setSnippetsCache(prev => prev.filter(s => s.id !== id));
       toast({ title: 'Deleted', description: 'Code snippet deleted successfully.' });
     } catch (err) {
       toast({ title: 'Error', description: 'Failed to delete snippet.', variant: 'destructive' });
@@ -980,7 +1033,7 @@ const SnippetsTab = () => {
   const handleToggleFav = async (snippet: CodeSnippet) => {
     try {
       await toggleSnippetFavorite(snippet.id, !!snippet.is_favorited);
-      setSnippets(prev => prev.map(s => s.id === snippet.id ? { ...s, is_favorited: !s.is_favorited } : s));
+      setSnippetsCache(prev => prev.map(s => s.id === snippet.id ? { ...s, is_favorited: !s.is_favorited } : s));
       if (selectedSnippet?.id === snippet.id) {
         setSelectedSnippet(prev => prev ? { ...prev, is_favorited: !prev.is_favorited } : null);
       }
@@ -992,7 +1045,7 @@ const SnippetsTab = () => {
   const handleTogglePinSnippet = async (snippet: CodeSnippet) => {
     try {
       await toggleSnippetPin(snippet.id, !!snippet.is_pinned);
-      setSnippets(prev => prev.map(s => s.id === snippet.id ? { ...s, is_pinned: !s.is_pinned } : s));
+      setSnippetsCache(prev => prev.map(s => s.id === snippet.id ? { ...s, is_pinned: !s.is_pinned } : s));
       if (selectedSnippet?.id === snippet.id) {
         setSelectedSnippet(prev => prev ? { ...prev, is_pinned: !prev.is_pinned } : null);
       }
@@ -1039,7 +1092,7 @@ const SnippetsTab = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-4 md:flex-row md:h-[calc(100vh-250px)]">
+      <div className={`flex flex-col gap-4 md:flex-row md:${PANE_HEIGHT}`}>
         <div className="w-full md:w-64 flex-shrink-0 space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
@@ -1057,10 +1110,14 @@ const SnippetsTab = () => {
   // is selected; a back button returns to the file list.
   const showDetail = isCreating || isEditing || !!selectedSnippet;
 
+  // Masking is no longer keyed on language === 'env' alone — the same API key
+  // pasted into a yaml/json/plaintext snippet used to render in full.
+  const hasSecrets = !!selectedSnippet && looksLikeSecrets(selectedSnippet.code, selectedSnippet.language);
+
   return (
     <>
-      <div className="flex flex-col gap-4 md:flex-row md:h-[calc(100vh-250px)]">
-        <div className={`w-full md:w-64 flex-shrink-0 border border-border rounded-lg overflow-hidden flex-col bg-card h-[calc(100vh-250px)] md:h-auto ${showDetail ? "hidden md:flex" : "flex"}`}>
+      <div className={cn("flex flex-col gap-4 md:flex-row", `md:${PANE_HEIGHT}`)}>
+        <div className={cn("w-full md:w-64 flex-shrink-0 border border-border rounded-lg overflow-hidden flex-col bg-card md:h-auto", PANE_HEIGHT, showDetail ? "hidden md:flex" : "flex")}>
           <div className="p-3 border-b border-border space-y-2">
             <div className="flex gap-2">
               <Button size="sm" className="flex-1" onClick={() => startCreating()}>
@@ -1075,19 +1132,56 @@ const SnippetsTab = () => {
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="h-8 pl-7 text-sm"
+                aria-label="Search snippets"
               />
-              {searchQuery && (
+              {searchInput && (
                 <button
-                  onClick={() => setSearchQuery('')}
+                  type="button"
+                  onClick={() => { setSearchInput(''); setSearchQuery(''); }}
                   className="absolute right-2 top-1/2 -translate-y-1/2"
+                  aria-label="Clear search"
                 >
                   <X className="h-3.5 w-3.5 text-muted-foreground" />
                 </button>
               )}
             </div>
+            {/* Snippets support favourites and tags but had no way to filter by
+                either — prompts had both. */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setFavOnly(v => !v)}
+                aria-pressed={favOnly}
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors',
+                  favOnly
+                    ? 'border-warning/40 bg-warning/15 text-warning'
+                    : 'border-transparent bg-foreground/[0.05] text-muted-foreground hover:text-foreground',
+                )}
+              >
+                <Star className={cn('h-3 w-3', favOnly && 'fill-current')} />
+                Starred {favCount > 0 && <span className="tabular-nums opacity-70">{favCount}</span>}
+              </button>
+              {selectedTags.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTags([])}
+                  className="inline-flex items-center gap-1 rounded-full border border-transparent bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary"
+                >
+                  <X className="h-3 w-3" /> {selectedTags.length} tag{selectedTags.length > 1 ? 's' : ''}
+                </button>
+              )}
+            </div>
+            {availableTags.length > 0 && (
+              <TagFilter
+                availableTags={availableTags}
+                selectedTags={selectedTags}
+                onChange={setSelectedTags}
+              />
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -1224,7 +1318,7 @@ const SnippetsTab = () => {
           </div>
         </div>
 
-        <div className={`flex-1 border border-border rounded-lg overflow-hidden flex-col bg-card h-[calc(100vh-250px)] md:h-auto ${showDetail ? "flex" : "hidden md:flex"}`}>
+        <div className={cn("flex-1 border border-border rounded-lg overflow-hidden flex-col bg-card md:h-auto", PANE_HEIGHT, showDetail ? "flex" : "hidden md:flex")}>
           {isCreating || isEditing ? (
             <div className="flex flex-col h-full">
               <div className="p-4 border-b border-border space-y-3">
@@ -1297,6 +1391,7 @@ const SnippetsTab = () => {
                   value={formData.code}
                   language={formData.language}
                   onChange={(val) => setFormData(prev => ({ ...prev, code: val }))}
+                  onSave={isEditing ? handleUpdate : handleCreate}
                   minHeight="100%"
                   className="h-full"
                 />
@@ -1353,7 +1448,7 @@ const SnippetsTab = () => {
                         <><Copy className="h-4 w-4 mr-1" /> Copy</>
                       )}
                     </Button>
-                    {selectedSnippet.language === 'env' && (
+                    {hasSecrets && (
                       <Button
                         size="sm"
                         variant="secondary"
@@ -1427,7 +1522,7 @@ const SnippetsTab = () => {
                 {selectedSnippet.description && (
                   <p className="text-sm text-muted-foreground mt-2">{selectedSnippet.description}</p>
                 )}
-                {selectedSnippet.language === 'env' && !revealSecret && (
+                {hasSecrets && !revealSecret && (
                   <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                     <EyeOff className="h-3 w-3" /> Values hidden — click the eye to reveal. Copy still copies the real values.
                   </p>
@@ -1443,8 +1538,7 @@ const SnippetsTab = () => {
 
               <div className="flex-1 overflow-auto p-2">
                 <CodeEditor
-                  key={`${selectedSnippet.id}-${revealSecret}`}
-                  value={selectedSnippet.language === 'env' && !revealSecret ? maskEnvValues(selectedSnippet.code) : selectedSnippet.code}
+                  value={hasSecrets && !revealSecret ? maskSecrets(selectedSnippet.code, selectedSnippet.language) : selectedSnippet.code}
                   language={selectedSnippet.language}
                   readOnly
                   minHeight="100%"

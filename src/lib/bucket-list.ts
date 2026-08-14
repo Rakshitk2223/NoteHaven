@@ -140,13 +140,16 @@ export async function deleteBucketItem(id: number): Promise<void> {
 // any failure (offline / CORS / no result) returns null and the card falls back
 // to its category gradient + emoji, which is designed to look good on its own.
 // --------------------------------------------
-export async function suggestImage(query: string): Promise<string | null> {
+export async function suggestImage(query: string, timeoutMs = 6000): Promise<string | null> {
   const q = query.trim();
   if (!q) return null;
   try {
     const res = await fetch(
       `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=12&mature=false&aspect_ratio=wide`,
-      { headers: { Accept: 'application/json' } },
+      // Openverse is a free public API and can hang. Without a deadline this
+      // await sat in the middle of save(), leaving the dialog stuck on "Saving…"
+      // with no way out.
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) },
     );
     if (!res.ok) return null;
     const json = await res.json();

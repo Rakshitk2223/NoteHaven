@@ -166,9 +166,13 @@ export async function updateFolder(
 export const moveFolder = (id: number, parentId: number | null) => updateFolder(id, { parent_id: parentId });
 
 /**
- * Deletes a folder and everything beneath it. Removes the underlying Storage
- * objects for all descendant files first (the DB cascade only clears rows, not
- * bytes), then deletes the folder — cascade removes sub-folders + file rows.
+ * Deletes a folder and everything beneath it. Collects the descendant files'
+ * storage paths, deletes the folder (the DB cascade clears sub-folders and file
+ * rows but not the bytes), then removes the objects.
+ *
+ * Rows before bytes, deliberately: if the folder delete fails after the objects
+ * are gone, every file inside it survives as a broken entry. Deleting the rows
+ * first means a failure at the storage step only leaves invisible orphans.
  */
 export async function deleteFolder(id: number): Promise<void> {
   const folders = await fetchFolders();
@@ -181,10 +185,11 @@ export async function deleteFolder(id: number): Promise<void> {
   if (filesErr) throw filesErr;
 
   const paths = (files || []).map((f) => f.storage_path).filter(Boolean);
-  await removeStorageObjects(paths);
 
   const { error } = await supabase.from('vault_folders').delete().eq('id', id);
   if (error) throw error;
+
+  await removeStorageObjects(paths);
 }
 
 // --------------------------------------------
@@ -260,10 +265,19 @@ export async function toggleStar(id: number, current: boolean): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Row first, then bytes.
+ *
+ * The old order deleted the storage object before the row, so a failing row
+ * delete (RLS hiccup, dropped connection) left a visible file entry pointing at
+ * bytes that no longer existed — permanently un-downloadable and un-fixable from
+ * the UI. An orphaned storage object is the far cheaper failure: invisible, and
+ * recoverable by a sweep. Same reasoning as uploadFile's rollback.
+ */
 export async function deleteFile(file: Pick<VaultFile, 'id' | 'storage_path'>): Promise<void> {
-  await removeStorageObjects([file.storage_path]);
   const { error } = await supabase.from('vault_files').delete().eq('id', file.id);
   if (error) throw error;
+  await removeStorageObjects([file.storage_path]);
 }
 
 /** Bulk move — one UPDATE for many files. */
@@ -273,15 +287,15 @@ export async function moveFiles(ids: number[], folderId: number | null): Promise
   if (error) throw error;
 }
 
-/** Bulk delete — removes the storage objects, then the rows in one round-trip each. */
+/** Bulk delete — rows first, then the storage objects (see deleteFile). */
 export async function deleteFiles(files: Pick<VaultFile, 'id' | 'storage_path'>[]): Promise<void> {
   if (files.length === 0) return;
-  await removeStorageObjects(files.map((f) => f.storage_path));
   const { error } = await supabase
     .from('vault_files')
     .delete()
     .in('id', files.map((f) => f.id));
   if (error) throw error;
+  await removeStorageObjects(files.map((f) => f.storage_path));
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   HoverCard,
@@ -104,6 +104,11 @@ export function CalendarMiniWidget({
       <button
         key={day}
         onClick={() => handleDayClick(day)}
+        aria-label={
+          dayEvents.length > 0
+            ? `${monthNames[month]} ${day} — ${dayEvents.length} event${dayEvents.length > 1 ? 's' : ''}`
+            : `${monthNames[month]} ${day}`
+        }
         className={cn(
           'h-10 md:h-12 w-full p-1 flex flex-col items-center justify-center rounded-lg transition-colors hover:bg-muted',
           today && 'bg-primary/10 font-bold ring-1 ring-primary/40'
@@ -152,21 +157,9 @@ export function CalendarMiniWidget({
     );
   }
 
-  const emptyState = (
-    <div className="text-center py-8">
-      <Calendar className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-      <p className="text-muted-foreground">No calendar data</p>
-    </div>
-  );
-
+  // No empty state: the month grid is always worth showing, events or not.
   return (
-    <WidgetWrapper
-      widget={widget}
-      isLoading={isLoading}
-      isEmpty={false}
-      emptyState={emptyState}
-
-    >
+    <WidgetWrapper widget={widget} isLoading={isLoading}>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <Button
@@ -215,6 +208,11 @@ export function CalendarMiniWidget({
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 rounded-full bg-warning" />
               <span className="text-muted-foreground">Renewals</span>
+            </div>
+            {/* Countdown dots render on the grid; the legend used to omit them. */}
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-full bg-accent" />
+              <span className="text-muted-foreground">Countdowns</span>
             </div>
           </div>
 

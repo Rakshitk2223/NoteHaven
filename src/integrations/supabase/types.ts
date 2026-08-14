@@ -431,45 +431,6 @@ export type Database = {
         }
         Relationships: []
       }
-      ledger_buckets: {
-        Row: {
-          id: number
-          user_id: string
-          name: string
-          kind: string
-          color: string | null
-          target_amount: number | null
-          notes: string | null
-          sort_order: number | null
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: number
-          user_id: string
-          name: string
-          kind?: string
-          color?: string | null
-          target_amount?: number | null
-          notes?: string | null
-          sort_order?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: number
-          user_id?: string
-          name?: string
-          kind?: string
-          color?: string | null
-          target_amount?: number | null
-          notes?: string | null
-          sort_order?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: []
-      }
       ledger_accounts: {
         Row: {
           archived: boolean | null
@@ -514,11 +475,9 @@ export type Database = {
           account_id: number | null
           to_account_id: number | null
           amount: number
-          bucket_id: number | null
           category_id: number | null
           created_at: string | null
           description: string | null
-          from_bucket_id: number | null
           id: number
           is_recurring: boolean | null
           notes: string | null
@@ -532,11 +491,9 @@ export type Database = {
           account_id?: number | null
           to_account_id?: number | null
           amount: number
-          bucket_id?: number | null
           category_id?: number | null
           created_at?: string | null
           description?: string | null
-          from_bucket_id?: number | null
           id?: number
           is_recurring?: boolean | null
           notes?: string | null
@@ -550,11 +507,9 @@ export type Database = {
           account_id?: number | null
           to_account_id?: number | null
           amount?: number
-          bucket_id?: number | null
           category_id?: number | null
           created_at?: string | null
           description?: string | null
-          from_bucket_id?: number | null
           id?: number
           is_recurring?: boolean | null
           notes?: string | null
@@ -570,13 +525,6 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "ledger_categories"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ledger_entries_bucket_id_fkey"
-            columns: ["bucket_id"]
-            isOneToOne: false
-            referencedRelation: "ledger_buckets"
             referencedColumns: ["id"]
           },
         ]
@@ -1315,7 +1263,6 @@ export const Constants = {
 // lib/subscriptions.ts, pages). Derived from the generated Database type.
 // ---------------------------------------------------------------------------
 export type LedgerCategory = Database["public"]["Tables"]["ledger_categories"]["Row"]
-export type LedgerBucket = Database["public"]["Tables"]["ledger_buckets"]["Row"]
 export type LedgerAccount = Database["public"]["Tables"]["ledger_accounts"]["Row"]
 export type SubscriptionCategory = Database["public"]["Tables"]["subscription_categories"]["Row"]
 export type SnippetFolder = Database["public"]["Tables"]["snippet_folders"]["Row"]

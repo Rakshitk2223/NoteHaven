@@ -8,9 +8,8 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
+import { mediaSearchGet } from '@/lib/edge-function';
 import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
-
-const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
 
 const READABLE = ['Manga', 'Manhwa', 'Manhua'];
 const WATCHABLE = ['Series', 'Anime', 'KDrama', 'JDrama'];
@@ -400,13 +399,14 @@ async function refreshOne(
     let top: Record<string, unknown> | null = null;
     for (const source of metadataSourcesFor(item.type)) {
       if (top && hasAllWanted(top, opts)) break;
-      const url = `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(
-        item.type.toLowerCase()
-      )}&source=${source}`;
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-        if (!res.ok) continue;
-        const data = await res.json();
+        // mediaSearchGet attaches the session token — the edge function verifies
+        // the JWT, so the plain fetch this used to do 401'd on every source and
+        // Refresh Library silently found nothing.
+        const data = await mediaSearchGet(
+          { q: item.title, type: item.type.toLowerCase(), source },
+          AbortSignal.timeout(15000),
+        ) as { results?: Array<Record<string, unknown>> } | null;
         const hit = data?.results?.[0];
         if (!hit) continue;
         top = top ? mergeFill(top, hit) : { ...hit };
@@ -519,19 +519,14 @@ async function refreshOne(
   if (opts.covers && !item.cover_image && userId) {
     attempted = true;
     try {
-      const res = await fetch(
-        `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(
-          item.type.toLowerCase()
-        )}&limit=1`,
-        { signal: AbortSignal.timeout(10000) }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const cover = data?.results?.[0]?.cover_image;
-        if (cover) {
-          await supabase.from('media_tracker').update({ cover_image: cover }).eq('id', item.id).eq('user_id', userId);
-          applied = true;
-        }
+      const data = await mediaSearchGet(
+        { q: item.title, type: item.type.toLowerCase(), limit: 1 },
+        AbortSignal.timeout(10000),
+      ) as { results?: Array<{ cover_image?: string }> } | null;
+      const cover = data?.results?.[0]?.cover_image;
+      if (cover) {
+        await supabase.from('media_tracker').update({ cover_image: cover }).eq('id', item.id).eq('user_id', userId);
+        applied = true;
       }
     } catch (error) {
       devLog(`cover refresh failed for "${item.title}": ${String(error)}`);

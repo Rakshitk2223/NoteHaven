@@ -282,15 +282,21 @@ const Notes = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNote?.id, editor]);
 
-  // If URL has ?note=ID, select that note once notes are loaded
+  // If URL has ?note=ID, select that note once notes are loaded — but only once
+  // per link. `notes` is in the deps (we have to wait for the list to arrive),
+  // and every autosave replaces that array, so this used to re-select the
+  // deep-linked note on each save: with ?note= in the URL you could click a
+  // different note and get yanked straight back to the original.
+  const consumedNoteParamRef = useRef<string | null>(null);
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const noteIdParam = params.get('note');
+    const noteIdParam = new URLSearchParams(location.search).get('note');
     if (!noteIdParam || notes.length === 0) return;
+    if (consumedNoteParamRef.current === noteIdParam) return;
     const targetId = Number(noteIdParam);
     if (!Number.isFinite(targetId)) return;
     const target = notes.find(n => n.id === targetId);
     if (target) {
+      consumedNoteParamRef.current = noteIdParam;
       setSelectedNote(target);
       // If on mobile, ensure editor is shown
       setShowNoteList(false);
@@ -383,12 +389,20 @@ const Notes = () => {
     }
   };
 
-  // Realtime subscription for multi-tab sync
+  // Realtime subscription for multi-tab sync.
+  //
+  // The cleanup used to be returned from the inner async setupRealtime(), which
+  // useEffect never sees — so removeChannel() was unreachable and every visit to
+  // /notes leaked another subscription, each one re-running these handlers.
+  // The channel is now held in a ref and torn down by the effect itself.
+  const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   useEffect(() => {
+    let disposed = false;
+
     const setupRealtime = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
-      if (!user) return;
+      if (!user || disposed) return;
 
       // Subscribe to changes on notes table for current user
       const channel = supabase
@@ -460,12 +474,23 @@ const Notes = () => {
         )
         .subscribe();
 
-      return () => {
+      // The effect may already have torn down while getSession() was in flight.
+      if (disposed) {
         supabase.removeChannel(channel);
-      };
+        return;
+      }
+      realtimeChannelRef.current = channel;
     };
 
     setupRealtime();
+
+    return () => {
+      disposed = true;
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+    };
   }, []);
 
   const createNote = async () => {
@@ -801,13 +826,32 @@ const Notes = () => {
   // Tiptap toolbar helpers
   type ActiveEditor = NonNullable<ReturnType<typeof useEditor>>;
   const run = (cb: (e: ActiveEditor) => void) => () => { if (editor) { editor.chain().focus(); cb(editor); } };
-  // Flush any pending save when the tab is being closed/refreshed (best-effort),
-  // and once more on unmount as a safety net. Note-switch flushing is handled by
-  // the note-load effect's cleanup above.
+  // Persist pending edits when the page goes away.
+  //
+  // `beforeunload` alone was not enough: flushPendingSaves() issues an async
+  // request, and the browser tears the page down without waiting for it, so the
+  // last keystrokes within the debounce window were lost. `visibilitychange →
+  // hidden` fires *before* teardown (and is the only reliable signal on mobile,
+  // where beforeunload often never runs), giving the write time to land.
+  // beforeunload is kept purely to warn if something is still in flight.
   useEffect(() => {
-    const handleBeforeUnload = () => flushPendingSaves();
+    const hasPending = () =>
+      Boolean(pendingTitleRef.current || pendingContentRef.current);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') flushPendingSaves();
+    };
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!hasPending()) return;
+      flushPendingSaves();
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       flushPendingSaves();
     };

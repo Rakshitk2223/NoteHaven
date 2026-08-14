@@ -11,13 +11,16 @@ interface Prompt {
 interface PromptsWidgetProps extends WidgetProps {
   prompts: Prompt[];
   onViewAll: () => void;
+  /** Opens one prompt. Falls back to the full list if not supplied. */
+  onPromptClick?: (id: number) => void;
 }
 
 export function PromptsWidget({
   widget,
   prompts,
   isLoading,
-  onViewAll
+  onViewAll,
+  onPromptClick
 }: PromptsWidgetProps) {
   const emptyState = (
     <div className="text-center py-8">
@@ -46,15 +49,16 @@ export function PromptsWidget({
 
       <div className="space-y-3">
         {prompts.slice(0, 5).map((prompt) => (
-          <div
+          <button
             key={prompt.id}
-            onClick={onViewAll}
-            className="p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+            type="button"
+            onClick={() => (onPromptClick ? onPromptClick(prompt.id) : onViewAll())}
+            className="w-full text-left p-3 rounded-lg hover:bg-muted/50 transition-colors"
           >
             <p className="font-semibold text-sm text-foreground truncate leading-tight">
               {prompt.title}
             </p>
-          </div>
+          </button>
         ))}
       </div>
     </WidgetWrapper>

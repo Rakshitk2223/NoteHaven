@@ -1,8 +1,8 @@
-import { format, isSameDay } from 'date-fns';
-import { Calendar, CheckCircle2, XCircle, Clock, ExternalLink, Plus } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, ExternalLink, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { CalendarEvent } from '@/types/calendar';
 import { EVENT_LABELS } from '@/lib/calendar';
+import { formatCurrency } from '@/lib/ledger';
 import { useNavigate } from 'react-router-dom';
 
 interface DayDetailProps {
@@ -11,16 +11,20 @@ interface DayDetailProps {
   onAddEvent?: () => void;
 }
 
-export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
+export const DayDetail = ({ events, onAddEvent }: DayDetailProps) => {
   const navigate = useNavigate();
 
+  // Tasks/notes/media accept an id param, so land on the actual row rather
+  // than the top of the list. Countdowns have no page of their own — they
+  // live on the dashboard widget, which used to make them silently unclickable.
   const handleEventClick = (event: CalendarEvent) => {
+    const id = event.data?.id;
     switch (event.type) {
       case 'task':
-        navigate('/tasks');
+        navigate(id ? `/tasks?task=${id}` : '/tasks');
         break;
       case 'note':
-        navigate('/notes');
+        navigate(id ? `/notes?note=${id}` : '/notes');
         break;
       case 'subscription':
         navigate('/subscriptions');
@@ -29,9 +33,10 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
         navigate('/birthdays');
         break;
       case 'media':
-        navigate('/media');
+        navigate(id ? `/media?media=${id}` : '/media');
         break;
-      default:
+      case 'countdown':
+        navigate('/dashboard');
         break;
     }
   };
@@ -67,15 +72,12 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
     }
   };
 
+  // No card chrome or date heading here — this only ever renders inside
+  // DayDetailModal, which supplies both.
   return (
-    <div className="bg-card rounded-lg border shadow-sm p-4">
-      <div className="flex items-center justify-between mb-4 pb-4 border-b">
-        <div className="flex items-center gap-2">
-          <Calendar className="h-5 w-5 text-muted-foreground" />
-          <h3 className="font-semibold">{format(date, 'EEEE, MMMM d')}</h3>
-        </div>
-        
-        {onAddEvent && (
+    <div>
+      {events.length > 0 && onAddEvent && (
+        <div className="flex justify-end mb-3">
           <Button
             variant="outline"
             size="sm"
@@ -85,8 +87,8 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
             <Plus className="h-4 w-4" />
             Add
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {events.length === 0 ? (
         <div className="text-center py-8">
@@ -108,10 +110,11 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
       ) : (
         <div className="space-y-3">
           {events.map(event => (
-            <div
+            <button
               key={event.id}
+              type="button"
               onClick={() => handleEventClick(event)}
-              className="p-3 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer group"
+              className="w-full text-left p-3 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer group"
             >
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
@@ -144,18 +147,22 @@ export const DayDetail = ({ date, events, onAddEvent }: DayDetailProps) => {
               {event.type === 'subscription' && (
                 <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
                   <Clock className="h-4 w-4" />
+                  {/* formatCurrency honours the currency set in Settings; this
+                      was hardcoded to ₹ regardless. */}
                   <span>
-                    ₹{(event.data as unknown as { amount: number }).amount} / {(event.data as unknown as { billing_cycle: string }).billing_cycle}
+                    {formatCurrency(Number((event.data as { amount?: number }).amount) || 0)}
+                    {' / '}
+                    {(event.data as { billing_cycle?: string }).billing_cycle ?? 'cycle'}
                   </span>
                 </div>
               )}
 
-              {event.type === 'birthday' && (event.data as unknown as { age?: number }).age && (event.data as unknown as { age: number }).age > 0 && (
+              {event.type === 'birthday' && Number(event.data.age) > 0 && (
                 <div className="mt-2 text-sm text-muted-foreground">
-                  Turning {(event.data as unknown as { age: number }).age}
+                  Turning {Number(event.data.age)}
                 </div>
               )}
-            </div>
+            </button>
           ))}
         </div>
       )}
