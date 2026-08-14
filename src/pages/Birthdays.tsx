@@ -56,7 +56,8 @@ const Birthdays = () => {
   const fetchBirthdays = async () => {
     try {
       setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       const { data, error } = await supabase
         .from('birthdays')
@@ -79,7 +80,8 @@ const Birthdays = () => {
     const dateString = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`;
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       if (editingId == null) {
         const { data, error } = await supabase

@@ -587,7 +587,7 @@ export type Database = {
           banner_image: string | null
           cast_members: Json | null
           chapters: number | null
-          cover_image: string
+          cover_image: string | null
           created_at: string | null
           description: string | null
           episodes: number | null
@@ -610,7 +610,7 @@ export type Database = {
           banner_image?: string | null
           cast_members?: Json | null
           chapters?: number | null
-          cover_image: string
+          cover_image?: string | null
           created_at?: string | null
           description?: string | null
           episodes?: number | null
@@ -633,7 +633,7 @@ export type Database = {
           banner_image?: string | null
           cast_members?: Json | null
           chapters?: number | null
-          cover_image?: string
+          cover_image?: string | null
           created_at?: string | null
           description?: string | null
           episodes?: number | null
@@ -1127,6 +1127,22 @@ export type Database = {
     }
     Functions: {
       cleanup_empty_tags: { Args: never; Returns: undefined }
+      // Share-link access to notes (migration 19). The share id is the secret;
+      // `shared_notes` and `notes` are not readable by recipients directly.
+      get_shared_note: {
+        Args: { p_share_id: string }
+        Returns: {
+          id: number
+          title: string | null
+          content: string | null
+          updated_at: string
+          allow_edit: boolean
+        }[]
+      }
+      update_shared_note: {
+        Args: { p_share_id: string; p_title?: string | null; p_content?: string | null }
+        Returns: number
+      }
       get_calendar_events: {
         Args: { p_end_date: string; p_start_date: string; p_user_id: string }
         Returns: {
@@ -1313,4 +1329,61 @@ export type LedgerSummary = {
   totalIncome: number
   totalExpense: number
   netBalance: number
+}
+
+// ---------------------------------------------------------------------------
+// Tags + subscriptions. lib/tags.ts, lib/subscriptions.ts and TagBadge.tsx have
+// always imported these names, but they were never defined here — because they
+// are type-only imports TypeScript erased them at build time and nothing
+// crashed, while every annotation using them silently checked nothing
+// (audit BUG-02). Defined properly now.
+// ---------------------------------------------------------------------------
+export type Tag = Database["public"]["Tables"]["tags"]["Row"]
+
+export type NoteWithTags = Database["public"]["Tables"]["notes"]["Row"] & {
+  tags?: Tag[]
+}
+export type TaskWithTags = Database["public"]["Tables"]["tasks"]["Row"] & {
+  tags?: Tag[]
+}
+export type MediaWithTags = Database["public"]["Tables"]["media_tracker"]["Row"] & {
+  tags?: Tag[]
+}
+export type PromptWithTags = Database["public"]["Tables"]["prompts"]["Row"] & {
+  tags?: Tag[]
+}
+export type CodeSnippetWithTags = Database["public"]["Tables"]["code_snippets"]["Row"] & {
+  tags?: Tag[]
+}
+
+/** The two cycles the Subscriptions UI can create and price. */
+export type BillingCycle = "monthly" | "yearly"
+
+export type Subscription = Omit<
+  Database["public"]["Tables"]["subscriptions"]["Row"],
+  "billing_cycle"
+> & {
+  // The column is TEXT, but every code path (calculateSubscriptionSummary,
+  // formatAmount, calculateNextRenewalDate) only handles these two values.
+  billing_cycle: BillingCycle
+  // populated when selected via `category:subscription_categories(*)`
+  category?: SubscriptionCategory | null
+}
+
+export type SubscriptionSummary = {
+  monthlyTotal: number
+  yearlyTotal: number
+  activeCount: number
+  upcomingRenewals: number
+}
+
+/** Row shape returned by the `get_upcoming_renewals` RPC. */
+export type UpcomingRenewal = {
+  id: number
+  name: string
+  amount: number
+  billing_cycle: string
+  next_renewal_date: string
+  days_until: number
+  status: string
 }

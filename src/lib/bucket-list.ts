@@ -56,7 +56,8 @@ export const STATUS_ORDER: BucketStatus[] = ['dreaming', 'planned', 'achieved'];
 // Data access (RLS scopes everything by user_id)
 // --------------------------------------------
 export async function fetchBucketItems(): Promise<BucketItem[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -83,7 +84,8 @@ function draftToRow(draft: BucketDraft) {
 }
 
 export async function createBucketItem(draft: BucketDraft): Promise<BucketItem> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase

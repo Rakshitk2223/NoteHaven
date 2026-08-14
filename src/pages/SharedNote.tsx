@@ -1,57 +1,54 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { sanitizePreview } from '@/lib/utils';
 
-interface SharedMeta {
-  note_id: number;
-  allow_edit: boolean;
-}
+// Shared notes are reached through two SECURITY DEFINER functions
+// (migration 19), never by querying `notes` / `shared_notes` directly:
+//   get_shared_note(share_id)                  → the note, if the id is valid
+//   update_shared_note(share_id, title, body)  → writes only when allow_edit
+// The share id is the secret; the tables themselves are owner-only, so a
+// recipient can no longer enumerate shares or read notes they weren't given.
 
-interface NoteRow {
+interface SharedNoteRow {
   id: number;
   title: string | null;
   content: string | null;
   updated_at: string;
+  allow_edit: boolean;
 }
 
 const SharedNote = () => {
   const { shareId } = useParams<{ shareId: string }>();
   const { toast } = useToast();
-  const [meta, setMeta] = useState<SharedMeta | null>(null);
-  const [note, setNote] = useState<NoteRow | null>(null);
+  const [note, setNote] = useState<SharedNoteRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLDivElement | null>(null);
-  const saveTimer = useRef<NodeJS.Timeout | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch shared note metadata + note data
+  const allowEdit = !!note?.allow_edit;
+
+  // Fetch the shared note by share id.
   useEffect(() => {
     const load = async () => {
       if (!shareId) return;
       setLoading(true);
       try {
-        const { data: shared, error: sharedErr } = await supabase
-          .from('shared_notes')
-          .select('note_id, allow_edit')
-          .eq('id', shareId)
-          .maybeSingle();
-        if (sharedErr || !shared) throw sharedErr || new Error('Share link not found');
-  setMeta({ note_id: shared.note_id, allow_edit: !!shared.allow_edit });
-        const { data: noteData, error: noteErr } = await supabase
-          .from('notes')
-          .select('id, title, content, updated_at')
-          .eq('id', shared.note_id)
-          .single();
-        if (noteErr || !noteData) throw noteErr || new Error('Note not found');
-        setNote(noteData as NoteRow);
-        // populate DOM (sanitize untrusted stored HTML before injecting)
+        const { data, error } = await supabase
+          .rpc('get_shared_note', { p_share_id: shareId });
+        if (error) throw error;
+
+        const row = (data as SharedNoteRow[] | null)?.[0];
+        if (!row) throw new Error('This share link is no longer valid.');
+
+        setNote(row);
+        // Populate the DOM once; sanitize the stored HTML before injecting it.
         requestAnimationFrame(() => {
-          if (titleRef.current) titleRef.current.textContent = noteData.title || '';
-          if (contentRef.current) contentRef.current.innerHTML = sanitizePreview(noteData.content || '');
+          if (titleRef.current) titleRef.current.textContent = row.title || '';
+          if (contentRef.current) contentRef.current.innerHTML = sanitizePreview(row.content || '');
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Unable to load shared note';
@@ -63,47 +60,37 @@ const SharedNote = () => {
     load();
   }, [shareId, toast]);
 
-  // Realtime subscription for collaborative edits
+  // Flush a pending save if the tab closes mid-edit.
   useEffect(() => {
-    if (!meta?.allow_edit || !meta.note_id) return; // only if editable
-    const channel = supabase.channel(`note-${meta.note_id}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notes', filter: `id=eq.${meta.note_id}` }, (payload: { new: NoteRow }) => {
-        const newRow = payload.new as NoteRow;
-        setNote(prev => prev && prev.id === newRow.id ? { ...prev, ...newRow } : newRow);
-        // Update DOM if different from local (avoid overwriting while typing)
-        // Only update if element is not focused AND content actually differs
-        if (titleRef.current && document.activeElement !== titleRef.current) {
-          const currentTitle = titleRef.current.textContent || '';
-          const newTitle = newRow.title || '';
-          if (currentTitle !== newTitle) {
-            titleRef.current.textContent = newTitle;
-          }
-        }
-        if (contentRef.current && document.activeElement !== contentRef.current) {
-          const currentContent = contentRef.current.innerHTML || '';
-          const newContent = sanitizePreview(newRow.content || '');
-          if (currentContent !== newContent) {
-            contentRef.current.innerHTML = newContent;
-          }
-        }
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [meta]);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, []);
 
   const pushUpdate = useCallback(async (field: 'title' | 'content', value: string) => {
-    if (!meta?.allow_edit || !note) return;
+    if (!allowEdit || !shareId) return;
     try {
       setSaving(true);
-      const { error } = await supabase.from('notes').update({ [field]: value }).eq('id', note.id);
+      const { data, error } = await supabase.rpc('update_shared_note', {
+        p_share_id: shareId,
+        p_title: field === 'title' ? value : null,
+        p_content: field === 'content' ? value : null,
+      });
       if (error) throw error;
+      // The function returns 0 when the share was revoked or set to read-only
+      // while this tab was open.
+      if (data === 0) {
+        toast({
+          title: 'Not saved',
+          description: 'This link is now read-only. Ask the owner for edit access.',
+          variant: 'destructive',
+        });
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not save change';
       toast({ title: 'Save failed', description: message, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
-  }, [meta, note, toast]);
+  }, [allowEdit, shareId, toast]);
 
   const scheduleSave = (field: 'title' | 'content', value: string) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -113,13 +100,12 @@ const SharedNote = () => {
   const handleTitleInput = () => {
     if (!note) return;
     const text = titleRef.current?.textContent || '';
-    setNote(prev => prev ? { ...prev, title: text } : prev);
     scheduleSave('title', text);
   };
+
   const handleContentInput = () => {
     if (!note) return;
     const html = sanitizePreview(contentRef.current?.innerHTML || '');
-    setNote(prev => prev ? { ...prev, content: html } : prev);
     scheduleSave('content', html);
   };
 
@@ -138,21 +124,21 @@ const SharedNote = () => {
       </div>
       <div
         ref={titleRef}
-        contentEditable={meta?.allow_edit}
+        contentEditable={allowEdit}
         suppressContentEditableWarning
-        onInput={meta?.allow_edit ? handleTitleInput : undefined}
-        className={`text-2xl sm:text-3xl font-bold mb-4 focus:outline-none ${meta?.allow_edit ? 'border-b border-transparent focus:border-border' : ''}`}
+        onInput={allowEdit ? handleTitleInput : undefined}
+        className={`text-2xl sm:text-3xl font-bold mb-4 focus:outline-none ${allowEdit ? 'border-b border-transparent focus:border-border' : ''}`}
         aria-label="Note title"
       />
       <div
         ref={contentRef}
-        contentEditable={meta?.allow_edit}
+        contentEditable={allowEdit}
         suppressContentEditableWarning
-        onInput={meta?.allow_edit ? handleContentInput : undefined}
-        className={`prose dark:prose-invert max-w-none min-h-[50vh] focus:outline-none ${meta?.allow_edit ? 'border border-transparent focus:border-border rounded-md p-3' : ''}`}
+        onInput={allowEdit ? handleContentInput : undefined}
+        className={`prose dark:prose-invert max-w-none min-h-[50vh] focus:outline-none ${allowEdit ? 'border border-transparent focus:border-border rounded-md p-3' : ''}`}
         aria-label="Note content"
       />
-      {!meta?.allow_edit && (
+      {!allowEdit && (
         <div className="mt-6 text-sm text-muted-foreground">Read-only share. Owner disabled editing.</div>
       )}
     </div>

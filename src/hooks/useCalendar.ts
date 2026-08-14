@@ -22,7 +22,8 @@ export const useCalendar = (currentDate: Date, view: CalendarView) => {
     try {
       setLoading(true);
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
         setEvents([]);
         return;

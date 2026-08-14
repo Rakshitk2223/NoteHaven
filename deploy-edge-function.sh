@@ -48,8 +48,12 @@ echo "✅ Project linked"
 echo ""
 
 # Deploy edge function
+# SECURITY: JWT verification is ON. The previous --no-verify-jwt deploy made this
+# a public, unauthenticated proxy that holds the service-role key — anyone could
+# write to media_metadata and burn the TMDB quota. The client sends its session
+# token via supabase.functions.invoke(), so signed-in users are unaffected.
 echo "📦 Deploying media-search edge function..."
-supabase functions deploy media-search --no-verify-jwt
+supabase functions deploy media-search
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to deploy function"
@@ -76,6 +80,14 @@ fi
 if [ -n "$FANART_API_KEY" ]; then
     supabase secrets set FANART_API_KEY="$FANART_API_KEY"
     echo "✅ FANART_API_KEY set"
+fi
+# Restrict CORS to your own origins. Comma-separated; unset falls back to '*'.
+#   export ALLOWED_ORIGINS="https://your-app.example,http://localhost:8080"
+if [ -n "$ALLOWED_ORIGINS" ]; then
+    supabase secrets set ALLOWED_ORIGINS="$ALLOWED_ORIGINS"
+    echo "✅ ALLOWED_ORIGINS set"
+else
+    echo "⚠️  ALLOWED_ORIGINS not set — CORS stays open to '*'. Set it for production."
 fi
 echo ""
 

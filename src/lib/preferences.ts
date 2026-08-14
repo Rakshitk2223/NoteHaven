@@ -83,7 +83,8 @@ function writeLocal(prefs: AppPreferences) {
 export async function loadPreferences(): Promise<AppPreferences> {
   const local = readLocal();
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return local;
     const { data, error } = await supabase
       .from('user_preferences')
@@ -105,7 +106,8 @@ export async function loadPreferences(): Promise<AppPreferences> {
 export async function savePreferences(prefs: AppPreferences): Promise<void> {
   writeLocal(prefs);
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return;
     await supabase
       .from('user_preferences')

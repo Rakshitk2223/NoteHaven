@@ -25,7 +25,8 @@ const DEFAULT_ACCOUNTS: Array<{ name: string; kind: AccountKind; color: string }
 ];
 
 export async function fetchAccounts(): Promise<LedgerAccount[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -44,7 +45,8 @@ export async function ensureAccountsExist(): Promise<LedgerAccount[]> {
   const existing = await fetchAccounts();
   if (existing.length > 0) return existing;
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -59,7 +61,8 @@ export async function ensureAccountsExist(): Promise<LedgerAccount[]> {
 export async function createAccount(
   account: { name: string; kind: AccountKind; opening_balance?: number; color?: string }
 ): Promise<LedgerAccount> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase

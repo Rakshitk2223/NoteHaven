@@ -8,6 +8,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
+import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 
 const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
 
@@ -116,7 +117,9 @@ export async function fetchMediaMetadataBatch(
     if (error || !data) return out;
 
     const byKey = new Map<string, MediaMeta>();
-    data.forEach((row: Record<string, unknown>) => {
+    // `sel()` takes a runtime column string, so the client can't infer a row
+    // type and widens to a union that includes its error shape. Narrow it here.
+    (data as unknown as Record<string, unknown>[]).forEach((row) => {
       byKey.set(metaKey(row.title as string, row.type as string), {
         description: (row.description as string) ?? null,
         episodes: (row.episodes as number) ?? null,
@@ -150,7 +153,8 @@ export async function fetchMediaMetadataBatch(
  */
 export async function removeCoverImage(mediaId: number): Promise<boolean> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return false;
 
     const { error } = await supabase
@@ -343,7 +347,8 @@ export async function refreshLibrary(
   onProgress?: (p: RefreshProgress) => void,
   onItem?: (r: RefreshItemResult) => void
 ): Promise<RefreshProgress> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   const progress: RefreshProgress = { done: 0, total: items.length, updated: 0, failed: 0, skipped: 0, newContent: 0, failedTitles: [] };
 
   const CONCURRENCY = 5;
@@ -437,7 +442,7 @@ async function refreshOne(
           // app would never find — that mismatch is why in-app refresh used to
           // appear to do nothing.) Only ticked fields, and unless `force` only
           // where the existing value is blank. Cover images are never touched.
-          const meta: Record<string, unknown> = {
+          const meta: TablesInsert<'media_metadata'> & Record<string, unknown> = {
             title: item.title,
             type: item.type.toLowerCase(),
             last_updated: new Date().toISOString(),
@@ -466,7 +471,9 @@ async function refreshOne(
 
           const wrote = Object.keys(meta).some((k) => !['title', 'type', 'last_updated'].includes(k));
           if (wrote) {
-            const { error } = await supabase.from('media_metadata').upsert(meta, { onConflict: 'title,type' });
+            const { error } = await supabase
+              .from('media_metadata')
+              .upsert(meta as TablesInsert<'media_metadata'>, { onConflict: 'title,type' });
             if (error) {
               errored = true;
               devLog(`metadata upsert failed for "${item.title}": ${error.message}`);
@@ -487,7 +494,7 @@ async function refreshOne(
             const grewEpisodes = freshEpisodes != null && prevEpisodes != null && freshEpisodes > prevEpisodes;
             const isNew = grewSeasons || grewEpisodes;
 
-            const patch: Record<string, unknown> = {};
+            const patch: TablesUpdate<'media_tracker'> = {};
             if (freshSeasons != null) patch.last_known_total_seasons = freshSeasons;
             if (freshEpisodes != null) patch.last_known_total_episodes = freshEpisodes;
             if (isNew) {
@@ -539,7 +546,8 @@ async function refreshOne(
 /** Clear the "new content" flag once the user has seen the item. */
 export async function acknowledgeNewContent(mediaId: number): Promise<void> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return;
     await supabase
       .from('media_tracker')

@@ -86,6 +86,8 @@ const Vault = () => {
   const [conflicts, setConflicts] = useState<{ file: File; existing: VaultFile }[]>([]);
   const [conflictBusy, setConflictBusy] = useState(false);
   const batchStats = useRef({ added: 0, replaced: 0, skipped: 0, errors: [] as string[] });
+  // Names minted during the current upload batch (see resolveConflict).
+  const namesUsedRef = useRef<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
   const [zippingId, setZippingId] = useState<number | null>(null);
   const [previewFile, setPreviewFile] = useState<VaultFile | null>(null);
@@ -205,6 +207,7 @@ const Vault = () => {
 
   // ---- uploads ----
   const finishBatch = async () => {
+    namesUsedRef.current = new Set();
     await load();
     const { added, replaced, skipped, errors } = batchStats.current;
     const parts: string[] = [];
@@ -219,6 +222,7 @@ const Vault = () => {
     const arr = Array.from(list);
     if (!arr.length) return;
     batchStats.current = { added: 0, replaced: 0, skipped: 0, errors: [] };
+    namesUsedRef.current = new Set();
 
     // A duplicate = same display name within the folder being viewed.
     const namesHere = new Set(
@@ -258,14 +262,20 @@ const Vault = () => {
     const toProcess = applyToAll ? queue : [queue[0]];
     setConflictBusy(true);
     // Track names already used in this folder so "Keep both" copies don't collide.
-    const taken = new Set(
-      files.filter((f) => (f.folder_id ?? null) === currentFolderId).map((f) => f.name)
-    );
+    // `files` is not reloaded until the whole batch finishes, so names minted by
+    // an earlier one-at-a-time resolution live in namesUsedRef — without it,
+    // resolving two same-named conflicts individually produced "file (1).pdf"
+    // twice (audit BUG-11).
+    const taken = new Set([
+      ...files.filter((f) => (f.folder_id ?? null) === currentFolderId).map((f) => f.name),
+      ...namesUsedRef.current,
+    ]);
     for (const { file, existing } of toProcess) {
       try {
         if (action === "keep") {
           const newName = uniqueName(file.name, taken);
           taken.add(newName);
+          namesUsedRef.current.add(newName);
           await uploadFile(file, currentFolderId, newName);
           batchStats.current.added++;
         } else if (action === "replace") {

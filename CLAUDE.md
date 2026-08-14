@@ -8,7 +8,7 @@ Guidance for AI assistants (and humans) working in the NoteHaven codebase. For d
 
 NoteHaven is a personal productivity & media companion: a React 18 + TypeScript + Vite single-page app backed entirely by Supabase (PostgreSQL + RLS, Auth, Storage, Realtime, RPC, one Edge Function). There is **no custom server** — the client talks to Supabase directly.
 
-Features: Notes (rich text, auto-save, sharing), Tasks, AI Prompt library, Code Snippets, Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger, Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a cross-cutting Tags system, and a customizable widget Dashboard.
+Features: Notes (rich text, auto-save, share links), Tasks, AI Prompt library, Code Snippets, Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger (accounts + cumulative "money in hand"), Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a **Bucket List**, a **Recipes** cookbook, a cross-cutting Tags system, and a customizable widget Dashboard.
 
 ---
 
@@ -76,7 +76,9 @@ deploy-edge-function.sh
 context/                  # frontend.md, backend.md (architecture docs)
 ```
 
-The `supabase/` folder is git-tracked and present: `config.toml`, the `media-search` edge function, and ten SQL migrations (`migrations/01`→`10`; `06` adds `ledger_buckets` + `bucket_id`/`from_bucket_id`/`transfer` for envelope budgeting; `07` adds `snippet_folders` + `folder_id`/`filename`/`description` on `code_snippets` so snippets organise into project folders; `08`/`09` extend media metadata with seasons + per-episode/cast data; `10` adds `vault_folders` + `vault_files` plus a **private `vault` Supabase Storage bucket** with per-user RLS for the file Vault). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
+The `supabase/` folder is git-tracked: `config.toml`, the `media-search` edge function, and the SQL migrations (`01`→`19`). Highlights: `06` adds `ledger_buckets` (**now unused** — the ledger moved to accounts in `13`); `07` adds `snippet_folders`; `08`/`09` extend media metadata with seasons + per-episode/cast data; `10` adds the private `vault` Storage bucket; `11a` media activity stamps, `11b` the public `avatars` bucket; `12` fixes the signup triggers; `13` adds `ledger_accounts`; `15` retires the subscription→ledger triggers; `16` bucket list; `17` recipes; **`18` reconciles columns that existed in production but in no migration**; **`19` is the security hardening pass** (share-link RPCs, IDOR fixes, `media_metadata` write policy). These plus `src/integrations/supabase/types.ts` are the schema source of truth. (`supabase/.temp/` is CLI cache — untracked.)
+
+Migrations are applied **by hand in the Supabase SQL editor**, in filename order. There is no migration runner, so `18` and `19` must be run explicitly.
 
 ---
 
@@ -102,24 +104,28 @@ The `supabase/` folder is git-tracked and present: `config.toml`, the `media-sea
 
 ## Things to be careful about (known rough edges)
 
-These are documented more fully in the audit / context files. Be aware when touching related code:
+These are real, current, and worth knowing before you touch related code.
 
-1. **Dashboard ledger widget** — now fixed: `fetchLedgerSummary` uses the RPC-backed `getLedgerSummary(year, month)` from `lib/ledger.ts` (previously an inline query with a `toISOString()` UTC-drift bug). Prefer the `lib/ledger.ts` helpers over re-querying `ledger_entries`.
-2. **`/prompts` is a working alias** that renders `Library` (same as `/library`); the old dead `pages/Prompts.tsx` has been removed.
-3. **Responsive/mobile**: `PageShell` renders the `lg:hidden` hamburger header for migrated content pages (bespoke full-height pages — Notes/MediaTracker/Calendar — keep their own). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` (`w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto`, `p-4 sm:p-6`) and `ui/sheet.tsx` (`overflow-y-auto`, `p-4 sm:p-6`) are mobile-safe, so prefer those defaults over per-dialog width hacks. Use responsive padding (`p-4 sm:p-6`) and text (`text-2xl sm:text-3xl`) on new pages.
-4. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components. (The old unused `TagInput.tsx`, `QuickTagButtons.tsx`, and `iconMap` in `AppSidebar.tsx` have been removed.)
-5. **Toasts**: only the shadcn `Toaster` (`use-toast`) is mounted. (The unused Sonner toaster has been removed.)
-6. *(resolved)* The Birthdays add/edit Dialog is now a single shared `<Dialog>` (both headers call `openAddModal`), and the duplicate Subscriptions summary card is gone (cards are Monthly Cost / Yearly Cost / Active / Renews Soon).
-7. **Cover refresh** proxies key-protected sources (TMDB, Fanart.tv) through the `media-search` edge function via `?source=&refresh=1` (keys live server-side; browser env vars were undefined). Live-action fallback chain: TMDB/TVmaze → Wikidata/Commons (keyless) → Fanart.tv (optional `FANART_API_KEY`). OMDB removed (poster endpoint is patron-gated). Edge-function changes require redeploy.
-8. **Secret in VCS**: `deploy-edge-function.sh` contains a hard-coded `TMDB_API_KEY` — rotate/remove; don't propagate it.
-9. **Large page files** (Notes ~1300, MediaTracker ~1900 lines) mix data fetching, state, and JSX. Prefer extracting when making substantial changes, but keep diffs scoped.
+1. **Migrations 18 + 19 must be applied.** A 2026-08 audit found the live database had drifted from the migration folder in two dangerous ways: the share-link policies on `notes` had lost their share-id predicate (making any shared note world-readable), and `get_calendar_events` / `get_upcoming_renewals` were `SECURITY DEFINER` with an unchecked `p_user_id` (cross-tenant reads). `19_security_hardening.sql` fixes both. See `audit-report.html` and `AUDIT_VERIFY.sql`.
+2. **Note sharing goes through RPCs, not tables.** `SharedNote.tsx` calls `get_shared_note(share_id)` / `update_shared_note(...)`. Recipients cannot read `shared_notes` or `notes` directly, by design — don't "simplify" it back to a table query.
+3. **The edge function verifies JWTs.** Call it via `lib/edge-function.ts` (`mediaSearchGet`), which attaches the session token. A bare `fetch()` will 401.
+4. **`media_metadata` is a shared, cross-tenant cache** with no `user_id`. Writes are limited to `authenticated`. Treat anything read from it as untrusted third-party data.
+5. **`ledger_buckets` is dead.** The table and its columns still exist, but the envelope-budgeting UI was removed — `MoneyLedger.buildPayload` hardcodes `bucket_id: null`. Either wire it back up or drop the schema; don't half-use it.
+6. **`/prompts` is a working alias** that renders `Library` (same as `/library`).
+7. **Responsive/mobile**: `PageShell` renders the `lg:hidden` hamburger header for migrated content pages (bespoke full-height pages — Notes/MediaTracker/Calendar — keep their own). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` and `ui/sheet.tsx` are mobile-safe, so prefer those defaults over per-dialog width hacks.
+8. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components.
+9. **Toasts**: only the shadcn `Toaster` (`use-toast`) is mounted.
+10. **Rotate the TMDB key.** `381f2d0e…` was committed in `aea34a8` and is still readable in git history. `deploy-edge-function.sh` no longer contains it, but removing it from HEAD does not un-leak it.
+11. **Use `getSession()`, not `getUser()`**, for "who am I" reads in the data layer — `getUser()` is a network round-trip per call.
+12. **Large page files** (Notes ~1300, MediaTracker ~1900 lines) mix data fetching, state, and JSX. Prefer extracting when making substantial changes, but keep diffs scoped.
 
 ---
 
 ## When making changes
 
 - Read the file (and its `lib/*` data module) before editing; match existing patterns and the design-token styling.
-- After edits, run `npm run build` (and `npm run lint`) to verify — there are no automated tests.
+- After edits, run `npm run build` (which now typechecks first) and `npm run lint` to verify — there are no automated tests.
+- `eslint` reports ~21 `react-hooks/exhaustive-deps` warnings on deliberate mount-only effects. Zero **errors** is the bar; don't add new ones.
 - Keep RLS in mind: every user table is scoped by `user_id = auth.uid()`. Client queries should filter by the authenticated user where the existing code does.
 - Don't introduce a second Supabase client instance (auth/session relies on the single shared one).
 - Be cautious with anything touching auth, RLS expectations, the edge function, or service-role usage — flag risky/destructive changes before applying.

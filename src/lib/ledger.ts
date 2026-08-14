@@ -1,83 +1,24 @@
 import { supabase } from '@/integrations/supabase/client';
 import { getCachedPrefs } from '@/lib/preferences';
-import { dateToYMD, parseYMD } from '@/lib/date-utils';
+import { dateToYMD, parseYMD, formatDateDDMMYYYY as formatDateDDMMYYYYUtil } from '@/lib/date-utils';
 import type { LedgerEntry, LedgerCategory, LedgerSummary } from '@/integrations/supabase/types';
 
 export type { LedgerEntry, LedgerCategory, LedgerSummary };
 
 // ============================================
-// CATEGORY OPERATIONS
-// ============================================
-
-export async function fetchLedgerCategories(): Promise<LedgerCategory[]> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase
-    .from('ledger_categories')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('type', { ascending: false }) // Income first
-    .order('name', { ascending: true });
-
-  if (error) throw error;
-  return (data as LedgerCategory[]) || [];
-}
-
-export async function createLedgerCategory(
-  name: string, 
-  type: 'income' | 'expense', 
-  color?: string
-): Promise<LedgerCategory> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase
-    .from('ledger_categories')
-    .insert([{
-      user_id: user.id,
-      name,
-      type,
-      color: color || '#3B82F6'
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as LedgerCategory;
-}
-
-export async function updateLedgerCategory(
-  id: number, 
-  updates: Partial<Omit<LedgerCategory, 'id' | 'user_id' | 'created_at'>>
-): Promise<void> {
-  const { error } = await supabase
-    .from('ledger_categories')
-    .update(updates)
-    .eq('id', id);
-
-  if (error) throw error;
-}
-
-export async function deleteLedgerCategory(id: number): Promise<void> {
-  const { error } = await supabase
-    .from('ledger_categories')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw error;
-}
-
-// ============================================
 // ENTRY OPERATIONS
 // ============================================
+// Category CRUD used to live here (fetch/create/update/delete). Nothing ever
+// called it — categories are seeded and read through lib/category-init.ts
+// instead — so it was removed in the audit dead-code pass (DEAD-03).
 
 export async function fetchLedgerEntries(
   startDate?: string,
   endDate?: string,
   type?: 'income' | 'expense'
 ): Promise<LedgerEntry[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   let query = supabase
@@ -105,7 +46,8 @@ export async function fetchLedgerEntries(
 export async function createLedgerEntry(
   entry: Omit<LedgerEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'category'>
 ): Promise<LedgerEntry> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -150,7 +92,8 @@ export async function getLedgerSummary(
   year: number,
   month: number
 ): Promise<LedgerSummary> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   try {
@@ -178,25 +121,25 @@ export async function getLedgerSummary(
   }
 }
 
-export function calculateLedgerSummary(entries: LedgerEntry[]): LedgerSummary {
-  const totalIncome = entries
-    .filter(e => e.type === 'income')
-    .reduce((sum, e) => sum + Number(e.amount), 0);
-  
-  const totalExpense = entries
-    .filter(e => e.type === 'expense')
-    .reduce((sum, e) => sum + Number(e.amount), 0);
-  
-  return {
-    totalIncome,
-    totalExpense,
-    netBalance: totalIncome - totalExpense
-  };
-}
-
 // ============================================
 // EXPORT FUNCTIONS
 // ============================================
+
+/**
+ * Escape one CSV field.
+ *
+ * Two separate problems, both real (audit DATA-03):
+ *  - A value containing a comma, quote or newline shifts every later column on
+ *    that row unless it is quoted and its quotes doubled.
+ *  - A value starting with = + - @ (or tab/CR) is executed as a formula when the
+ *    file is opened in Excel or Google Sheets — CSV injection. Prefixing with a
+ *    single quote neutralises it while still displaying the original text.
+ */
+function csvField(value: unknown): string {
+  const raw = value == null ? '' : String(value);
+  const guarded = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${guarded.replace(/"/g, '""')}"`;
+}
 
 export function exportToCSV(entries: LedgerEntry[]): string {
   const headers = ['Date', 'Type', 'Category', 'Amount', 'Description', 'Notes'];
@@ -208,8 +151,12 @@ export function exportToCSV(entries: LedgerEntry[]): string {
     entry.description || '',
     entry.notes || ''
   ]);
-  
-  return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+
+  return [
+    headers.map(csvField).join(','),
+    ...rows.map(r => r.map(csvField).join(',')),
+    // Excel needs CRLF to reliably keep embedded newlines inside a quoted field.
+  ].join('\r\n');
 }
 
 export function exportToJSON(entries: LedgerEntry[]): string {
@@ -249,22 +196,16 @@ export function getMonthName(month: number): string {
   return new Date(2000, month - 1).toLocaleString('default', { month: 'long' });
 }
 
-// Date formatting utility - dd/mm/yyyy
+/**
+ * dd/mm/yyyy for a YYYY-MM-DD column value.
+ *
+ * Delegates to date-utils rather than re-implementing with `new Date(string)`,
+ * which parses a bare date as UTC midnight and renders the previous day for
+ * anyone west of Greenwich (audit BUG-15). There is now one implementation.
+ */
 export function formatDateDDMMYYYY(dateString: string | null): string {
   if (!dateString) return '-';
-  const date = new Date(dateString);
-  const day = date.getDate().toString().padStart(2, '0');
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const year = date.getFullYear();
-  return `${day}/${month}/${year}`;
-}
-
-export function getWeekNumber(date: Date): number {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((Number(d) - Number(yearStart)) / 86400000 + 1) / 7);
+  return formatDateDDMMYYYYUtil(dateString);
 }
 
 export function groupEntriesByCategory(

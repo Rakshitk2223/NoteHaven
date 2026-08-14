@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 import { PageShell } from '@/components/PageShell';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Stagger, StaggerItem } from '@/components/ui/motion';
 import { cn } from '@/lib/utils';
 import { parseYMD, dateToYMD } from '@/lib/date-utils';
@@ -58,6 +59,7 @@ const MoneyLedger = () => {
   const [editingEntry, setEditingEntry] = useState<LedgerEntry | null>(null);
   const [newEntry, setNewEntry] = useState<LedgerEntryFormData>(emptyForm);
   const [editForm, setEditForm] = useState<LedgerEntryFormData>(emptyForm);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
 
   useEffect(() => { loadData(); }, []);
 
@@ -193,19 +195,43 @@ const MoneyLedger = () => {
     } catch { toast({ title: 'Error', description: 'Failed to update entry', variant: 'destructive' }); }
   };
 
-  const handleDelete = async (id: number) => {
+  // Deleting a financial record is irreversible, so it goes through the same
+  // ConfirmDialog every other destructive action in the app uses (audit BUG-07).
+  const confirmDelete = async () => {
+    const id = deleteConfirm.id;
+    if (id == null) return;
     try {
       await deleteLedgerEntry(id);
       toast({ title: 'Entry deleted' });
       loadData();
-    } catch { toast({ title: 'Error', description: 'Failed to delete entry', variant: 'destructive' }); }
+    } catch {
+      toast({ title: 'Error', description: 'Failed to delete entry', variant: 'destructive' });
+    } finally {
+      setDeleteConfirm({ open: false, id: null });
+    }
   };
 
   const handleExportCSV = () => { downloadFile(exportToCSV(monthEntries), `ledger_${selectedYear}_${selectedMonth}.csv`, 'text/csv'); toast({ title: 'CSV exported' }); };
   const handleExportJSON = () => { downloadFile(exportToJSON(monthEntries), `ledger_${selectedYear}_${selectedMonth}.json`, 'application/json'); toast({ title: 'JSON exported' }); };
 
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
-  const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
+
+  // The year list used to be a fixed current±2 window, which made anything older
+  // unreachable even though it still counted toward the balance (audit BUG-08).
+  // Now it spans from the earliest entry (or subscription start) to next year.
+  const years = useMemo(() => {
+    const current = new Date().getFullYear();
+    const dates = [
+      ...entries.map((e) => e.transaction_date),
+      ...subs.map((s) => s.start_date),
+    ].filter(Boolean);
+    const earliest = dates.length
+      ? Math.min(...dates.map((d) => parseYMD(d).getFullYear()))
+      : current;
+    const from = Math.min(earliest, current - 2);
+    const to = current + 1;
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  }, [entries, subs]);
 
   const actions = (
     <>
@@ -416,7 +442,7 @@ const MoneyLedger = () => {
                         </td>
                         <td className="py-3 px-3 text-right">
                           <Button variant="ghost" size="sm" onClick={() => handleEdit(e)} className="mr-1"><Edit2 className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleDelete(e.id)} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => setDeleteConfirm({ open: true, id: e.id })} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
                         </td>
                       </tr>
                     );
@@ -427,6 +453,14 @@ const MoneyLedger = () => {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, id: open ? deleteConfirm.id : null })}
+        onConfirm={confirmDelete}
+        title="Delete entry"
+        description="This permanently removes the transaction and adjusts your balance. This can't be undone."
+      />
     </PageShell>
   );
 };

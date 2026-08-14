@@ -3,8 +3,8 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
-
-const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
+import { mediaSearchGet } from '@/lib/edge-function';
+import { invalidateImageCache } from '@/lib/image-cache';
 
 // API priority order based on media type
 // MangaDex/MangaUpdates excluded: no CORS headers (fail from browser, work in edge function).
@@ -28,16 +28,14 @@ interface RefreshResult {
   id?: number;
 }
 
-// Minimal shape of a MangaDex relationship object (only the fields we read).
-interface MangaDexRelationship {
-  type?: string;
-  attributes?: { fileName?: string };
-}
-
-// Fetch from specific API
+// Fetch from specific API.
+// Note: 'mangadex' and 'mangaupdates' are deliberately absent — neither sends
+// CORS headers, so they can only be reached server-side. They are covered by the
+// edge function's own fallback chain, not from here. (Audit DEAD-03 removed the
+// two unreachable browser-side implementations.)
 async function fetchFromApi(api: string, title: string, type: string): Promise<RefreshResult | null> {
   const normalizedType = type.toLowerCase();
-  
+
   try {
     switch (api) {
       case 'anilist':
@@ -46,10 +44,6 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
         return await fetchFromKitsu(title, normalizedType);
       case 'jikan':
         return await fetchFromJikan(title, normalizedType);
-      case 'mangadex':
-        return await fetchFromMangaDex(title, normalizedType);
-      case 'mangaupdates':
-        return await fetchFromMangaUpdates(title, normalizedType);
       case 'tvmaze':
         return await fetchFromTVmaze(title, normalizedType);
       case 'tmdb':
@@ -65,26 +59,6 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
     console.error(`Error fetching from ${api}:`, error);
     return null;
   }
-}
-
-async function fetchFromMangaUpdates(title: string, type: string): Promise<RefreshResult | null> {
-  // MangaUpdates does not currently provide CORS headers. Use our edge function as a server-side proxy.
-  const response = await fetch(
-    `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(title)}&type=${encodeURIComponent(type)}&limit=1`,
-    { signal: AbortSignal.timeout(5000) }
-  );
-
-  if (!response.ok) return null;
-
-  const data = await response.json();
-  const cover = data?.results?.[0]?.cover_image;
-  if (!data?.success || !cover) return null;
-
-  const source = typeof data?.source === 'string' ? data.source.toLowerCase() : '';
-  return {
-    coverImage: cover,
-    apiSource: source.includes('mangaupdates') ? 'mangaupdates' : 'mangaupdates',
-  };
 }
 
 // AniList API
@@ -187,36 +161,6 @@ async function fetchFromKitsu(title: string, type: string): Promise<RefreshResul
   }
 }
 
-// MangaDex API
-async function fetchFromMangaDex(title: string, type: string): Promise<RefreshResult | null> {
-  try {
-    const response = await fetch(
-      `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=1&includes[]=cover_art`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    if (data.result !== 'ok' || !data.data?.[0]) return null;
-
-    const manga = data.data[0];
-    const coverRel = (manga.relationships as MangaDexRelationship[] | undefined)?.find(
-      (r) => r.type === 'cover_art'
-    );
-    const coverFileName = coverRel?.attributes?.fileName;
-    if (!coverFileName) return null;
-
-    return {
-      coverImage: `https://uploads.mangadex.org/covers/${manga.id}/${coverFileName}.512.jpg`,
-      apiSource: 'mangadex',
-    };
-  } catch (error) {
-    console.error('MangaDex error:', error);
-    return null;
-  }
-}
-
 // TVmaze API
 async function fetchFromTVmaze(title: string, type: string): Promise<RefreshResult | null> {
   try {
@@ -244,14 +188,11 @@ async function fetchFromTVmaze(title: string, type: string): Promise<RefreshResu
 // TMDB/Fanart API keys live server-side (non-VITE env vars are undefined in the browser),
 // so these must be fetched via the edge function rather than called directly.
 async function fetchFromEdgeSource(source: string, title: string, type: string): Promise<RefreshResult | null> {
-  const response = await fetch(
-    `${EDGE_FUNCTION_URL}?q=${encodeURIComponent(title)}&type=${encodeURIComponent(type)}&source=${source}&refresh=1&limit=1`,
-    { signal: AbortSignal.timeout(8000) }
-  );
+  const data = await mediaSearchGet(
+    { q: title, type, source, refresh: 1, limit: 1 },
+    AbortSignal.timeout(8000),
+  ) as { success?: boolean; results?: Array<{ cover_image?: string }> } | null;
 
-  if (!response.ok) return null;
-
-  const data = await response.json();
   const cover = data?.results?.[0]?.cover_image;
   if (!data?.success || !cover) return null;
 
@@ -325,7 +266,8 @@ async function updateMediaTracker(
   try {
     // Update media_tracker.cover_image if we have the ID
     if (mediaId) {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
         console.error('Failed to update media_tracker: user not authenticated');
       } else {
@@ -363,30 +305,5 @@ async function updateMediaTracker(
   }
 }
 
-// Invalidate localStorage cache for a specific media item
-function invalidateImageCache(mediaId?: number) {
-  if (!mediaId) return;
-  
-  try {
-    const imageCacheKey = 'media_images_v1';
-    const sourceCacheKey = 'media_image_sources_v1';
-
-    const cachedImages = localStorage.getItem(imageCacheKey);
-    if (cachedImages) {
-      const data = JSON.parse(cachedImages);
-      delete data[mediaId];
-      localStorage.setItem(imageCacheKey, JSON.stringify(data));
-    }
-
-    const cachedSources = localStorage.getItem(sourceCacheKey);
-    if (cachedSources) {
-      const data = JSON.parse(cachedSources);
-      delete data[mediaId];
-      localStorage.setItem(sourceCacheKey, JSON.stringify(data));
-    }
-
-    devLog(`🗑️ Invalidated image cache for item ${mediaId}`);
-  } catch (error) {
-    console.error('Cache invalidation error:', error);
-  }
-}
+// Cache invalidation now lives in lib/image-cache.ts, so the keys are declared
+// once instead of being re-typed as literals here (audit BUG-12).

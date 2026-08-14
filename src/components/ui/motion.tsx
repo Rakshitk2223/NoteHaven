@@ -11,18 +11,16 @@ import { cn } from "@/lib/utils";
 
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
 
-export const pageEnter: Transition = { duration: 0.32, ease: EASE_OUT };
+// Module-private: these back the wrappers below. They were exported, but no
+// other file ever imported them (audit DEAD-03) — and exporting non-components
+// from this file also trips react-refresh/only-export-components.
+const pageEnter: Transition = { duration: 0.36, ease: EASE_OUT };
 
-export const fadeInUp: Variants = {
-  hidden: { opacity: 0, y: 12 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.34, ease: EASE_OUT } },
-};
-
-export const staggerContainer: Variants = {
+const staggerContainer: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.05, delayChildren: 0.04 },
+    transition: { staggerChildren: 0.045, delayChildren: 0.02 },
   },
 };
 

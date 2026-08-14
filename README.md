@@ -84,7 +84,7 @@ Deploy the media-search edge function:
 supabase login
 
 # Deploy the function
-supabase functions deploy media-search --no-verify-jwt
+supabase functions deploy media-search   # verify_jwt=true comes from supabase/config.toml
 
 # Set environment variables for the function
 supabase secrets set TMDB_API_KEY="your_tmdb_api_key"
@@ -198,7 +198,7 @@ curl "https://your-project.supabase.co/functions/v1/media-search?q=naruto&type=a
 4. Verify edge function environment variables are set
 
 **Edge function returning 401:**
-- Make sure you deployed with `--no-verify-jwt` flag
+- The function requires a signed-in user. `--no-verify-jwt` must NOT be used — it made this a public proxy for the service-role key. `verify_jwt = true` lives in `supabase/config.toml` and is sticky server-side, so it must be declared there rather than just omitting the flag.
 - Or configure the function to allow anonymous access in Supabase Dashboard
 
 **Auth not persisting:**

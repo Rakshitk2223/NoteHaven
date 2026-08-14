@@ -143,7 +143,8 @@ const Dashboard = () => {
       setLoading(true);
       setIsRefreshing(true);
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('User not authenticated');
 
       const [
@@ -232,7 +233,8 @@ const Dashboard = () => {
   }, []);
 
   const fetchPendingTasks = async (): Promise<Task[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const { data, error } = await supabase
@@ -248,7 +250,8 @@ const Dashboard = () => {
   };
 
   const fetchRecentNotes = async (): Promise<Note[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const { data, error } = await supabase
@@ -263,15 +266,18 @@ const Dashboard = () => {
   };
 
   const fetchWatchingMedia = async (): Promise<MediaItem[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
+    // 'Reading' is the status every manga/manhwa/manhua row uses, so filtering
+    // on 'Watching' alone hid half the library from its own widget (audit BUG-10).
     const base = () =>
       supabase
         .from('media_tracker')
         .select('id, title, type')
         .eq('user_id', user.id)
-        .eq('status', 'Watching')
+        .in('status', ['Watching', 'Reading'])
         .limit(10);
 
     // Order by genuine last activity; gracefully fall back if migration 11
@@ -289,7 +295,8 @@ const Dashboard = () => {
   };
 
   const fetchFavoritePrompts = async (): Promise<Prompt[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const { data, error } = await supabase
@@ -305,7 +312,8 @@ const Dashboard = () => {
   };
 
   const fetchPinnedItems = async (): Promise<PinnedItem[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const [notesPinned, tasksPinned, promptsPinned] = await Promise.all([
@@ -370,7 +378,8 @@ const Dashboard = () => {
   };
 
   const fetchStats = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const [tasksResult, notesResult, mediaResult, promptsResult] =
@@ -394,7 +403,8 @@ const Dashboard = () => {
   };
 
   const fetchCountdowns = async (): Promise<Countdown[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const { data, error } = await supabase
@@ -408,7 +418,8 @@ const Dashboard = () => {
   };
 
   const fetchBirthdays = async (): Promise<Birthday[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const { data, error } = await supabase
@@ -500,7 +511,8 @@ const Dashboard = () => {
     const taskToComplete = tasks.find((t) => t.id === taskId);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('User not authenticated');
 
       setTasks((prev) => prev.filter((task) => task.id !== taskId));
@@ -535,7 +547,8 @@ const Dashboard = () => {
   };
 
   const handleAddCountdown = async (name: string, date: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return;
 
     const { data, error } = await supabase

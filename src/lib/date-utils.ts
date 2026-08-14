@@ -49,7 +49,7 @@ export function formatDateDDMMYYYY(dateString: string): string {
 /**
  * Get today's date as YYYY-MM-DD string
  */
-export function getTodayYMD(): string {
+function getTodayYMD(): string {
   return dateToYMD(new Date());
 }
 

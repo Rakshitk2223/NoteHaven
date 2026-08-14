@@ -93,7 +93,8 @@ const PREFERENCE_KEY = 'dashboard_widgets';
 
 export async function loadWidgets(): Promise<DashboardWidget[]> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return DEFAULT_WIDGETS;
 
     const { data, error } = await supabase
@@ -126,7 +127,8 @@ export async function loadWidgets(): Promise<DashboardWidget[]> {
 
 export async function saveWidgets(widgets: DashboardWidget[]): Promise<void> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return;
 
     await supabase
@@ -145,7 +147,8 @@ export async function saveWidgets(widgets: DashboardWidget[]): Promise<void> {
 
 export async function resetWidgets(): Promise<DashboardWidget[]> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return DEFAULT_WIDGETS;
 
     await supabase

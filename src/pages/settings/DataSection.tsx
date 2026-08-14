@@ -7,14 +7,28 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { IMAGE_CACHE_PREFIXES } from '@/lib/image-cache';
 import { SettingsSection, SettingRow } from '@/components/settings/primitives';
 
 // Full backup — every user-owned table.
+// The list previously omitted recipes, recipe_folders, bucket_list,
+// ledger_accounts, vault_files, vault_folders, user_preferences and all four tag
+// junction tables, while still promising "every section" (audit DATA-01).
 const EXPORT_TABLES = [
   'prompts', 'notes', 'tasks', 'media_tracker',
   'subscriptions', 'subscription_categories',
-  'ledger_entries', 'ledger_categories', 'ledger_buckets',
+  'ledger_entries', 'ledger_categories', 'ledger_accounts',
   'birthdays', 'countdowns', 'code_snippets', 'snippet_folders', 'tags',
+  'recipes', 'recipe_folders', 'bucket_list',
+  'vault_folders', 'vault_files',
+  'user_preferences',
+] as const;
+
+// Tag links are stored in junction tables keyed by the parent row, not on the
+// parent itself, so they need exporting separately or a restored backup comes
+// back untagged. They have no user_id column — RLS scopes them via their parent.
+const EXPORT_JUNCTIONS = [
+  'note_tags', 'task_tags', 'media_tags', 'prompt_tags', 'code_snippet_tags',
 ] as const;
 
 // Restore only self-contained tables (no cross-table FKs) and insert as NEW
@@ -22,8 +36,9 @@ const EXPORT_TABLES = [
 const IMPORT_TABLES = ['notes', 'tasks', 'prompts', 'birthdays', 'countdowns'] as const;
 
 // localStorage cache key prefixes wiped by "Clear cache" (image/metadata caches
-// only — never UI preferences like mediaTrackerViewMode).
-const CACHE_PREFIXES = ['media_images', 'media_image_sources', 'media_metadata'];
+// only — never UI preferences like mediaTrackerViewMode). The image-cache keys
+// come from lib/image-cache.ts so the two can't drift apart.
+const CACHE_PREFIXES = [...IMAGE_CACHE_PREFIXES, 'media_metadata'];
 
 function formatBytes(n: number): string {
   if (!n) return '0 B';
@@ -44,7 +59,8 @@ export function DataSection() {
   useEffect(() => {
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user;
         if (!user) return;
         const { data } = await supabase.from('vault_files').select('size_bytes').eq('user_id', user.id);
         const bytes = (data ?? []).reduce((s, r) => s + (Number(r.size_bytes) || 0), 0);
@@ -56,22 +72,63 @@ export function DataSection() {
   const handleExport = useCallback(async () => {
     try {
       setExporting(true);
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
+
       const results = await Promise.allSettled(
         EXPORT_TABLES.map((t) => supabase.from(t).select('*').eq('user_id', user.id).then((r) => {
           if (r.error) throw r.error;
           return r.data || [];
         })),
       );
-      const out: Record<string, unknown> = { exported_at: new Date().toISOString(), user_id: user.id, email: user.email };
-      EXPORT_TABLES.forEach((t, i) => { const r = results[i]; out[t] = r.status === 'fulfilled' ? r.value : []; });
+      // Junction tables have no user_id — RLS already limits them to rows whose
+      // parent belongs to the caller.
+      const junctionResults = await Promise.allSettled(
+        EXPORT_JUNCTIONS.map((t) => supabase.from(t).select('*').then((r) => {
+          if (r.error) throw r.error;
+          return r.data || [];
+        })),
+      );
+
+      const out: Record<string, unknown> = {
+        exported_at: new Date().toISOString(),
+        schema_version: 2,
+        user_id: user.id,
+        email: user.email,
+      };
+      const failed: string[] = [];
+
+      EXPORT_TABLES.forEach((t, i) => {
+        const r = results[i];
+        if (r.status === 'fulfilled') out[t] = r.value;
+        else { out[t] = []; failed.push(t); }
+      });
+      EXPORT_JUNCTIONS.forEach((t, i) => {
+        const r = junctionResults[i];
+        if (r.status === 'fulfilled') out[t] = r.value;
+        else { out[t] = []; failed.push(t); }
+      });
+
       const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'notehaven_export.json'; a.click();
-      URL.revokeObjectURL(url);
-      toast({ title: 'Export ready', description: 'Downloaded notehaven_export.json' });
+      a.href = url; a.download = 'notehaven_export.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      // Revoke after the download has started — revoking synchronously can
+      // cancel it in some browsers.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+
+      // A partial export is a corrupt backup; never report it as a clean one.
+      if (failed.length) {
+        toast({
+          title: 'Export incomplete',
+          description: `Could not read: ${failed.join(', ')}. The file is missing those sections.`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({ title: 'Export ready', description: 'Downloaded notehaven_export.json' });
+      }
     } catch (e) {
       toast({ title: 'Export failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' });
     } finally { setExporting(false); }
@@ -94,9 +151,11 @@ export function DataSection() {
     if (!pendingImport) return;
     try {
       setImporting(true);
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       let inserted = 0;
+      const failed: string[] = [];
       for (const table of IMPORT_TABLES) {
         const rows = Array.isArray(pendingImport[table]) ? pendingImport[table] as Record<string, unknown>[] : [];
         if (!rows.length) continue;
@@ -108,9 +167,25 @@ export function DataSection() {
           return r;
         });
         const { error } = await supabase.from(table).insert(clean as never);
-        if (!error) inserted += clean.length;
+        if (error) {
+          // Previously a failed table was silently skipped and the toast still
+          // said "Import complete" (audit DATA-02).
+          console.error(`Import failed for ${table}:`, error);
+          failed.push(`${table} (${error.message})`);
+        } else {
+          inserted += clean.length;
+        }
       }
-      toast({ title: 'Import complete', description: `${inserted} item${inserted === 1 ? '' : 's'} added.` });
+
+      if (failed.length) {
+        toast({
+          title: inserted ? 'Import partly failed' : 'Import failed',
+          description: `${inserted} item${inserted === 1 ? '' : 's'} added. Could not import: ${failed.join('; ')}`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({ title: 'Import complete', description: `${inserted} item${inserted === 1 ? '' : 's'} added.` });
+      }
     } catch (e) {
       toast({ title: 'Import failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' });
     } finally {

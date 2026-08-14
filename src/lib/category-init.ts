@@ -33,8 +33,36 @@ const DEFAULT_SUBSCRIPTION_CATEGORIES = [
  */
 const LEDGER_CATEGORIES_SEED_FLAG = 'ledger_categories_v2_seeded';
 
+/**
+ * Read the "already seeded" flag from user_preferences.
+ *
+ * This used to live in localStorage, which is per-browser: opening the app on a
+ * second device (or after clearing site data) found no flag and re-created every
+ * default category the user had deliberately deleted (audit BUG-05). The flag
+ * belongs with the account, not the browser.
+ */
+async function hasSeededLedgerCategories(userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('user_preferences')
+    .select('preference_value')
+    .eq('user_id', userId)
+    .eq('preference_key', LEDGER_CATEGORIES_SEED_FLAG)
+    .maybeSingle();
+  return !!data;
+}
+
+async function markLedgerCategoriesSeeded(userId: string): Promise<void> {
+  try {
+    await supabase.from('user_preferences').upsert(
+      { user_id: userId, preference_key: LEDGER_CATEGORIES_SEED_FLAG, preference_value: { seeded: true } },
+      { onConflict: 'user_id,preference_key' },
+    );
+  } catch { /* best effort — a failed write just means one extra check next load */ }
+}
+
 export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data: existingCategories, error: fetchError } = await supabase
@@ -51,16 +79,15 @@ export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
 
   // One-time ADDITIVE seed of the v2 category set: existing users get the new
   // categories (Mom / Food / Pocket money / …) added once, without re-adding any
-  // they later delete; new users get the full set. Guarded by a localStorage flag.
-  let seeded = false;
-  try { seeded = localStorage.getItem(LEDGER_CATEGORIES_SEED_FLAG) === '1'; } catch { /* ignore */ }
+  // they later delete; new users get the full set.
+  const seeded = await hasSeededLedgerCategories(user.id);
   if (existing.length > 0 && seeded) return existing;
 
   const have = new Set(existing.map((c) => `${c.name.toLowerCase()}|${c.type}`));
   const missing = DEFAULT_LEDGER_CATEGORIES.filter((c) => !have.has(`${c.name.toLowerCase()}|${c.type}`));
 
   if (missing.length === 0) {
-    try { localStorage.setItem(LEDGER_CATEGORIES_SEED_FLAG, '1'); } catch { /* ignore */ }
+    await markLedgerCategoriesSeeded(user.id);
     return existing;
   }
 
@@ -75,7 +102,7 @@ export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
     throw insertError;
   }
 
-  try { localStorage.setItem(LEDGER_CATEGORIES_SEED_FLAG, '1'); } catch { /* ignore */ }
+  await markLedgerCategoriesSeeded(user.id);
   return [...existing, ...((newCategories || []) as LedgerCategory[])];
 }
 
@@ -84,7 +111,8 @@ export async function ensureLedgerCategoriesExist(): Promise<LedgerCategory[]> {
  * Returns all categories (existing + newly created)
  */
 export async function ensureSubscriptionCategoriesExist(): Promise<SubscriptionCategory[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   // First, try to fetch existing categories
@@ -123,44 +151,6 @@ export async function ensureSubscriptionCategoriesExist(): Promise<SubscriptionC
   return (newCategories || []) as SubscriptionCategory[];
 }
 
-/**
- * Checks if categories exist without creating them
- */
-export async function checkLedgerCategoriesExist(): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-
-  const { data, error } = await supabase
-    .from('ledger_categories')
-    .select('id')
-    .eq('user_id', user.id)
-    .limit(1);
-
-  if (error) {
-    console.error('Error checking ledger categories:', error);
-    return false;
-  }
-
-  return data && data.length > 0;
-}
-
-/**
- * Checks if subscription categories exist without creating them
- */
-export async function checkSubscriptionCategoriesExist(): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-
-  const { data, error } = await supabase
-    .from('subscription_categories')
-    .select('id')
-    .eq('user_id', user.id)
-    .limit(1);
-
-  if (error) {
-    console.error('Error checking subscription categories:', error);
-    return false;
-  }
-
-  return data && data.length > 0;
-}
+// checkLedgerCategoriesExist / checkSubscriptionCategoriesExist were exported
+// here but never called anywhere — removed in the audit dead-code pass (DEAD-03).
+// The ensure* functions above already return the current set.

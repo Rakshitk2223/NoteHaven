@@ -380,7 +380,7 @@ const Recipes = () => {
                       {detail.ingredients.map((ing, i) => (
                         <button
                           key={i}
-                          onClick={() => setChecked((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+                          onClick={() => setChecked((prev) => { const n = new Set(prev); if (n.has(i)) n.delete(i); else n.add(i); return n; })}
                           className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-secondary/50"
                         >
                           <span className={cn('grid h-4 w-4 flex-shrink-0 place-items-center rounded border', checked.has(i) ? 'border-primary bg-primary text-primary-foreground' : 'border-border')}>
@@ -442,7 +442,7 @@ const Recipes = () => {
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ingredients</p>
                   <div className="space-y-1">
                     {detail.ingredients.map((ing, i) => (
-                      <button key={i} onClick={() => setChecked((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-secondary/50">
+                      <button key={i} onClick={() => setChecked((prev) => { const n = new Set(prev); if (n.has(i)) n.delete(i); else n.add(i); return n; })} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-secondary/50">
                         <span className={cn('grid h-4 w-4 flex-shrink-0 place-items-center rounded border', checked.has(i) ? 'border-primary bg-primary text-primary-foreground' : 'border-border')}>
                           {checked.has(i) && <Check className="h-3 w-3" strokeWidth={3} />}
                         </span>

@@ -1,11 +1,58 @@
 // Optimized media search with parallel APIs and proper timeout handling
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// CORS headers
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// CORS. Set ALLOWED_ORIGINS to a comma-separated allow-list (e.g.
+// "https://notehaven.example,http://localhost:8080"). Unset falls back to '*'
+// so local development keeps working, but production should always set it.
+const ALLOWED_ORIGINS = (Deno.env.get('ALLOWED_ORIGINS') || '')
+  .split(',').map((o) => o.trim()).filter(Boolean);
+
+function corsFor(req: Request): Record<string, string> {
+  const origin = req.headers.get('origin') || '';
+  const allow = ALLOWED_ORIGINS.length === 0
+    ? '*'
+    : (ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
+  return {
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Vary': 'Origin',
+  };
+}
+
+// Hard caps so a caller can't turn this into a bulk scraper or a DB stressor.
+const MAX_LIMIT = 50;
+const MAX_BATCH_ITEMS = 50;
+const MAX_QUERY_LEN = 200;
+
+/**
+ * Require a real signed-in user, not just any valid project JWT.
+ *
+ * `verify_jwt = true` (supabase/config.toml) makes the platform reject requests
+ * with no/!valid token — but the ANON key is itself a validly-signed JWT, and it
+ * ships publicly in the browser bundle. Without this check, anyone who reads the
+ * key out of the JS could still drive a function that holds the service-role key.
+ *
+ * The platform has already verified the signature by the time we get here, so we
+ * only need to read the `role` claim. Anything other than `authenticated` — i.e.
+ * the anon key — is refused.
+ */
+function isAuthenticatedUser(req: Request): boolean {
+  const auth = req.headers.get('authorization') || '';
+  const token = auth.replace(/^Bearer\s+/i, '').trim();
+  if (!token) return false;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload?.role === 'authenticated' && !!payload?.sub;
+  } catch {
+    return false;
+  }
+}
+
+function clampLimit(raw: string | null): number {
+  const n = parseInt(raw || '10', 10);
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(Math.max(n, 1), MAX_LIMIT);
+}
 
 // Helper: Add timeout to any promise
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T | null> {
@@ -921,12 +968,26 @@ function determineType(item: TMDBResult, searchType: string): string {
 
 // Batch search: accept POST with { items: [{id, title, type}] }
 async function handleBatchSearch(req: Request, supabase: SupabaseClient): Promise<Response> {
+  const corsHeaders = corsFor(req);
   const body = await req.json();
-  const items: Array<{ id: number; title: string; type: string }> = body.items;
+  const raw: Array<{ id: number; title: string; type: string }> = body.items;
 
-  if (!items || !Array.isArray(items) || items.length === 0) {
+  if (!raw || !Array.isArray(raw) || raw.length === 0) {
     return new Response(
       JSON.stringify({ error: 'items array is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Cap the batch and the per-title length before anything reaches the DB or an
+  // upstream API — an unbounded items[] fed straight into .in() is a free DoS.
+  const items = raw
+    .filter((i) => i && typeof i.title === 'string' && i.title.length <= MAX_QUERY_LEN)
+    .slice(0, MAX_BATCH_ITEMS);
+
+  if (items.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'no valid items' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
@@ -1031,9 +1092,20 @@ async function handleBatchSearch(req: Request, supabase: SupabaseClient): Promis
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = corsFor(req);
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
+  }
+
+  // Signed-in users only — the anon key is public, so a valid signature alone
+  // proves nothing about who is calling.
+  if (!isAuthenticatedUser(req)) {
+    return new Response(
+      JSON.stringify({ error: 'Sign in required' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   try {
@@ -1043,9 +1115,10 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const { searchParams } = new URL(req.url);
-    const query = searchParams.get('q');
+    const rawQuery = searchParams.get('q');
+    const query = rawQuery ? rawQuery.slice(0, MAX_QUERY_LEN) : rawQuery;
     const type = searchParams.get('type');
-    const limit = parseInt(searchParams.get('limit') || '10');
+    const limit = clampLimit(searchParams.get('limit'));
     const source = searchParams.get('source');
     const refresh = ['1', 'true'].includes((searchParams.get('refresh') || '').toLowerCase());
 
@@ -1131,45 +1204,41 @@ Deno.serve(async (req) => {
     const normalizedType = type?.toLowerCase();
     const tmdbKey = Deno.env.get('TMDB_API_KEY');
 
-    // Run all applicable APIs in parallel with 3-second timeout
-    let apiPromises: Promise<MediaResult[] | null>[] = [];
-    
+    // Run all applicable APIs in parallel with 3-second timeout.
+    // Each entry carries its own name so the reported `source` can never drift
+    // out of step with the promise order (it previously indexed a fixed name
+    // array that only matched the anime branch).
+    let apiCalls: Array<{ name: string; run: Promise<MediaResult[] | null> }> = [];
+
     if (normalizedType === 'anime' || !type) {
-      apiPromises = [
-        withTimeout(searchAniList(query, 'anime'), 3000, 'AniList'),
-        withTimeout(searchJikan(query, 'anime'), 3000, 'Jikan'),
-        withTimeout(searchTMDB(query, 'tv', tmdbKey || ''), 3000, 'TMDB'),
+      apiCalls = [
+        { name: 'AniList', run: withTimeout(searchAniList(query, 'anime'), 3000, 'AniList') },
+        { name: 'Jikan',   run: withTimeout(searchJikan(query, 'anime'), 3000, 'Jikan') },
+        { name: 'TMDB',    run: withTimeout(searchTMDB(query, 'tv', tmdbKey || ''), 3000, 'TMDB') },
       ];
-    } else if (normalizedType === 'manga') {
-      apiPromises = [
-        withTimeout(searchAniList(query, 'manga'), 3000, 'AniList'),
-        withTimeout(searchJikan(query, 'manga'), 3000, 'Jikan'),
-        withTimeout(searchMangaDex(query), 3000, 'MangaDex'),
-        withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'),
-      ];
-    } else if (['manhwa', 'manhua'].includes(normalizedType || '')) {
-      apiPromises = [
-        withTimeout(searchAniList(query, 'manga'), 3000, 'AniList'),
-        withTimeout(searchJikan(query, 'manga'), 3000, 'Jikan'),
-        withTimeout(searchMangaDex(query), 3000, 'MangaDex'),
-        withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates'),
+    } else if (['manga', 'manhwa', 'manhua'].includes(normalizedType || '')) {
+      apiCalls = [
+        { name: 'AniList',      run: withTimeout(searchAniList(query, 'manga'), 3000, 'AniList') },
+        { name: 'Jikan',        run: withTimeout(searchJikan(query, 'manga'), 3000, 'Jikan') },
+        { name: 'MangaDex',     run: withTimeout(searchMangaDex(query), 3000, 'MangaDex') },
+        { name: 'MangaUpdates', run: withTimeout(searchMangaUpdates(query), 4000, 'MangaUpdates') },
       ];
     } else if (['movie', 'series', 'kdrama', 'jdrama'].includes(normalizedType || '')) {
-      apiPromises = [
-        withTimeout(searchTMDB(query, normalizedType, tmdbKey || ''), 3000, 'TMDB'),
-        withTimeout(searchTVmaze(query), 3000, 'TVmaze'),
-        withTimeout(searchWikidata(query, normalizedType || ''), 4000, 'Wikidata'),
+      apiCalls = [
+        { name: 'TMDB',     run: withTimeout(searchTMDB(query, normalizedType, tmdbKey || ''), 3000, 'TMDB') },
+        { name: 'TVmaze',   run: withTimeout(searchTVmaze(query), 3000, 'TVmaze') },
+        { name: 'Wikidata', run: withTimeout(searchWikidata(query, normalizedType || ''), 4000, 'Wikidata') },
       ];
     } else {
-      apiPromises = [
-        withTimeout(searchAniList(query, 'anime'), 3000, 'AniList'),
-        withTimeout(searchTMDB(query, 'tv', tmdbKey || ''), 3000, 'TMDB'),
+      apiCalls = [
+        { name: 'AniList', run: withTimeout(searchAniList(query, 'anime'), 3000, 'AniList') },
+        { name: 'TMDB',    run: withTimeout(searchTMDB(query, 'tv', tmdbKey || ''), 3000, 'TMDB') },
       ];
     }
 
     // Wait for all APIs to complete (or timeout)
-    const apiResults = await Promise.allSettled(apiPromises);
-    
+    const apiResults = await Promise.allSettled(apiCalls.map((c) => c.run));
+
     // Merge all successful results
     let allResults: MediaResult[] = [];
     const sources: string[] = [];
@@ -1177,8 +1246,7 @@ Deno.serve(async (req) => {
     apiResults.forEach((result, index) => {
       if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
         allResults = [...allResults, ...result.value];
-        const apiNames = ['AniList', 'Jikan', 'MangaDex', 'MangaUpdates', 'TVmaze', 'TMDB'];
-        sources.push(apiNames[index] || 'API');
+        sources.push(apiCalls[index].name);
       }
     });
 
@@ -1215,9 +1283,10 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
+    // Log the detail server-side; never return it to the caller.
     console.error('Error:', error);
     return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error.message }),
+      JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

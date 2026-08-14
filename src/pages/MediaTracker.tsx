@@ -608,7 +608,8 @@ const MediaTracker = () => {
         query = query.order('title', { ascending: true });
       }
       query = query.range(from, to);
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (user) {
         query = query.eq('user_id', user.id);
       }
@@ -769,7 +770,8 @@ const MediaTracker = () => {
   const { data: groupCountsData } = useQuery({
     queryKey: ['groupCounts', customGroups],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return { all: 0 };
 
       // Page through all rows (type+status only — cheap) to bypass the 1000 cap.
@@ -1162,7 +1164,12 @@ const MediaTracker = () => {
     });
 
     try {
-      const { error } = await supabase.from('media_tracker').update({ [field]: newValue, last_activity_at: new Date().toISOString() }).eq('id', item.id);
+      // Explicit payload — a computed key widens to Record<string, …>, which the
+      // generated Update type rejects.
+      const patch = field === 'current_episode'
+        ? { current_episode: newValue, last_activity_at: new Date().toISOString() }
+        : { current_chapter: newValue, last_activity_at: new Date().toISOString() };
+      const { error } = await supabase.from('media_tracker').update(patch).eq('id', item.id);
       if (error) throw error;
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
     } catch (e: unknown) {
@@ -1212,7 +1219,8 @@ const MediaTracker = () => {
 
   const handleExportJson = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       // Pull every tracker column + tag names so a backup restores fully.
       const { data, error } = await supabase
@@ -1252,7 +1260,8 @@ const MediaTracker = () => {
 
   const handleExportTxt = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       
       let query = supabase.from('media_tracker').select('*').eq('user_id', user.id).order('title', { ascending: true });
@@ -1306,7 +1315,8 @@ const MediaTracker = () => {
       return;
     }
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       
       const isReadable = readableTypes.includes(quickAddType);
@@ -1357,7 +1367,8 @@ const MediaTracker = () => {
   const handleCreateMedia = async () => {
     try {
       // Get the current authenticated user
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       
       if (!user) {
         throw new Error('User not authenticated');
@@ -1606,7 +1617,8 @@ const MediaTracker = () => {
     // query, so honour it by sweeping just what's visible.
     if (selectedTags.length > 0) return toSweep(finalItems);
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) return toSweep(finalItems);
 
     // Types implied by the selected category.
@@ -1775,7 +1787,8 @@ const MediaTracker = () => {
         setIsImporting(false);
         return;
       }
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       toast({ title: 'Import started', description: 'Your media is being imported in the background.' });
 

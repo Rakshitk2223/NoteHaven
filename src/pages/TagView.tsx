@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, CheckSquare, Play, MessageSquare, Tag as TagIcon } from 'lucide-react';
+import { ArrowLeft, FileText, CheckSquare, Play, MessageSquare, Code2, Tag as TagIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageShell } from '@/components/PageShell';
@@ -38,7 +38,8 @@ export default function TagView() {
       const decodedTagName = decodeURIComponent(tagName || '');
       
       // Get the tag info
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
 
       const { data: tagData } = await supabase
@@ -67,7 +68,11 @@ export default function TagView() {
     }
   };
 
-  const totalItems = items.notes.length + items.tasks.length + items.media.length + items.prompts.length;
+  // searchByTag() also returns snippets — they were fetched but never counted or
+  // rendered, so a tag used only on snippets showed "No items found" (audit BUG-04).
+  const totalItems =
+    items.notes.length + items.tasks.length + items.media.length +
+    items.prompts.length + items.snippets.length;
 
   return (
     <PageShell
@@ -225,12 +230,37 @@ export default function TagView() {
                     {items.prompts.map(prompt => (
                       <StaggerItem key={prompt.id} hover={false}>
                         <button
-                          onClick={() => navigate('/library')}
+                          onClick={() => navigate(`/library?prompt=${prompt.id}`)}
                           className="w-full text-left p-3 rounded-lg border hover:bg-accent transition-colors"
                         >
                           <p className="font-medium">{prompt.title}</p>
                           <p className="text-xs text-muted-foreground">
                             {prompt.is_favorited && '★ Favorite'}
+                          </p>
+                        </button>
+                      </StaggerItem>
+                    ))}
+                  </Stagger>
+                </section>
+              )}
+
+              {/* Code Snippets Section */}
+              {items.snippets.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Code2 className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-semibold">Code Snippets ({items.snippets.length})</h2>
+                  </div>
+                  <Stagger className="grid gap-2">
+                    {items.snippets.map(snippet => (
+                      <StaggerItem key={snippet.id} hover={false}>
+                        <button
+                          onClick={() => navigate(`/library?tab=snippets&snippet=${snippet.id}`)}
+                          className="w-full text-left p-3 rounded-lg border hover:bg-accent transition-colors"
+                        >
+                          <p className="font-medium truncate">{snippet.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {snippet.filename || snippet.language}
                           </p>
                         </button>
                       </StaggerItem>

@@ -1,20 +1,23 @@
 import { supabase } from '@/integrations/supabase/client';
 import { dateToYMD, parseYMD, formatDateDDMMYYYY as formatDateDDMMYYYYUtil } from '@/lib/date-utils';
-import type { 
-  Subscription, 
-  SubscriptionCategory, 
+import { formatCurrency } from '@/lib/ledger';
+import type {
+  Subscription,
+  SubscriptionCategory,
   SubscriptionSummary,
-  UpcomingRenewal
+  UpcomingRenewal,
+  BillingCycle
 } from '@/integrations/supabase/types';
 
-export type { Subscription, SubscriptionCategory, SubscriptionSummary, UpcomingRenewal };
+export type { Subscription, SubscriptionCategory, SubscriptionSummary, UpcomingRenewal, BillingCycle };
 
 // ============================================
 // CATEGORY OPERATIONS
 // ============================================
 
 export async function fetchSubscriptionCategories(): Promise<SubscriptionCategory[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -32,7 +35,8 @@ export async function fetchSubscriptionCategories(): Promise<SubscriptionCategor
 // ============================================
 
 export async function fetchSubscriptions(): Promise<Subscription[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -48,7 +52,8 @@ export async function fetchSubscriptions(): Promise<Subscription[]> {
 export async function createSubscription(
   subscription: Omit<Subscription, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'ledger_entry_id'>
 ): Promise<Subscription> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   // Validation: Either start_date or end_date must be provided
@@ -62,7 +67,7 @@ export async function createSubscription(
     if (refDate) {
       subscription.next_renewal_date = calculateNextRenewalDate(
         refDate,
-        subscription.billing_cycle
+        subscription.billing_cycle as BillingCycle
       );
     } else {
       // Default to 1 month/year from today if no dates provided
@@ -86,14 +91,21 @@ export async function createSubscription(
     .single();
 
   if (error) throw error;
-  
-  // Note: Database trigger automatically creates/updates ledger entries
+
+  // No ledger row is written here. Each renewal's expense is derived at read
+  // time by deriveSubscriptionCharges() in lib/ledger.ts, so editing or
+  // cancelling a subscription self-corrects retroactively.
   return data as unknown as Subscription;
 }
 
+/** Writable columns only — `category` is joined in, not stored. */
+export type SubscriptionUpdate = Partial<
+  Omit<Subscription, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'category'>
+>;
+
 export async function updateSubscription(
   id: number,
-  updates: Partial<Omit<Subscription, 'id' | 'user_id' | 'created_at' | 'updated_at'>>
+  updates: SubscriptionUpdate
 ): Promise<void> {
   const { error } = await supabase
     .from('subscriptions')
@@ -101,12 +113,16 @@ export async function updateSubscription(
     .eq('id', id);
 
   if (error) throw error;
-  
-  // Note: The database trigger will handle updating ledger entries if amount changes
+
+  // Subscriptions no longer write ledger rows. Migration 15 dropped the
+  // auto-ledger triggers; the expense for each renewal is derived at read time
+  // by deriveSubscriptionCharges() in lib/ledger.ts.
 }
 
 export async function deleteSubscription(id: number): Promise<void> {
-  // Note: Database trigger automatically deletes linked ledger entries
+  // The BEFORE DELETE trigger that used to clean up a linked ledger row was
+  // dropped in migration 15 — it caused Postgres error 27000 and blocked
+  // deletion entirely. Derived charges need no cleanup.
   const { error } = await supabase
     .from('subscriptions')
     .delete()
@@ -120,7 +136,8 @@ export async function deleteSubscription(id: number): Promise<void> {
 // ============================================
 
 export async function getUpcomingRenewals(days: number = 4): Promise<UpcomingRenewal[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -187,16 +204,10 @@ export function calculateSubscriptionSummary(subscriptions: Subscription[]): Sub
   };
 }
 
-export function formatBillingCycle(cycle: 'monthly' | 'yearly'): string {
-  return cycle === 'monthly' ? 'Monthly' : 'Yearly';
-}
-
-export function formatAmount(amount: number, cycle: 'monthly' | 'yearly'): string {
-  const formatted = new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR'
-  }).format(amount);
-  
+export function formatAmount(amount: number, cycle: BillingCycle): string {
+  // Uses the shared currency formatter so this respects the user's Region
+  // preference, instead of hardcoding en-IN/INR as it did before.
+  const formatted = formatCurrency(amount);
   return cycle === 'monthly' ? `${formatted}/month` : `${formatted}/year`;
 }
 

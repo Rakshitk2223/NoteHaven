@@ -154,6 +154,14 @@ const Login = () => {
                     placeholder="Enter your password"
                   />
                 </div>
+                <div className="text-right">
+                  <Link
+                    to="/reset-password"
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors underline-offset-4 hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
               </div>
 
               <motion.div

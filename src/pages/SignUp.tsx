@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/components/ui/use-toast";
 
 const SignUp = () => {
   const [email, setEmail] = useState("");
@@ -12,17 +13,32 @@ const SignUp = () => {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password || !confirmPassword) return;
-    
+
     if (password !== confirmPassword) {
-      alert("Passwords do not match");
+      toast({
+        title: "Passwords don't match",
+        description: 'Re-enter the same password in both fields.',
+        variant: 'destructive',
+      });
       return;
     }
-    
+
+    // Supabase enforces 6+; ask for 8 to match Settings → Security.
+    if (password.length < 8) {
+      toast({
+        title: 'Password too short',
+        description: 'Use at least 8 characters.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       await signUp(email, password);
@@ -111,7 +127,7 @@ const SignUp = () => {
             variant="gradient"
             className="w-full"
             size="lg"
-            disabled={loading || !email || !password}
+            disabled={loading || !email || !password || !confirmPassword}
           >
             {loading ? "Creating account..." : "Sign Up"}
           </Button>

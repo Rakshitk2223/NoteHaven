@@ -139,7 +139,8 @@ export async function createSnippet(
   },
   tags: Tag[] = []
 ): Promise<CodeSnippet> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data: newSnippet, error } = await supabase
@@ -252,7 +253,8 @@ export async function fetchFolders(): Promise<SnippetFolder[]> {
 }
 
 export async function createFolder(name: string, color?: string): Promise<SnippetFolder> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const trimmed = name.trim();

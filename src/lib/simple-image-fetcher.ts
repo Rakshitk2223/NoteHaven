@@ -4,9 +4,8 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
-
-// Supabase Edge Function URL (for fetching new images only)
-const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
+import { mediaSearchGet } from '@/lib/edge-function';
+import { readImageCache, mergeImageCache } from '@/lib/image-cache';
 
 export interface ImageResult {
   id: number;
@@ -21,54 +20,14 @@ export interface BatchImageResponse {
   results: ImageResult[];
 }
 
-// Cache key for localStorage (version-based, not date-based)
-const IMAGE_CACHE_VERSION = 'v1';
-const getImageCacheKey = () => `media_images_${IMAGE_CACHE_VERSION}`;
-const getSourceCacheKey = () => `media_image_sources_${IMAGE_CACHE_VERSION}`;
+// PostgREST puts .in() lists in the URL, so a large library would blow past the
+// URL length limit and 414. Chunk every batched lookup (audit BUG-12).
+const DB_CHUNK = 100;
 
-// Check localStorage cache for images
-function getCachedImages(): Map<number, string> | null {
-  try {
-    const cached = localStorage.getItem(getImageCacheKey());
-    if (cached) {
-      const data = JSON.parse(cached);
-      devLog('📦 Using localStorage cache:', Object.keys(data).length, 'images');
-      return new Map(Object.entries(data).map(([k, v]) => [parseInt(k), v as string]));
-    }
-  } catch (e) {
-    console.error('Cache read error:', e);
-  }
-  return null;
-}
-
-// Check localStorage cache for API sources
-function getCachedApiSources(): Map<number, string> | null {
-  try {
-    const cached = localStorage.getItem(getSourceCacheKey());
-    if (cached) {
-      const data = JSON.parse(cached);
-      return new Map(Object.entries(data).map(([k, v]) => [parseInt(k), v as string]));
-    }
-  } catch (e) {
-    console.error('Source cache read error:', e);
-  }
-  return null;
-}
-
-// Save to localStorage cache
-function cacheImages(images: Map<number, string>, apiSources?: Map<number, string>) {
-  try {
-    const obj = Object.fromEntries(images);
-    localStorage.setItem(getImageCacheKey(), JSON.stringify(obj));
-    devLog('💾 Saved to localStorage cache:', images.size, 'images');
-    
-    if (apiSources) {
-      const sourceObj = Object.fromEntries(apiSources);
-      localStorage.setItem(getSourceCacheKey(), JSON.stringify(sourceObj));
-    }
-  } catch (e) {
-    console.error('Cache write error:', e);
-  }
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 // Step 1: Check media_tracker.cover_image directly (FASTEST - no cross-table lookup)
@@ -80,20 +39,22 @@ async function fetchFromMediaTracker(
   if (items.length === 0) return { images, found };
 
   try {
-    const { data, error } = await supabase
-      .from('media_tracker')
-      .select('id, cover_image')
-      .in('id', items.map(i => i.id))
-      .not('cover_image', 'is', null);
+    for (const batch of chunk(items.map(i => i.id), DB_CHUNK)) {
+      const { data, error } = await supabase
+        .from('media_tracker')
+        .select('id, cover_image')
+        .in('id', batch)
+        .not('cover_image', 'is', null);
 
-    if (error) return { images, found };
+      if (error) continue;
 
-    data?.forEach((row) => {
-      if (row.cover_image) {
-        images.set(row.id, row.cover_image);
-        found.add(row.id);
-      }
-    });
+      data?.forEach((row) => {
+        if (row.cover_image) {
+          images.set(row.id, row.cover_image);
+          found.add(row.id);
+        }
+      });
+    }
     devLog(`✅ media_tracker cover_image: ${images.size}/${items.length} found`);
   } catch (error) {
     console.error('media_tracker fetch error:', error);
@@ -110,18 +71,22 @@ async function fetchFromMediaMetadata(
   if (items.length === 0) return { images, sources };
 
   try {
-    const { data, error } = await supabase
-      .from('media_metadata')
-      .select('title, type, cover_image')
-      .in('title', items.map(i => i.title));
-
-    if (error) return { images, sources };
-
     const dbMap = new Map<string, string>();
-    data?.forEach((item) => {
-      const key = `${item.title.toLowerCase()}_${item.type!.toLowerCase()}`;
-      dbMap.set(key, item.cover_image);
-    });
+
+    for (const batch of chunk(items.map(i => i.title), DB_CHUNK)) {
+      const { data, error } = await supabase
+        .from('media_metadata')
+        .select('title, type, cover_image')
+        .in('title', batch);
+
+      if (error) continue;
+
+      data?.forEach((item) => {
+        if (!item.cover_image) return;
+        const key = `${item.title.toLowerCase()}_${item.type!.toLowerCase()}`;
+        dbMap.set(key, item.cover_image);
+      });
+    }
 
     items.forEach(item => {
       const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
@@ -156,25 +121,15 @@ async function fetchMissingItemsFromAPI(
     const batch = missingItems.slice(i, i + batchSize);
     
     const promises = batch.map(async (item) => {
-      try {
-        const url = new URL(EDGE_FUNCTION_URL);
-        url.searchParams.set('q', item.title);
-        url.searchParams.set('type', item.type);
-        url.searchParams.set('limit', '1');
-        
-        const response = await fetch(url.toString());
-        if (!response.ok) return null;
-        
-        const data = await response.json();
-        if (data.success && data.results?.[0]?.cover_image) {
-          return {
-            id: item.id,
-            imageUrl: data.results[0].cover_image,
-            apiSource: data.source || 'api'
-          };
-        }
-      } catch (error) {
-        console.error(`Error fetching ${item.title}:`, error);
+      const data = await mediaSearchGet({ q: item.title, type: item.type, limit: 1 }) as
+        { success?: boolean; source?: string; results?: Array<{ cover_image?: string }> } | null;
+
+      if (data?.success && data.results?.[0]?.cover_image) {
+        return {
+          id: item.id,
+          imageUrl: data.results[0].cover_image,
+          apiSource: data.source || 'api',
+        };
       }
       return null;
     });
@@ -213,19 +168,18 @@ export async function fetchImagesFromSupabase(
   const results: ImageResult[] = [];
   let fetchedFromAPI = 0;
 
-  // Step 1: Check localStorage cache
-  const cachedImages = getCachedImages();
-  const cachedSources = getCachedApiSources();
+  // Step 1: Check localStorage cache (TTL-bounded — see lib/image-cache.ts)
+  const cached = readImageCache();
   const cacheHits = new Map<number, string>();
   const cacheSources = new Map<number, string>();
   const needsDbCheck: Array<{ id: number; title: string; type: string }> = [];
 
-  if (cachedImages) {
+  if (cached) {
     items.forEach(item => {
-      const cached = cachedImages.get(item.id);
-      if (cached) {
-        cacheHits.set(item.id, cached);
-        cacheSources.set(item.id, cachedSources?.get(item.id) || 'cache');
+      const hit = cached.images.get(item.id);
+      if (hit) {
+        cacheHits.set(item.id, hit);
+        cacheSources.set(item.id, cached.sources.get(item.id) || 'cache');
       } else {
         needsDbCheck.push(item);
       }
@@ -265,7 +219,8 @@ export async function fetchImagesFromSupabase(
     });
   });
 
-  cacheImages(allImages, allSources);
+  // Merge (never replace) so a filtered view can't evict the rest of the cache.
+  mergeImageCache(allImages, allSources);
 
   const totalTime = (performance.now() - startTime).toFixed(0);
   const found = results.filter(r => r.imageUrl).length;

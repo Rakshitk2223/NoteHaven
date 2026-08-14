@@ -41,27 +41,6 @@ export function groupEventsByDate<T extends { date: string }>(
   return map;
 }
 
-export function getEventTypeColor(type: CalendarEventType): string {
-  return EVENT_COLORS[type] || '#6B7280';
-}
 
-export function getEventTypeLabel(type: CalendarEventType): string {
-  return EVENT_LABELS[type] || type;
-}
 
-export function formatEventDate(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-}
 
-export function isSameDate(date1: Date, date2: Date): boolean {
-  return (
-    date1.getFullYear() === date2.getFullYear() &&
-    date1.getMonth() === date2.getMonth() &&
-    date1.getDate() === date2.getDate()
-  );
-}

@@ -40,6 +40,11 @@ interface Note {
   tags?: Tag[];
 }
 
+// Columns that can actually be written back. `Note` carries `tags`, which is
+// joined in rather than stored, so Partial<Note> is not a valid update payload
+// (audit BUG-02 — this was masked while `Tag` resolved to `any`).
+type NoteUpdate = Partial<Pick<Note, 'title' | 'content' | 'is_pinned' | 'background_color'>>;
+
 // HTML-only persistence: any legacy markdown handling removed
 
 const Notes = () => {
@@ -338,7 +343,8 @@ const Notes = () => {
 
       // 2. If missing, create it
       if (!inboxNote) {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user;
         if (user) {
           const { data: created, error: createErr } = await supabase
             .from('notes')
@@ -380,7 +386,8 @@ const Notes = () => {
   // Realtime subscription for multi-tab sync
   useEffect(() => {
     const setupRealtime = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return;
 
       // Subscribe to changes on notes table for current user
@@ -464,7 +471,8 @@ const Notes = () => {
   const createNote = async () => {
     try {
       // Get the current authenticated user
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       
       if (!user) {
         throw new Error('User not authenticated');
@@ -501,7 +509,7 @@ const Notes = () => {
     }
   };
 
-  const updateNote = async (noteId: number, updates: Partial<Note>) => {
+  const updateNote = async (noteId: number, updates: NoteUpdate) => {
     try {
       const { error } = await supabase
         .from('notes')
@@ -568,9 +576,12 @@ const Notes = () => {
 
       // Single round-trip: write the field and read back the server-generated updated_at.
       // We trust the DB's updated_at (not a client clock) so realtime echo-matching is exact.
+      // Build an explicitly-typed payload — a computed key widens to
+      // Record<string, string>, which the generated Update type rejects.
+      const patch: NoteUpdate = field === 'title' ? { title: value } : { content: value };
       const { data: saved, error } = await supabase
         .from('notes')
-        .update({ [field]: value })
+        .update(patch)
         .eq('id', noteId)
         .select('updated_at')
         .single();
@@ -749,7 +760,8 @@ const Notes = () => {
     if (!selectedNote) return;
     setGeneratingShare(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       // Check existing
       const { data: existing, error: existingErr } = await supabase

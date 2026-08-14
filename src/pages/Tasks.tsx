@@ -51,44 +51,30 @@ const Tasks = () => {
   const [newTaskTags, setNewTaskTags] = useState<Tag[]>([]);
   const [editTaskTags, setEditTaskTags] = useState<Tag[]>([]);
 
-  // Ref to track mounted state and prevent setting state after unmount
-  const isMountedRef = useRef(true);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
+  // Load tags when editing a task.
+  //
+  // This used to hold an AbortController whose signal was never passed to
+  // anything — fetchTaskTags() takes no signal, so nothing was ever aborted and
+  // the AbortError branch was unreachable (audit DEAD-04). A per-effect
+  // `cancelled` flag does the actual job: ignore a late response once the
+  // selected task has changed or the component unmounted.
   useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-      abortControllerRef.current?.abort();
-    };
-  }, []);
+    if (!editTask?.id) {
+      setEditTaskTags([]);
+      return;
+    }
 
-  // Load tags when editing a task
-  useEffect(() => {
-    const loadEditTaskTags = async () => {
-      if (!editTask?.id) {
-        setEditTaskTags([]);
-        return;
-      }
-
-      // Cancel any in-flight request
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = new AbortController();
-
+    let cancelled = false;
+    (async () => {
       try {
         const tags = await fetchTaskTags(editTask.id);
-        // Only update state if component is still mounted and task hasn't changed
-        if (isMountedRef.current) {
-          setEditTaskTags(tags);
-        }
+        if (!cancelled) setEditTaskTags(tags);
       } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          // Request was cancelled, ignore
-          return;
-        }
-        console.error('Failed to load task tags:', err);
+        if (!cancelled) console.error('Failed to load task tags:', err);
       }
-    };
-    loadEditTaskTags();
+    })();
+
+    return () => { cancelled = true; };
   }, [editTask]);
 
   // Fetch tasks on component mount
@@ -178,7 +164,8 @@ const Tasks = () => {
 
     try {
       // Get the current authenticated user
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       
       if (!user) {
         throw new Error('User not authenticated');

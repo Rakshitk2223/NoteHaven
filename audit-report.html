@@ -1,0 +1,1073 @@
+<title>NoteHaven Teardown</title>
+<style>
+  /* ============================================================
+     Palette rule for this document: neutrals carry ALL structure.
+     Colour is reserved exclusively for severity. Nothing decorative
+     competes with risk for the reader's eye.
+     Neutrals are biased green-grey (not pure) — chosen, not inherited.
+     ============================================================ */
+  :root {
+    --paper:      #FBFAF7;
+    --raised:     #FFFFFF;
+    --sunk:       #F2F1EC;
+    --ink:        #161A18;
+    --ink-soft:   #3D443F;
+    --muted:      #6A716B;
+    --faint:      #949A94;
+    --rule:       #DEDCD3;
+    --rule-soft:  #EAE8E1;
+
+    --crit:       #A81E17;
+    --crit-bg:    #FBEDEC;
+    --high:       #9A4A06;
+    --high-bg:    #FCF1E6;
+    --med:        #6F5714;
+    --med-bg:     #F9F3E0;
+    --low:        #3C5F57;
+    --low-bg:     #ECF2F0;
+    --good:       #2C6046;
+    --good-bg:    #EBF3EE;
+
+    --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-body: Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:     #121513;
+      --raised:    #191D1B;
+      --sunk:      #1E2320;
+      --ink:       #E9E7E0;
+      --ink-soft:  #C3C7C1;
+      --muted:     #949B94;
+      --faint:     #6E756E;
+      --rule:      #2A302C;
+      --rule-soft: #222825;
+
+      --crit:      #F1786C;
+      --crit-bg:   #2A1917;
+      --high:      #E9A15C;
+      --high-bg:   #271D13;
+      --med:       #D6BA61;
+      --med-bg:    #232016;
+      --low:       #8FB3A8;
+      --low-bg:    #1A211F;
+      --good:      #79BE96;
+      --good-bg:   #16211B;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:     #121513;
+    --raised:    #191D1B;
+    --sunk:      #1E2320;
+    --ink:       #E9E7E0;
+    --ink-soft:  #C3C7C1;
+    --muted:     #949B94;
+    --faint:     #6E756E;
+    --rule:      #2A302C;
+    --rule-soft: #222825;
+
+    --crit:      #F1786C;
+    --crit-bg:   #2A1917;
+    --high:      #E9A15C;
+    --high-bg:   #271D13;
+    --med:       #D6BA61;
+    --med-bg:    #232016;
+    --low:       #8FB3A8;
+    --low-bg:    #1A211F;
+    --good:      #79BE96;
+    --good-bg:   #16211B;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 62rem; margin: 0 auto; }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    padding: 4rem 0 2rem;
+    border-bottom: 2px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(2.4rem, 6vw, 3.9rem);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.02;
+    text-wrap: balance;
+    margin: 0;
+  }
+  .standfirst {
+    font-size: 1.14rem;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  /* ---------- scoreboard ---------- */
+  .scoreboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 2.5rem 0 3rem;
+  }
+  .score { background: var(--raised); padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; }
+  .score b {
+    font-family: var(--font-display);
+    font-size: 2.1rem;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+  }
+  .score span {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .score.c b { color: var(--crit); }
+  .score.h b { color: var(--high); }
+  .score.m b { color: var(--med); }
+  .score.g b { color: var(--good); }
+
+  /* ---------- sections ---------- */
+  section { margin: 3.5rem 0 0; }
+  h2 {
+    font-family: var(--font-display);
+    font-size: 1.55rem;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.4rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--ink);
+    text-wrap: balance;
+  }
+  .sec-note { color: var(--muted); font-size: 0.97rem; max-width: var(--measure); margin: 0 0 1.9rem; }
+  h3 {
+    font-family: var(--font-display);
+    font-size: 1.06rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 2.2rem 0 0.7rem;
+  }
+  p { max-width: var(--measure); }
+  a { color: inherit; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+  /* ---------- finding ---------- */
+  .finding {
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--rule);
+    padding: 1.15rem 1.3rem 1.3rem;
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+  .finding.crit { border-left-color: var(--crit); }
+  .finding.high { border-left-color: var(--high); }
+  .finding.med  { border-left-color: var(--med); }
+  .finding.low  { border-left-color: var(--low); }
+
+  .f-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem 0.85rem; }
+  .f-id {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 0.16rem 0.44rem;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .crit .f-id { color: var(--crit); background: var(--crit-bg); }
+  .high .f-id { color: var(--high); background: var(--high-bg); }
+  .med  .f-id { color: var(--med);  background: var(--med-bg); }
+  .low  .f-id { color: var(--low);  background: var(--low-bg); }
+
+  .f-title {
+    font-family: var(--font-display);
+    font-size: 1.04rem;
+    font-weight: 700;
+    letter-spacing: -0.008em;
+    flex: 1 1 18rem;
+    line-height: 1.35;
+  }
+  .f-tag {
+    font-family: var(--font-mono);
+    font-size: 0.63rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    white-space: nowrap;
+  }
+  .finding p { margin: 0; font-size: 0.97rem; }
+  .finding p + p { margin-top: 0.15rem; }
+
+  .verdict {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    padding: 0.5rem 0.7rem;
+    border-radius: 2px;
+    line-height: 1.5;
+  }
+  .verdict.confirm { background: var(--crit-bg); color: var(--crit); }
+  .verdict.check   { background: var(--med-bg);  color: var(--med); }
+  .verdict.fix     { background: var(--good-bg); color: var(--good); }
+
+  /* ---------- code ---------- */
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.855em;
+    background: var(--sunk);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.62;
+    background: var(--sunk);
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    padding: 0.85rem 1rem;
+    margin: 0;
+    overflow-x: auto;
+    color: var(--ink-soft);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .del { color: var(--crit); }
+  .ins { color: var(--good); }
+  .cmt { color: var(--faint); }
+
+  /* ---------- tables ---------- */
+  .tw { overflow-x: auto; border: 1px solid var(--rule); background: var(--raised); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; min-width: 34rem; }
+  th, td { text-align: left; padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--sunk);
+    white-space: nowrap;
+  }
+  tr:last-child td { border-bottom: none; }
+  td code { background: none; padding: 0; }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+  /* ---------- misc ---------- */
+  ul, ol { max-width: var(--measure); padding-left: 1.15rem; }
+  li { margin-bottom: 0.42rem; }
+  li::marker { color: var(--faint); }
+
+  .callout {
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--crit);
+    background: var(--raised);
+    padding: 1.2rem 1.35rem;
+    margin: 1.75rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .callout h3 { margin: 0; color: var(--crit); }
+  .callout p { margin: 0; font-size: 0.98rem; }
+
+  .good-item {
+    border-left: 3px solid var(--good);
+    padding: 0.1rem 0 0.1rem 0.95rem;
+    margin-bottom: 1.05rem;
+    max-width: var(--measure);
+  }
+  .good-item b { font-family: var(--font-display); font-size: 0.98rem; letter-spacing: -0.005em; }
+  .good-item p { margin: 0.15rem 0 0; font-size: 0.94rem; color: var(--ink-soft); }
+
+  .steps { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+  .steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 2.4rem 1fr;
+    gap: 0 0.9rem;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+    max-width: none;
+    margin: 0;
+  }
+  .steps li::before {
+    content: counter(step);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--faint);
+    padding-top: 0.15rem;
+  }
+  .steps b { font-family: var(--font-display); font-size: 1rem; }
+  .steps p { margin: 0.2rem 0 0; font-size: 0.93rem; color: var(--ink-soft); max-width: var(--measure); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--faint);
+    line-height: 1.8;
+  }
+
+  @media (max-width: 40rem) {
+    body { font-size: 16px; padding: 0 1rem 4rem; }
+    .masthead { padding-top: 2.5rem; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">
+    <span>Full-codebase audit</span>
+    <span>NoteHaven · main @ 276b72c</span>
+    <span>14 Aug 2026</span>
+  </div>
+  <h1>NoteHaven Teardown</h1>
+  <p class="standfirst">
+    29,428 lines of TypeScript, 17 SQL migrations, one edge function and one live Supabase
+    project, read end to end. The app is well-built in most places. It also has a note-sharing
+    system that, on the live database, appears to hand shared notes to anyone on the internet —
+    no login, no share link.
+  </p>
+  <p class="standfirst" style="color:var(--muted);font-size:1rem;">
+    <strong style="color:var(--good);">Remediation applied.</strong> Every finding below has been
+    fixed in code, except the four that only you can do (marked <span class="f-id"
+    style="color:var(--high);background:var(--high-bg);">YOURS</span>). Typecheck 0 errors,
+    lint 0 errors, build green.
+  </p>
+</header>
+
+<div class="scoreboard">
+  <div class="score g"><b>0</b><span>Type errors</span></div>
+  <div class="score g"><b>0</b><span>Lint errors</span></div>
+  <div class="score g"><b>25</b><span>Fixed in code</span></div>
+  <div class="score h"><b>4</b><span>Need you</span></div>
+  <div class="score"><b>~1,240</b><span>Lines deleted</span></div>
+  <div class="score g"><b>9</b><span>Left alone</span></div>
+</div>
+
+<section style="margin-top:2rem;">
+<h2>Do these four things</h2>
+<p class="sec-note">The code fixes are inert until the database and the edge function catch up. Steps 1 and 2 are the ones that close the exposure.</p>
+
+<ol class="steps">
+  <li><b>Run migration 18, then 19, in the Supabase SQL editor.</b><p>Order matters — <code>19</code>'s <code>get_calendar_events</code> selects a column <code>18</code> adds. <code>19</code> ends with two verification queries; both should return zero rows / show <code>search_path</code> pinned. This is what actually closes SEC-01 through SEC-05.</p></li>
+  <li><b>Deploy the app and the edge function together.</b><p><code>./deploy-edge-function.sh</code> (now without <code>--no-verify-jwt</code>). The new <code>SharedNote.tsx</code> and migration 19 are a matched pair: old client + new database means share links break, new client + old database means they stay exposed.</p></li>
+  <li><b>Rotate the TMDB key.</b><p><code>381f2d0e99cd3d0cc1e5b9fa1099a9d5</code> is readable in git history at <code>aea34a8</code> and code changes cannot un-leak it. Set the new one via <code>export TMDB_API_KEY=… &amp;&amp; ./deploy-edge-function.sh</code>.</p></li>
+  <li><b>Set <code>ALLOWED_ORIGINS</code>.</b><p><code>export ALLOWED_ORIGINS="https://your-app.example,http://localhost:8080"</code> before deploying, or CORS stays open to <code>*</code>.</p></li>
+</ol>
+</section>
+
+<section>
+<h2>What changed in the code</h2>
+<p class="sec-note">57 files. The full diff is staged in your working tree — <code>git diff --cached</code> to review, <code>git reset</code> to unstage.</p>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Finding</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td><code>SEC-01/02</code></td><td>Migration 19 drops the broken share policies and replaces them with <code>get_shared_note()</code> / <code>update_shared_note()</code> definer RPCs keyed on the share id. <code>shared_notes</code> is owner-only again. <code>SharedNote.tsx</code> rewritten onto the RPCs.</td></tr>
+      <tr><td><code>SEC-03/04/08</code></td><td>Both definer functions now raise on <code>p_user_id &lt;&gt; auth.uid()</code>, filter on <code>auth.uid()</code> internally, and pin <code>SET search_path = public</code>. Five trigger functions pinned too.</td></tr>
+      <tr><td><code>SEC-05</code></td><td><code>media_metadata</code> write policies scoped <code>TO authenticated</code>, and UPDATE finally has a <code>WITH CHECK</code>.</td></tr>
+      <tr><td><code>SEC-06</code></td><td>JWT verification on; CORS allow-list; <code>limit</code> clamped 1–50; batch capped at 50 items and 200-char titles; 500s no longer leak <code>error.message</code>. New <code>lib/edge-function.ts</code> attaches the session token.</td></tr>
+      <tr><td><code>ACC-01</code></td><td>New <code>/reset-password</code> route (request link + set new password), "Forgot password?" on the login form, and password change now re-authenticates against the current password first.</td></tr>
+      <tr><td><code>DATA-01/02/03</code></td><td>Export covers 20 tables + 5 tag junctions and reports partial failures; import surfaces per-table errors instead of claiming success; CSV fields are quoted and formula-injection is neutralised.</td></tr>
+      <tr><td><code>BUG-01/02</code></td><td><code>build</code> runs <code>tsc --noEmit</code> first. The 9 missing type exports are defined, which surfaced 6 further real type errors — all fixed.</td></tr>
+      <tr><td><code>BUG-03…17</code></td><td>Fill-space toggle wired; snippets rendered on tag pages; category seed flag moved to <code>user_preferences</code>; ledger delete confirms and the year list spans your real history; "Currently Watching" includes <code>Reading</code>; sign-up gate and validation; vault keep-both collision; cover cache given a 24h TTL, merge-on-write and chunked <code>.in()</code>; edge-function source names; one date formatter; one PWA manifest with a dark splash; 69 <code>getUser()</code> → <code>getSession()</code>.</td></tr>
+      <tr><td><code>DEAD-01…04</code></td><td>Removed <code>BucketsSection.tsx</code>, <code>lib/buckets.ts</code>, <code>ui/table.tsx</code>, the calendar barrel, ~20 unreachable exports, and the no-op AbortController.</td></tr>
+      <tr><td><code>DRIFT-01/02/03</code></td><td>Migration 18 adds the five drifted columns and <code>normalize_tag_name</code>; the duplicate <code>11</code> is now <code>11a</code>/<code>11b</code>; CLAUDE.md rewritten.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p style="margin-top:1.5rem;">
+  <strong>Two things I deliberately did not do.</strong> The realtime collaborative-edit
+  subscription in <code>SharedNote.tsx</code> is gone — it depended on anonymous
+  <code>SELECT</code> on <code>notes</code>, so it could only ever have worked because of SEC-01.
+  Rebuilding it needs a broadcast channel rather than <code>postgres_changes</code>. And the 21
+  remaining <code>exhaustive-deps</code> lint warnings are untouched: they sit on deliberate
+  mount-only effects, and "fixing" them by adding deps is how you get refetch loops.
+</p>
+</section>
+
+<section>
+<h2>The one that matters</h2>
+<p class="sec-note">Everything else in this report can wait a week. This cannot.</p>
+
+<div class="callout">
+  <h3>Any note you have ever shared is likely public right now</h3>
+  <p>
+    Migration <code>02_add_all_features.sql</code> gates share-based note reads on a session
+    variable: <code>sn.id = current_setting('app.share_id')::uuid</code>. The live database does
+    not have that clause. The schema dump committed in <code>schemadump.md</code> shows the policy
+    as <code>EXISTS (SELECT 1 FROM shared_notes sn WHERE sn.note_id = notes.id)</code> — the
+    share-id check is simply absent.
+  </p>
+  <p>
+    With that clause gone, the policy reads: <em>if a row exists in <code>shared_notes</code> for
+    this note, anyone may select it.</em> Not "anyone with the link" — anyone. And
+    <code>shared_notes</code> itself carries <code>shared_notes_public_read USING (true)</code>,
+    so the share IDs, note IDs and owner UUIDs are enumerable by an anonymous caller holding only
+    the public anon key, which ships in your JavaScript bundle.
+  </p>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-01</span><span class="f-title">Share-scoped note policy lost its share-id predicate</span><span class="f-tag">RLS · notes</span></div>
+  <p>The full unauthenticated chain, using nothing but the public anon key:</p>
+  <pre><code><span class="cmt"># 1. enumerate every share that exists</span>
+GET /rest/v1/shared_notes?select=id,note_id,owner_id,allow_edit
+
+<span class="cmt"># 2. read the note body — no share id supplied anywhere</span>
+GET /rest/v1/notes?id=eq.&lt;note_id&gt;&amp;select=title,content
+
+<span class="cmt"># 3. if allow_edit is true, overwrite it</span>
+PATCH /rest/v1/notes?id=eq.&lt;note_id&gt;  {"content": "..."}</code></pre>
+  <p>
+    Step 3 is real: <code>notes_update_via_share</code> lost the same predicate and keeps only
+    <code>AND sn.allow_edit</code>. Every editable share is world-writable, and the app's own
+    Realtime subscription in <a href="src/pages/SharedNote.tsx#L69">SharedNote.tsx:69</a> will
+    push an attacker's edits straight into the owner's open tab.
+  </p>
+  <div class="verdict check">CONFIRM WITH → AUDIT_VERIFY.sql block [1]. If <code>using_expr</code> has no <code>current_setting</code>, this is live.</div>
+  <p><b>Fix.</b> The session-variable design cannot work over PostgREST anyway — nothing in the codebase ever calls <code>set_config('app.share_id', …)</code>, and pooled connections would leak it if it did. Replace it with a predicate the client can actually satisfy:</p>
+  <pre><code>DROP POLICY IF EXISTS notes_select_via_share ON public.notes;
+DROP POLICY IF EXISTS notes_update_via_share ON public.notes;
+DROP POLICY IF EXISTS shared_notes_public_read ON public.shared_notes;
+
+<span class="cmt">-- the share id becomes the secret: you must already know it</span>
+CREATE POLICY shared_notes_read_by_id ON public.shared_notes
+  FOR SELECT USING (true);   <span class="cmt">-- keep, but ALWAYS filter by id (see note)</span></code></pre>
+  <p>
+    The clean version is a <code>SECURITY DEFINER</code> function
+    <code>get_shared_note(p_share_id uuid)</code> that takes the share id, looks up the note, and
+    returns it — with <code>REVOKE ALL ON public.shared_notes FROM anon, authenticated</code> so
+    the table can't be enumerated at all. <code>SharedNote.tsx</code> then calls that one RPC
+    instead of two table reads.
+  </p>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-02</span><span class="f-title">shared_notes is fully enumerable by anonymous callers</span><span class="f-tag">RLS · shared_notes</span></div>
+  <p>
+    <code>FOR SELECT USING (true)</code> with no role restriction. Even after SEC-01 is fixed,
+    this leaks the complete share table: how many notes each user shares, which are editable, and
+    every owner's <code>auth.users.id</code>. Those UUIDs are the input to SEC-03.
+  </p>
+  <div class="verdict fix">FIX: <code>REVOKE ALL ON public.shared_notes FROM anon, authenticated;</code> and read shares only through a definer function keyed by share id.</div>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-03</span><span class="f-title">get_calendar_events trusts a caller-supplied user id</span><span class="f-tag">IDOR · SECURITY DEFINER</span></div>
+  <p>
+    Declared <code>SECURITY DEFINER</code>, granted to <code>authenticated</code>, and takes
+    <code>p_user_id uuid</code> which it uses directly in every <code>WHERE</code> clause. It never
+    compares that argument to <code>auth.uid()</code>. Definer rights mean RLS is bypassed.
+  </p>
+  <p>
+    Any signed-up user who knows another user's UUID can read their tasks, note titles, birthdays,
+    countdowns, media library, and subscription names and amounts — six tables in one call.
+    Combined with SEC-02, the attacker doesn't even need to guess the UUID.
+  </p>
+  <pre><code>CREATE OR REPLACE FUNCTION public.get_calendar_events(...)
+ LANGUAGE plpgsql SECURITY DEFINER      <span class="cmt">-- no SET search_path either</span>
+AS $function$
+BEGIN
+  ...  WHERE t.user_id = p_user_id;     <span class="del">-- caller-controlled, unchecked</span></code></pre>
+  <div class="verdict fix">FIX: add <code>SET search_path = public</code> and, as the first statement, <code>IF p_user_id &lt;&gt; auth.uid() THEN RAISE EXCEPTION 'forbidden'; END IF;</code> — or drop the parameter and use <code>auth.uid()</code> directly. <a href="src/hooks/useCalendar.ts#L42">useCalendar.ts:42</a> already passes the caller's own id, so dropping the parameter breaks nothing.</div>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-04</span><span class="f-title">get_upcoming_renewals has the same hole — and the migration doesn't say so</span><span class="f-tag">IDOR · drift</span></div>
+  <p>
+    Migration 02 creates this function as <code>SECURITY INVOKER</code>, which would be safe — RLS
+    would filter it. The live function is <code>SECURITY DEFINER</code> with a different default
+    (<code>p_days DEFAULT 30</code> vs. <code>4</code>). Someone redefined it in the dashboard and
+    never wrote it back. Same fix as SEC-03.
+  </p>
+  <div class="verdict check">CONFIRM WITH → block [3]. Look for <code>mentions_auth_uid = false</code>.</div>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-05</span><span class="f-title">media_metadata accepts writes from anyone</span><span class="f-tag">RLS · shared cache</span></div>
+  <pre><code>CREATE POLICY "Allow service role insert" ON public.media_metadata
+    FOR INSERT WITH CHECK (true);        <span class="del">-- applies to anon + authenticated</span>
+CREATE POLICY "Allow service role update" ON public.media_metadata
+    FOR UPDATE USING (true);             <span class="del">-- no WITH CHECK at all</span></code></pre>
+  <p>
+    The policy names say "service role", but the service role bypasses RLS entirely — these
+    policies exist <em>only</em> to grant <code>anon</code> and <code>authenticated</code>. This is
+    a cross-tenant table with no <code>user_id</code>: anyone can rewrite every
+    <code>cover_image</code> in your shared cache to a URL they control, giving them a request log
+    of which titles your users browse, or insert rows until the table is a storage bill.
+  </p>
+  <p>
+    This is load-bearing, so it can't just be dropped: <a href="src/lib/media-refresh.ts#L347">media-refresh.ts:347</a>
+    and <a href="src/lib/media-metadata.ts#L469">media-metadata.ts:469</a> both upsert here from the
+    browser with the anon key. Route those writes through the edge function first, then restrict
+    the policies to <code>TO authenticated</code> at minimum.
+  </p>
+  <div class="verdict check">Check what's already in there → blocks [16] and [17]. Any host outside tmdb/anilist/mangadex/tvmaze/jikan/wikimedia is poisoning.</div>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-06</span><span class="f-title">The edge function is a public, unauthenticated service-role proxy</span><span class="f-tag">edge function</span></div>
+  <p>
+    <a href="deploy-edge-function.sh">deploy-edge-function.sh</a> deploys with
+    <code>--no-verify-jwt</code>, and the handler sets
+    <code>Access-Control-Allow-Origin: '*'</code> while holding
+    <code>SUPABASE_SERVICE_ROLE_KEY</code>. Four consequences, all reachable with curl:
+  </p>
+  <ul>
+    <li>Unauthenticated writes to <code>media_metadata</code> under service-role rights (<a href="supabase/functions/media-search/index.ts#L1199">index.ts:1199</a>), amplifying SEC-05 past any RLS fix.</li>
+    <li>Free use of your TMDB quota as an open proxy.</li>
+    <li><code>details: error.message</code> returned on 500 (<a href="supabase/functions/media-search/index.ts#L1220">index.ts:1220</a>) — internal errors leak to callers.</li>
+    <li><code>limit</code> is <code>parseInt</code>'d with no clamp, and <code>handleBatchSearch</code> feeds an unbounded <code>items[]</code> array straight into <code>.in('title', titles)</code>. No rate limiting anywhere.</li>
+  </ul>
+  <div class="verdict fix">FIX: drop <code>--no-verify-jwt</code> and send the session token from the client; pin CORS to your own origin; clamp <code>limit</code> to 1–50 and <code>items</code> to ~50; return a generic 500 body.</div>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-07</span><span class="f-title">TMDB API key is still live in git history</span><span class="f-tag">secret</span></div>
+  <p>
+    The working tree is clean — the key was removed and replaced with a rotate-me comment, which
+    was the right call. But it is still retrievable:
+  </p>
+  <pre><code>$ git show aea34a8:deploy-edge-function.sh | grep TMDB
+supabase secrets set TMDB_API_KEY="381f2d0e99cd3d0cc1e5b9fa1099a9d5"</code></pre>
+  <p>
+    Removing a secret from HEAD does not un-leak it. Note that <a href="CLAUDE.md">CLAUDE.md</a>
+    item 8 still describes this as a secret <em>currently in the file</em>, which sends the next
+    reader looking in the wrong place.
+  </p>
+  <div class="verdict fix">FIX: rotate the key at themoviedb.org. Then correct CLAUDE.md item 8 to say "leaked in history, rotated on &lt;date&gt;".</div>
+</div>
+
+<div class="finding crit">
+  <div class="f-head"><span class="f-id">SEC-08</span><span class="f-title">SECURITY DEFINER functions without a pinned search_path</span><span class="f-tag">hardening</span></div>
+  <p>
+    <code>get_calendar_events</code> and <code>get_upcoming_renewals</code> run as owner with a
+    mutable <code>search_path</code> — the standard privilege-escalation shape, and a Supabase
+    linter warning. Migration 12 gets this exactly right for the signup triggers
+    (<code>SET search_path = public</code>); these two were never brought in line.
+  </p>
+</div>
+</section>
+
+<section>
+<h2>High: data you'd notice losing</h2>
+<p class="sec-note">Not exploitable from outside, but each one either loses data or blocks a user from getting back in.</p>
+
+<div class="finding high">
+  <div class="f-head"><span class="f-id">ACC-01</span><span class="f-title">There is no password reset, anywhere</span><span class="f-tag">auth</span></div>
+  <p>
+    <code>supabase.auth.resetPasswordForEmail</code> appears nowhere in the codebase, and
+    <a href="src/pages/Login.tsx">Login.tsx</a> has no "forgot password" link. A user who forgets
+    their password has no route back into their vault, ledger and notes short of you running SQL
+    for them. Separately, <a href="src/pages/settings/SecuritySection.tsx#L21">SecuritySection.tsx:21</a>
+    changes the password with no current-password re-authentication, so anyone with a live session
+    can lock the owner out.
+  </p>
+</div>
+
+<div class="finding high">
+  <div class="f-head"><span class="f-id">DATA-01</span><span class="f-title">"Export all data" silently omits seven tables</span><span class="f-tag">backup</span></div>
+  <p>
+    <code>EXPORT_TABLES</code> in <a href="src/pages/settings/DataSection.tsx#L14">DataSection.tsx:14</a>
+    lists 14 tables. Missing: <code>recipes</code>, <code>recipe_folders</code>,
+    <code>bucket_list</code>, <code>ledger_accounts</code>, <code>vault_files</code>,
+    <code>vault_folders</code>, <code>user_preferences</code>, plus every tag junction table (so
+    tags export, but nothing stays tagged). It does export <code>ledger_buckets</code> — a feature
+    no longer wired to anything.
+  </p>
+  <p>
+    The button says "Download a full JSON backup of every section." Someone will trust that before
+    a migration and lose their whole cookbook and bucket list.
+  </p>
+</div>
+
+<div class="finding high">
+  <div class="f-head"><span class="f-id">DATA-02</span><span class="f-title">Import reports success for rows it failed to write</span><span class="f-tag">backup</span></div>
+  <pre><code>const { error } = await supabase.from(table).insert(clean as never);
+if (!error) inserted += clean.length;   <span class="del">// error → skipped, never surfaced</span></code></pre>
+  <p>
+    A per-table failure is swallowed; the toast then reports only what succeeded, with no
+    indication anything was dropped. Restoring five tables where three fail shows "Import
+    complete". <a href="src/pages/settings/DataSection.tsx#L113">DataSection.tsx:113</a>
+  </p>
+</div>
+
+<div class="finding high">
+  <div class="f-head"><span class="f-id">DATA-03</span><span class="f-title">CSV export corrupts on commas and is formula-injectable</span><span class="f-tag">ledger</span></div>
+  <pre><code>return [headers.join(','), ...rows.map(r =&gt; r.join(','))].join('\n');</code></pre>
+  <p>
+    No quoting, no escaping. A description of <code>Lunch, drinks</code> shifts every later column
+    on that row. A description beginning <code>=</code>, <code>+</code>, <code>-</code> or
+    <code>@</code> is executed as a formula when the file opens in Excel or Sheets.
+    <a href="src/lib/ledger.ts#L201">ledger.ts:201</a>
+  </p>
+  <div class="verdict fix">FIX: wrap every field in double quotes, double any internal quote, and prefix a leading <code>=+-@</code> with an apostrophe.</div>
+</div>
+</section>
+
+<section>
+<h2>Logic bugs</h2>
+<p class="sec-note">Ordered by how likely you are to hit them. All verified by reading the code path, several by <code>tsc</code>.</p>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-01</span><span class="f-title">The build passes while 19 type errors stand</span><span class="f-tag">tooling</span></div>
+  <p>
+    <code>npm run build</code> is <code>vite build</code>, which transpiles via SWC and never
+    typechecks. It completes in 2.8s and reports success. <code>npx tsc --noEmit</code> on the same
+    tree reports 19 errors. CLAUDE.md tells the next contributor to "run <code>npm run build</code>
+    to verify" — that verifies nothing about types.
+  </p>
+  <div class="verdict fix">FIX: <code>"build": "tsc --noEmit -p tsconfig.app.json &amp;&amp; vite build"</code>, after clearing the errors below.</div>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-02</span><span class="f-title">Your core domain types don't exist</span><span class="f-tag">types</span></div>
+  <p>
+    <code>lib/tags.ts</code>, <code>lib/subscriptions.ts</code> and <code>TagBadge.tsx</code> all
+    import types that <code>integrations/supabase/types.ts</code> does not export:
+    <code>Tag</code>, <code>NoteWithTags</code>, <code>TaskWithTags</code>,
+    <code>MediaWithTags</code>, <code>PromptWithTags</code>, <code>CodeSnippetWithTags</code>,
+    <code>Subscription</code>, <code>SubscriptionSummary</code>, <code>UpcomingRenewal</code>.
+  </p>
+  <p>
+    The file only defines the ledger aliases. Because these are type-only imports they vanish at
+    build time and nothing crashes — but every <code>Tag</code> and <code>Subscription</code>
+    annotation across the app is checking nothing. That's 9 missing types under the two most-used
+    domain objects in the codebase.
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-03</span><span class="f-title">The dashboard "fill space" toggle is wired to nothing</span><span class="f-tag">settings</span></div>
+  <p>
+    <a href="src/pages/settings/DashboardSection.tsx#L45">DashboardSection.tsx:45</a> renders
+    <code>&lt;WidgetManager&gt;</code> without <code>fillSpace</code> or
+    <code>onToggleFillSpace</code>, both required by <code>WidgetManagerProps</code>. Caught by
+    <code>tsc</code> as TS2739. The control either doesn't render or renders inert, depending on
+    how the component guards it — <code>Dashboard.tsx</code> passes both correctly, so the setting
+    works from the dashboard and not from Settings.
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-04</span><span class="f-title">Tagged code snippets are invisible on the tag page</span><span class="f-tag">tags</span></div>
+  <p>
+    <code>searchByTag</code> fetches five collections including <code>snippets</code>.
+    <a href="src/pages/TagView.tsx#L70">TagView.tsx:70</a> computes
+    <code>totalItems</code> from four of them, and the JSX renders four sections. Tag a snippet,
+    open its tag page, and the snippet is neither counted nor shown — and if a tag is used
+    <em>only</em> on snippets, the page says "No items found with this tag."
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-05</span><span class="f-title">Deleted ledger categories come back on a new device</span><span class="f-tag">ledger</span></div>
+  <p>
+    <code>ensureLedgerCategoriesExist</code> guards its additive re-seed with a
+    <em>localStorage</em> flag (<code>ledger_categories_v2_seeded</code>). The comment promises it
+    won't "re-add any they later delete" — true on that browser only. Open the app on a phone, or
+    after clearing site data, and the flag is absent, so every default category you deleted is
+    recreated. <a href="src/lib/category-init.ts#L56">category-init.ts:56</a>
+  </p>
+  <div class="verdict fix">FIX: store the flag in <code>user_preferences</code>, where the rest of the cross-device settings already live.</div>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-06</span><span class="f-title">Subscription deletion may still fail, and the comments lie about why</span><span class="f-tag">subscriptions · drift</span></div>
+  <p>
+    <code>lib/subscriptions.ts</code> says "Database trigger automatically creates/updates ledger
+    entries" and "automatically deletes linked ledger entries" in three places. Migration 15 dropped
+    both triggers precisely because the delete one causes Postgres error 27000. The schema dump
+    still shows <code>subscription_auto_ledger</code> and <code>subscription_delete_ledger</code>
+    live — the dump predates migration 15, so this hinges on whether 15 was ever applied.
+  </p>
+  <p>
+    If it wasn't: deletes still fail, and every subscription still writes a duplicate ledger row
+    that double-counts against the derived charges in <code>deriveSubscriptionCharges</code>.
+  </p>
+  <div class="verdict check">CONFIRM WITH → block [5]. Zero rows means 15 landed; then delete the stale comments.</div>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-07</span><span class="f-title">Deleting a ledger entry asks for no confirmation</span><span class="f-tag">ledger</span></div>
+  <p>
+    <a href="src/pages/MoneyLedger.tsx#L419">MoneyLedger.tsx:419</a> calls
+    <code>handleDelete(e.id)</code> straight from the trash button. Every other destructive action
+    in the app routes through <code>&lt;ConfirmDialog&gt;</code> — Tasks, Birthdays, Vault,
+    Recipes, BucketList, Library, Dashboard. Financial records are the one place it was skipped.
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-08</span><span class="f-title">Ledger history older than two years is unreachable</span><span class="f-tag">ledger</span></div>
+  <pre><code>const years = Array.from({ length: 5 }, (_, i) =&gt; new Date().getFullYear() - 2 + i);</code></pre>
+  <p>
+    A fixed window of current year ±2, and the year select is the only way to navigate. Entries
+    from 2023 still count toward "money in hand" but cannot be viewed, edited or exported.
+    <a href="src/pages/MoneyLedger.tsx#L208">MoneyLedger.tsx:208</a>
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-09</span><span class="f-title">Sign-up button is clickable before the confirm field is filled</span><span class="f-tag">auth</span></div>
+  <pre><code>disabled={loading || !email || !password}   <span class="del">// !confirmPassword missing</span>
+...
+if (!email || !password || !confirmPassword) return;   <span class="cmt">// silent no-op</span></code></pre>
+  <p>
+    The button is enabled, the click does nothing, and no message appears. The mismatch path also
+    uses a raw <code>alert()</code> — the only one in an app that otherwise uses toasts throughout.
+    <a href="src/pages/SignUp.tsx#L114">SignUp.tsx:114</a>
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-10</span><span class="f-title">"Currently Watching" can never show anything you're reading</span><span class="f-tag">dashboard</span></div>
+  <p>
+    <code>fetchWatchingMedia</code> filters <code>.eq('status', 'Watching')</code>. The status
+    enum also has <code>'Reading'</code>, which is what every manga, manhwa and manhua row uses.
+    Half the media tracker is structurally excluded from its own dashboard widget.
+    <a href="src/pages/Dashboard.tsx#L268">Dashboard.tsx:268</a>
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-11</span><span class="f-title">Vault "keep both" collides when conflicts are resolved one at a time</span><span class="f-tag">vault</span></div>
+  <p>
+    <code>resolveConflict</code> rebuilds its <code>taken</code> set from the <code>files</code>
+    state, which isn't reloaded until the whole batch finishes. Resolving two same-named conflicts
+    individually produces <code>report (1).pdf</code> twice. Only the "apply to all" path is safe,
+    because it holds one set across the loop.
+    <a href="src/pages/Vault.tsx#L261">Vault.tsx:261</a>
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-12</span><span class="f-title">Cover images cache forever and evict each other</span><span class="f-tag">media</span></div>
+  <p>
+    <code>simple-image-fetcher.ts</code> checks localStorage <em>before</em>
+    <code>media_tracker.cover_image</code>, under a hardcoded <code>v1</code> key with no TTL. A
+    cover changed anywhere except through <code>refreshCoverImage</code> — which is the only
+    caller of <code>invalidateImageCache</code> — never updates.
+  </p>
+  <p>
+    Worse, <code>cacheImages(allImages, …)</code> writes only the current page's items, so
+    scrolling into a filtered view evicts everything else. And <code>invalidateImageCache</code>
+    re-declares the cache keys as string literals instead of importing them, so the two files can
+    drift apart silently. <a href="src/lib/media-refresh.ts#L371">media-refresh.ts:371</a>
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-13</span><span class="f-title">The edge function reports the wrong source for every non-anime search</span><span class="f-tag">edge function</span></div>
+  <pre><code>const apiNames = ['AniList','Jikan','MangaDex','MangaUpdates','TVmaze','TMDB'];
+sources.push(apiNames[index] || 'API');   <span class="del">// index is position in apiPromises</span></code></pre>
+  <p>
+    <code>apiPromises</code> is built differently per media type. For a movie it's
+    <code>[TMDB, TVmaze, Wikidata]</code>, so index 0 reports "AniList". The
+    <code>source</code> field in the response — which the client stores and displays as the cover's
+    provenance — is wrong for every branch except anime.
+    <a href="supabase/functions/media-search/index.ts#L1180">index.ts:1180</a>
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-14</span><span class="f-title">A ternary whose branches are identical</span><span class="f-tag">media</span></div>
+  <pre><code>apiSource: source.includes('mangaupdates') ? 'mangaupdates' : 'mangaupdates',</code></pre>
+  <p>
+    <a href="src/lib/media-refresh.ts#L86">media-refresh.ts:86</a>. Harmless as written, but it
+    marks an unfinished thought — and the function containing it is unreachable anyway (see
+    DEAD-03).
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-15</span><span class="f-title">Two date formatters with the same name, one of them wrong</span><span class="f-tag">dates</span></div>
+  <p>
+    <code>date-utils.ts</code> exports <code>formatDateDDMMYYYY</code> built on
+    <code>parseYMD</code>. <code>ledger.ts</code> exports a second function with the same name
+    built on <code>new Date(dateString)</code> — the exact pattern CLAUDE.md forbids, because
+    <code>new Date('2026-08-14')</code> parses as UTC midnight and renders as the 13th for anyone
+    west of Greenwich. <code>MoneyLedger.tsx</code> imports the ledger one.
+  </p>
+  <p>
+    It happens to display correctly in IST, so it will stay invisible until someone travels.
+    <a href="src/lib/ledger.ts#L253">ledger.ts:253</a>
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-16</span><span class="f-title">Two PWA manifests, and the splash screen is white</span><span class="f-tag">pwa</span></div>
+  <p>
+    <code>index.html</code> links <code>/manifest.json</code> from <code>public/</code>, while
+    <code>vite-plugin-pwa</code> generates and injects its own
+    <code>manifest.webmanifest</code>. Both exist in <code>dist/</code>. Both set
+    <code>background_color: "#ffffff"</code> on a dark-first app, so installed launches flash
+    white, and both set <code>theme_color: "#4B5D7A"</code> — a slate blue from before the Aurora
+    redesign — which disagrees with the <code>#141414</code> in the page's own
+    <code>theme-color</code> meta.
+  </p>
+</div>
+
+<div class="finding med">
+  <div class="f-head"><span class="f-id">BUG-17</span><span class="f-title">80 calls to auth.getUser(), 11 on the dashboard alone</span><span class="f-tag">performance</span></div>
+  <p>
+    Nearly every data function opens with
+    <code>const { data: { user } } = await supabase.auth.getUser()</code>. That is a network call
+    to <code>/auth/v1/user</code>, not a local read. Loading the dashboard makes about a dozen of
+    them before any real query runs, serialised ahead of each fetch.
+  </p>
+  <div class="verdict fix">FIX: <code>getSession()</code> reads the cached JWT synchronously, or pass <code>user.id</code> down from <code>useAuth()</code>, which already holds it.</div>
+</div>
+</section>
+
+<section>
+<h2>Dead code and orphans</h2>
+<p class="sec-note">Verified by cross-referencing every <code>export</code> against every import in <code>src/</code>. The buckets feature is the significant one — it's a complete vertical slice, database through UI, that nothing can reach.</p>
+
+<div class="finding low">
+  <div class="f-head"><span class="f-id">DEAD-01</span><span class="f-title">Envelope budgeting is fully orphaned — schema, library and UI</span><span class="f-tag">ledger_buckets</span></div>
+  <p>
+    Migration 06 added <code>ledger_buckets</code> plus <code>bucket_id</code> and
+    <code>from_bucket_id</code> on <code>ledger_entries</code>. <code>lib/buckets.ts</code> (131
+    lines) and <code>components/ledger/BucketsSection.tsx</code> (211 lines) implement it. Nothing
+    imports either file, and the one place that could write those columns hardcodes them away:
+  </p>
+  <pre><code><span class="cmt">// MoneyLedger.tsx buildPayload()</span>
+bucket_id: null,
+from_bucket_id: null,</code></pre>
+  <p>
+    Ledger v2 (migration 13) replaced buckets with accounts and the UI followed, but nothing was
+    removed. <code>DataSection.tsx</code> still faithfully exports the empty
+    <code>ledger_buckets</code> table in every backup.
+  </p>
+</div>
+
+<div class="finding low">
+  <div class="f-head"><span class="f-id">DEAD-02</span><span class="f-title">Files no import reaches</span><span class="f-tag">orphans</span></div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>File</th><th class="num">Lines</th><th>Why it's dead</th></tr></thead>
+      <tbody>
+        <tr><td><code>components/ledger/BucketsSection.tsx</code></td><td class="num">211</td><td>Buckets UI, never mounted</td></tr>
+        <tr><td><code>lib/buckets.ts</code></td><td class="num">131</td><td>Only importer is the above</td></tr>
+        <tr><td><code>components/ui/table.tsx</code></td><td class="num">117</td><td>shadcn primitive; ledger hand-rolls its own <code>&lt;table&gt;</code></td></tr>
+        <tr><td><code>components/calendar/index.ts</code></td><td class="num">7</td><td>Barrel; consumers import files directly</td></tr>
+        <tr><td><code>components/dashboard/widgets/index.ts</code></td><td class="num">12</td><td>Barrel; superseded by <code>dashboard/index.ts</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="finding low">
+  <div class="f-head"><span class="f-id">DEAD-03</span><span class="f-title">Exported functions with zero callers</span><span class="f-tag">28 symbols</span></div>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Module</th><th>Unreachable exports</th></tr></thead>
+      <tbody>
+        <tr><td><code>lib/tags.ts</code></td><td><code>cleanupEmptyTags</code>, <code>canDeleteTag</code>, <code>deleteTag</code>, <code>fetchSnippetTags</code>, <code>getTagColorName</code></td></tr>
+        <tr><td><code>lib/ledger.ts</code></td><td><code>fetchLedgerCategories</code>, <code>createLedgerCategory</code>, <code>updateLedgerCategory</code>, <code>deleteLedgerCategory</code>, <code>calculateLedgerSummary</code>, <code>getWeekNumber</code></td></tr>
+        <tr><td><code>lib/calendar.ts</code></td><td><code>formatEventDate</code>, <code>getEventTypeColor</code>, <code>getEventTypeLabel</code>, <code>isSameDate</code></td></tr>
+        <tr><td><code>lib/vault.ts</code></td><td><code>getStorageUsage</code>, <code>isSelfOrDescendant</code>, <code>renameFolder</code></td></tr>
+        <tr><td><code>lib/category-init.ts</code></td><td><code>checkLedgerCategoriesExist</code>, <code>checkSubscriptionCategoriesExist</code></td></tr>
+        <tr><td><code>lib/subscriptions.ts</code></td><td><code>fetchSubscriptionCategories</code>, <code>formatBillingCycle</code></td></tr>
+        <tr><td><code>lib/media-refresh.ts</code></td><td><code>fetchFromMangaDex</code>, <code>fetchFromMangaUpdates</code> — <code>API_PRIORITY</code> never names them, so <code>fetchFromApi</code> can't reach them</td></tr>
+        <tr><td><code>lib/date-utils.ts</code></td><td><code>getTodayYMD</code></td></tr>
+        <tr><td><code>components/ui/motion.tsx</code></td><td><code>fadeInUp</code>, <code>pageEnter</code>, <code>staggerContainer</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    <code>cleanupEmptyTags</code> is the interesting one: the RPC it calls
+    <em>does</em> exist in the live database (it deletes tags with
+    <code>usage_count = 0</code> older than a day), but nothing in the app has ever invoked it. A
+    working maintenance job with no trigger.
+  </p>
+</div>
+
+<div class="finding low">
+  <div class="f-head"><span class="f-id">DEAD-04</span><span class="f-title">An AbortController that aborts nothing</span><span class="f-tag">Tasks.tsx</span></div>
+  <p>
+    <a href="src/pages/Tasks.tsx#L74">Tasks.tsx:74</a> creates a fresh
+    <code>AbortController</code> per effect run and calls <code>.abort()</code> on the previous
+    one — but its <code>signal</code> is never passed to anything. <code>fetchTaskTags</code> takes
+    no signal parameter. The <code>err.name === 'AbortError'</code> branch below it is therefore
+    also unreachable. The <code>isMountedRef</code> guard is doing all the real work.
+  </p>
+</div>
+</section>
+
+<section>
+<h2>Schema drift</h2>
+<p class="sec-note">CLAUDE.md names <code>supabase/migrations/</code> as the schema source of truth. It isn't — the live database has columns and functions that no migration creates.</p>
+
+<div class="finding high">
+  <div class="f-head"><span class="f-id">DRIFT-01</span><span class="f-title">The migrations cannot rebuild production</span><span class="f-tag">migrations</span></div>
+  <p>Five columns and one function exist live with no <code>CREATE</code> or <code>ALTER</code> anywhere in <code>supabase/migrations/</code>:</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Object</th><th>Used by</th><th>Breaks if missing</th></tr></thead>
+      <tbody>
+        <tr><td><code>notes.background_color</code></td><td><a href="src/pages/Notes.tsx#L734">Notes.tsx:734</a></td><td>Note categories</td></tr>
+        <tr><td><code>media_tracker.release_date</code></td><td><code>get_calendar_events</code></td><td>The whole RPC — it selects the column</td></tr>
+        <tr><td><code>subscriptions.end_date</code></td><td><code>deriveSubscriptionCharges</code></td><td>Subscription end dates</td></tr>
+        <tr><td><code>subscriptions.ledger_entry_id</code></td><td>Migration 15 itself</td><td>Migration 15 fails to run</td></tr>
+        <tr><td><code>prompts.is_pinned</code></td><td><code>fetchPinnedItems</code></td><td>Pinned prompts widget</td></tr>
+        <tr><td><code>normalize_tag_name()</code></td><td>—</td><td>Nothing; undocumented</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Run <code>01</code>→<code>17</code> on an empty project and you get an app that fails on the
+    calendar, note categories and pinned prompts. Migration 15 would error outright on
+    <code>ledger_entry_id</code>.
+  </p>
+  <div class="verdict check">CONFIRM WITH → block [7] for the columns, [8] for whether 16/17 ever ran.</div>
+</div>
+
+<div class="finding low">
+  <div class="f-head"><span class="f-id">DRIFT-02</span><span class="f-title">Two migrations numbered 11</span><span class="f-tag">migrations</span></div>
+  <p>
+    <code>11_create_avatars_bucket.sql</code> and <code>11_media_last_activity.sql</code>. Any
+    tool that orders by filename picks one arbitrarily; a human reading the folder can't tell which
+    ran first. Renumber the avatars one to <code>11a</code> or push it to <code>18</code>.
+  </p>
+</div>
+
+<div class="finding low">
+  <div class="f-head"><span class="f-id">DRIFT-03</span><span class="f-title">CLAUDE.md describes a codebase from several features ago</span><span class="f-tag">docs</span></div>
+  <ul>
+    <li>Says ten migrations <code>01</code>→<code>10</code>; there are seventeen.</li>
+    <li>Never mentions Recipes, Bucket List, or ledger accounts — three shipped features.</li>
+    <li>Item 8 still reports the TMDB key as present in the working tree (see SEC-07).</li>
+    <li>Item 1 says the ledger widget "is now fixed"; the underlying <code>new Date()</code> pattern survives in <code>ledger.ts</code> (BUG-15).</li>
+  </ul>
+</div>
+</section>
+
+<section>
+<h2>What's built right</h2>
+<p class="sec-note">Worth naming, because the fixes above should not disturb any of it.</p>
+
+<div class="good-item">
+  <b>The Vault is the strongest thing in the codebase.</b>
+  <p>Private bucket, storage RLS keyed on the <code>{user_id}/</code> path prefix, short-lived signed URLs minted per view, and no shareable link anywhere by design. <code>uploadFile</code> even removes the uploaded object if the metadata insert fails, so bytes are never orphaned. <code>replaceFile</code> rolls back the same way.</p>
+</div>
+
+<div class="good-item">
+  <b>The avatars bucket excludes SVG.</b>
+  <p><code>allowed_mime_types</code> is png/jpeg/webp/gif on a <em>public</em> bucket. Allowing <code>image/svg+xml</code> there would be stored XSS on your own origin. That's a subtle call, made correctly.</p>
+</div>
+
+<div class="good-item">
+  <b>Every stored-HTML render path is sanitised.</b>
+  <p>Both <code>dangerouslySetInnerHTML</code> sites and all three <code>innerHTML</code> writes in <code>SharedNote.tsx</code> go through <code>sanitizeHtml</code> or <code>sanitizePreview</code>, with explicit allowlists and <code>ALLOW_DATA_ATTR: false</code>. This is what keeps SEC-01 from also being a stored-XSS vector.</p>
+</div>
+
+<div class="good-item">
+  <b>Derived subscription charges instead of materialised rows.</b>
+  <p><code>deriveSubscriptionCharges</code> computes each charge from <code>start_date</code> by billing cycle at read time. No background job, no drift, and editing or cancelling a subscription self-corrects retroactively. Migration 15's reasoning for the switch is genuinely well argued.</p>
+</div>
+
+<div class="good-item">
+  <b>Migration 12 is a model postmortem.</b>
+  <p>It diagnoses "Database error saving new user" precisely — signup triggers running as <code>supabase_auth_admin</code> where <code>auth.uid()</code> is null, so RLS rejects the insert and rolls back the whole <code>auth.users</code> write — and fixes it with <code>SECURITY DEFINER</code> plus a pinned <code>search_path</code>. That pinning is exactly what SEC-08 is missing elsewhere.</p>
+</div>
+
+<div class="good-item">
+  <b>Code splitting is real and measured.</b>
+  <p>Authenticated routes are lazy; <code>manualChunks</code> isolates the heavy leaves. CodeMirror (508 kB) and Recharts (400 kB) only download with the pages that use them, and the entry bundle is 175 kB. Hover-prefetch via <code>route-prefetch.ts</code> hides the latency.</p>
+</div>
+
+<div class="good-item">
+  <b>Local-date discipline.</b>
+  <p><code>date-utils.ts</code> exists specifically because <code>toISOString().split('T')[0]</code> silently shifts dates, and it's used consistently almost everywhere. BUG-15 is the one leak.</p>
+</div>
+
+<div class="good-item">
+  <b>RLS is on every user table with the same predicate.</b>
+  <p>All 24 user-owned tables enable RLS and scope on <code>auth.uid() = user_id</code>, junction tables via an <code>EXISTS</code> against their parent. The critical findings above are three specific deviations from an otherwise uniform and correct model.</p>
+</div>
+
+<div class="good-item">
+  <b>The comments explain why, not what.</b>
+  <p>Migration headers, <code>vite.config.ts</code>'s chunking rationale, and the <code>preferences.ts</code> note about re-applying theme tokens all record reasoning a future reader would otherwise have to reconstruct. This is rarer than it should be.</p>
+</div>
+</section>
+
+<section>
+<h2>Appendix: the original plan</h2>
+<p class="sec-note">Kept for the record — this was the sequence before the fixes were applied. Steps 1, 4 and 5 are still yours to run; the rest are done.</p>
+
+<ol class="steps">
+  <li><b>Run the four confirmation blocks.</b><p><a href="AUDIT_VERIFY.sql">AUDIT_VERIFY.sql</a> blocks [1], [3], [5], [11]. Block [11] tells you the blast radius: how many notes are exposed and how many are writable.</p></li>
+  <li><b>Close the note-sharing hole.</b><p>If [1] confirms it, the fastest safe stop is <code>DROP POLICY notes_select_via_share</code> and <code>notes_update_via_share</code>. That breaks sharing for recipients and fixes the leak in one statement; rebuild it properly with a definer function afterwards.</p></li>
+  <li><b>Lock the two definer functions.</b><p>Add the <code>auth.uid()</code> check and <code>SET search_path = public</code> to <code>get_calendar_events</code> and <code>get_upcoming_renewals</code>. Nothing in the client changes.</p></li>
+  <li><b>Rotate the TMDB key.</b><p>It's been readable in history since <code>aea34a8</code>.</p></li>
+  <li><b>Re-deploy the edge function with JWT verification.</b><p>Drop <code>--no-verify-jwt</code>, pin CORS, clamp <code>limit</code> and <code>items</code>. Then tighten the <code>media_metadata</code> policies to <code>TO authenticated</code> and move the client-side upserts behind the function.</p></li>
+  <li><b>Make the build typecheck.</b><p>Add the nine missing exports to <code>types.ts</code>, fix the <code>WidgetManager</code> props, then put <code>tsc --noEmit</code> in front of <code>vite build</code> so this can't drift again.</p></li>
+  <li><b>Fix the backup path.</b><p>Add the seven missing tables to <code>EXPORT_TABLES</code>, surface import errors, and quote the CSV. A backup you can't trust is worse than none.</p></li>
+  <li><b>Reconcile the migrations with production.</b><p>Write migration 18 adding the five drifted columns with <code>IF NOT EXISTS</code>, so the folder can rebuild the database. Then renumber the duplicate 11.</p></li>
+  <li><b>Delete the buckets feature.</b><p>Two files, 342 lines, and the <code>ledger_buckets</code> export. Or wire it back up — but leaving a dead vertical slice in place is what made this audit slower than it needed to be.</p></li>
+  <li><b>Refresh CLAUDE.md.</b><p>Seventeen migrations, three undocumented features, and item 8 rewritten. It's the first thing the next contributor reads.</p></li>
+</ol>
+</section>
+
+<footer>
+  Method: full read of <code>src/</code> (29,428 lines), all 17 migrations, the media-search edge
+  function, and the committed schema dump. Verified with <code>npx tsc --noEmit</code> (19 errors),
+  <code>npm run lint</code> (2 errors, 24 warnings) and <code>npm run build</code> (succeeds).
+  Live-database findings are drawn from the snapshot embedded in <code>schemadump.md</code>, dated
+  approximately 21 Jun 2026 — it predates migrations 15–17, so items marked CONFIRM need a query
+  against the current database.<br>
+  Not verified: runtime behaviour, Supabase project auth settings, storage policies, and whether
+  migrations 15–17 were applied.
+</footer>
+
+</div>

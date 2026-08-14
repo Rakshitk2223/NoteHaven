@@ -22,6 +22,7 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import SignUp from "./pages/SignUp";
 import CheckEmail from "./pages/CheckEmail";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -78,6 +79,7 @@ const AppInner = () => {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
           <Route path="/check-email" element={<CheckEmail />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/notes/share/:shareId" element={<SharedNote />} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/prompts" element={<ProtectedRoute><Library /></ProtectedRoute>} />

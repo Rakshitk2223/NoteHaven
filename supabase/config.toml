@@ -1,1 +1,12 @@
 project_id = "ylefihvjlyzabhvgdnoe"
+
+# media-search holds the service-role key, so it must never be reachable without
+# a valid session token. It was previously deployed with --no-verify-jwt, which
+# made it a public unauthenticated write proxy (audit SEC-06).
+#
+# IMPORTANT: verify_jwt is sticky server-side. Simply dropping the
+# --no-verify-jwt flag from the deploy command does NOT re-enable it — the
+# function keeps whatever it was last configured with. Declaring it here makes
+# the setting part of the repo and reapplies it on every deploy.
+[functions.media-search]
+verify_jwt = true

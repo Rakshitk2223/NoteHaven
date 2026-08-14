@@ -99,19 +99,6 @@ export function collectDescendantFolderIds(folders: VaultFolder[], rootId: numbe
   return result;
 }
 
-/**
- * True if `candidate` is the same folder as `ancestor` or sits inside its
- * subtree — used to stop a folder being moved into itself/its own descendant.
- */
-export function isSelfOrDescendant(folders: VaultFolder[], candidateId: number, ancestorId: number): boolean {
-  const byId = new Map(folders.map((f) => [f.id, f]));
-  let cur: number | null = candidateId;
-  while (cur != null) {
-    if (cur === ancestorId) return true;
-    cur = byId.get(cur)?.parent_id ?? null;
-  }
-  return false;
-}
 
 /** Ancestor chain from root → folder (inclusive) for breadcrumbs. */
 export function buildBreadcrumb(folders: VaultFolder[], folderId: number | null): VaultFolder[] {
@@ -146,7 +133,8 @@ export async function createFolder(
   parentId: number | null,
   color?: string
 ): Promise<VaultFolder> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const trimmed = name.trim();
@@ -175,7 +163,6 @@ export async function updateFolder(
   if (error) throw error;
 }
 
-export const renameFolder = (id: number, name: string) => updateFolder(id, { name });
 export const moveFolder = (id: number, parentId: number | null) => updateFolder(id, { parent_id: parentId });
 
 /**
@@ -219,7 +206,8 @@ export async function uploadFile(
   folderId: number | null,
   displayName?: string
 ): Promise<VaultFile> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   if (file.size > MAX_FILE_BYTES) {
@@ -304,7 +292,8 @@ export async function replaceFile(
   existing: Pick<VaultFile, 'id' | 'storage_path'>,
   newFile: File
 ): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
   if (newFile.size > MAX_FILE_BYTES) {
     throw new Error(`"${newFile.name}" is ${formatBytes(newFile.size)} — over the ${formatBytes(MAX_FILE_BYTES)} limit.`);
@@ -488,16 +477,6 @@ export async function downloadFilesAsZip(
   return added;
 }
 
-// --------------------------------------------
-// Storage usage
-// --------------------------------------------
-
-/** Total bytes stored across all of the user's files (for the usage meter). */
-export async function getStorageUsage(): Promise<number> {
-  const { data, error } = await supabase.from('vault_files').select('size_bytes');
-  if (error) throw error;
-  return (data || []).reduce((sum, r) => sum + (r.size_bytes ?? 0), 0);
-}
 
 // Storage delete accepts an array; chunk to stay well within limits. Failures
 // here are non-fatal (the metadata row is the source of truth for the UI).

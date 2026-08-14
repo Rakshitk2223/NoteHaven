@@ -20,8 +20,11 @@ export default defineConfig(({ mode }) => ({
         name: 'NoteHaven',
         short_name: 'NoteHaven',
         description: 'Your personal productivity hub for notes, tasks, media tracking, and more',
-        theme_color: '#4B5D7A',
-        background_color: '#ffffff',
+        // Match the app's dark-first Aurora canvas. The old #4B5D7A predated the
+        // redesign, and background_color: #ffffff flashed a white splash on every
+        // installed launch of a dark app.
+        theme_color: '#141414',
+        background_color: '#141414',
         display: 'standalone',
         orientation: 'portrait-primary',
         icons: [

@@ -43,13 +43,6 @@ export function validateTagName(name: string): string | null {
   return trimmed.toLowerCase().replace(/\s+/g, ' ');
 }
 
-/**
- * Check if tag can be deleted (must have usage_count === 0)
- */
-export function canDeleteTag(tag: Tag): boolean {
-  return tag.usage_count === 0;
-}
-
 // ============================================
 // COLOR UTILITIES
 // ============================================
@@ -62,14 +55,6 @@ export function getRandomTagColor(): string {
   return TAG_COLORS[randomIndex].value;
 }
 
-/**
- * Get color name from value
- */
-export function getTagColorName(colorValue: string): string {
-  const color = TAG_COLORS.find(c => c.value === colorValue);
-  return color?.name || 'Custom';
-}
-
 // ============================================
 // FETCH OPERATIONS
 // ============================================
@@ -78,7 +63,8 @@ export function getTagColorName(colorValue: string): string {
  * Fetch all tags for the current user
  */
 export async function fetchUserTags(): Promise<Tag[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   const { data, error } = await supabase
@@ -144,19 +130,6 @@ export async function fetchPromptTags(promptId: number): Promise<Tag[]> {
   return (data || []).map((item: { tags: Tag }) => item.tags);
 }
 
-/**
- * Fetch tags for a specific code snippet
- */
-export async function fetchSnippetTags(snippetId: number): Promise<Tag[]> {
-  const { data, error } = await supabase
-    .from('code_snippet_tags')
-    .select('tag_id, tags(*)')
-    .eq('snippet_id', snippetId);
-
-  if (error) throw error;
-  return (data || []).map((item: { tags: Tag }) => item.tags);
-}
-
 // ============================================
 // TAG CRUD
 // ============================================
@@ -168,7 +141,8 @@ export async function createTag(name: string, color?: string): Promise<Tag> {
   const normalizedName = validateTagName(name);
   if (!normalizedName) throw new Error('Invalid tag name');
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   // Check if tag already exists
@@ -194,33 +168,6 @@ export async function createTag(name: string, color?: string): Promise<Tag> {
 
   if (error) throw error;
   return data;
-}
-
-/**
- * Delete a tag (only if usage_count === 0)
- */
-export async function deleteTag(tagId: number): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  // Check if tag is in use
-  const { data: tag } = await supabase
-    .from('tags')
-    .select('usage_count')
-    .eq('id', tagId)
-    .eq('user_id', user.id)
-    .single();
-
-  if (!tag) throw new Error('Tag not found');
-  if (tag.usage_count > 0) throw new Error('Cannot delete tag that is in use');
-
-  const { error } = await supabase
-    .from('tags')
-    .delete()
-    .eq('id', tagId)
-    .eq('user_id', user.id);
-
-  if (error) throw error;
 }
 
 // ============================================
@@ -323,7 +270,8 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
   const normalizedName = validateTagName(tagName);
   if (!normalizedName) throw new Error('Invalid tag name');
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
   // Get the tag
@@ -374,15 +322,7 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
   };
 }
 
-// ============================================
-// CLEANUP
-// ============================================
-
-/**
- * Clean up empty tags (usage_count === 0) for the current user.
- * Calls the `cleanup_empty_tags` Postgres function.
- */
-export async function cleanupEmptyTags(): Promise<void> {
-  const { error } = await supabase.rpc('cleanup_empty_tags');
-  if (error) throw error;
-}
+// NOTE: a `cleanup_empty_tags()` function exists in the database (it deletes
+// tags with usage_count = 0 older than a day) but nothing in the app has ever
+// called it. The client wrapper was removed in the audit dead-code pass; run the
+// function on a schedule server-side if you want the maintenance behaviour.

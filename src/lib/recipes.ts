@@ -84,7 +84,8 @@ function draftToRow(draft: RecipeDraft) {
 // Recipes CRUD (RLS scopes by user_id)
 // --------------------------------------------
 export async function fetchRecipes(): Promise<Recipe[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
   const { data, error } = await supabase
     .from('recipes')
@@ -96,7 +97,8 @@ export async function fetchRecipes(): Promise<Recipe[]> {
 }
 
 export async function createRecipe(draft: RecipeDraft): Promise<Recipe> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
   const { data, error } = await supabase
     .from('recipes')
@@ -132,7 +134,8 @@ export async function setRecipeFields(id: number, patch: Partial<Recipe>): Promi
 // Folders
 // --------------------------------------------
 export async function fetchRecipeFolders(): Promise<RecipeFolder[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
   const { data, error } = await supabase
     .from('recipe_folders')
@@ -144,7 +147,8 @@ export async function fetchRecipeFolders(): Promise<RecipeFolder[]> {
 }
 
 export async function createRecipeFolder(name: string): Promise<RecipeFolder> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('Not authenticated');
   const { data, error } = await supabase
     .from('recipe_folders')
