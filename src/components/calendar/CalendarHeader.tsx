@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-reac
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { format, addMonths, subMonths, addWeeks, subWeeks, startOfWeek, endOfWeek } from 'date-fns';
+import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfWeek, endOfWeek } from 'date-fns';
 import type { CalendarView, CalendarFilters } from '@/types/calendar';
 import { EVENT_COLORS, EVENT_LABELS } from '@/lib/calendar';
 import type { CalendarEventType } from '@/types/calendar';
@@ -36,6 +36,8 @@ export const CalendarHeader = ({
   const handlePrev = () => {
     if (view === 'month') {
       onNavigate(subMonths(currentDate, 1));
+    } else if (view === 'agenda') {
+      onNavigate(subDays(currentDate, 30));
     } else {
       onNavigate(subWeeks(currentDate, 1));
     }
@@ -44,6 +46,8 @@ export const CalendarHeader = ({
   const handleNext = () => {
     if (view === 'month') {
       onNavigate(addMonths(currentDate, 1));
+    } else if (view === 'agenda') {
+      onNavigate(addDays(currentDate, 30));
     } else {
       onNavigate(addWeeks(currentDate, 1));
     }
@@ -63,6 +67,8 @@ export const CalendarHeader = ({
   const getDisplayDate = () => {
     if (view === 'month') {
       return format(currentDate, 'MMMM yyyy');
+    } else if (view === 'agenda') {
+      return `${format(currentDate, 'MMM d')} – ${format(addDays(currentDate, 30), 'MMM d, yyyy')}`;
     } else {
       const weekStart = startOfWeek(currentDate);
       const weekEnd = endOfWeek(currentDate);
@@ -118,6 +124,13 @@ export const CalendarHeader = ({
             onClick={() => onViewChange('week')}
           >
             Week
+          </Button>
+          <Button
+            variant={view === 'agenda' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => onViewChange('agenda')}
+          >
+            Agenda
           </Button>
         </div>
       </div>

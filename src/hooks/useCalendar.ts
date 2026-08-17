@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format } from 'date-fns';
+import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, format, addDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import type { CalendarEvent, CalendarFilters, CalendarView } from '@/types/calendar';
 import { DEFAULT_FILTERS } from '@/types/calendar';
@@ -49,12 +49,17 @@ export const useCalendar = (currentDate: Date, view: CalendarView) => {
 
   // Deliberately keyed on the range, not the Date instance: the parent creates
   // a new Date on every navigation, but only a changed range needs a refetch.
+  // Agenda is a rolling 30-day window starting at currentDate.
   const rangeStart = view === 'month'
     ? format(startOfWeek(startOfMonth(currentDate)), 'yyyy-MM-dd')
-    : format(startOfWeek(currentDate), 'yyyy-MM-dd');
+    : view === 'agenda'
+      ? format(currentDate, 'yyyy-MM-dd')
+      : format(startOfWeek(currentDate), 'yyyy-MM-dd');
   const rangeEnd = view === 'month'
     ? format(endOfWeek(endOfMonth(currentDate)), 'yyyy-MM-dd')
-    : format(endOfWeek(currentDate), 'yyyy-MM-dd');
+    : view === 'agenda'
+      ? format(addDays(currentDate, 30), 'yyyy-MM-dd')
+      : format(endOfWeek(currentDate), 'yyyy-MM-dd');
 
   const fetchEvents = useCallback(async () => {
     const seq = ++requestSeq.current;

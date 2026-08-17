@@ -1,4 +1,5 @@
 export { CalendarMiniWidget } from './CalendarMiniWidget';
+export { TodayWidget } from './TodayWidget';
 export { LedgerWidget } from './LedgerWidget';
 export { StatsWidget } from './StatsWidget';
 export { TasksWidget } from './TasksWidget';

@@ -16,6 +16,7 @@ const loaders: Record<string, () => Promise<unknown>> = {
   "/birthdays": () => import("@/pages/Birthdays"),
   "/ledger": () => import("@/pages/MoneyLedger"),
   "/subscriptions": () => import("@/pages/Subscriptions"),
+  "/wishlist": () => import("@/pages/Wishlist"),
   "/settings": () => import("@/pages/Settings"),
 };
 

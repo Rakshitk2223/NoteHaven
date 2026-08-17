@@ -32,6 +32,7 @@ import {
   BirthdaysWidget,
   SubscriptionsWidget,
   CalendarMiniWidget,
+  TodayWidget,
   LedgerWidget,
   CircularProgress
 } from '@/components/dashboard';
@@ -618,6 +619,17 @@ const Dashboard = () => {
     };
 
     switch (widget.type) {
+      case 'today':
+        return (
+          <TodayWidget
+            {...commonProps}
+            events={calendarEvents}
+            tasks={tasks}
+            onTaskComplete={handleTaskComplete}
+            onNavigate={(path) => navigate(path)}
+          />
+        );
+
       case 'stats':
         return (
           <StatsWidget

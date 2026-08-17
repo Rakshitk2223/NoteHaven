@@ -10,6 +10,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -358,15 +360,43 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
     }
   };
 
-  const handleCopyPrompt = async (promptText: string, id: number) => {
+  // {{variable}} templating: prompts may contain placeholders like {{topic}}.
+  // Copying such a prompt opens a fill-in dialog instead of copying verbatim.
+  const [varFill, setVarFill] = useState<{ promptText: string; id: number; vars: string[] } | null>(null);
+  const [varValues, setVarValues] = useState<Record<string, string>>({});
+
+  const extractVars = (text: string): string[] =>
+    [...new Set(Array.from(text.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g), (m) => m[1]))];
+
+  const writeToClipboard = async (text: string, id: number) => {
     try {
-      await navigator.clipboard.writeText(promptText);
+      await navigator.clipboard.writeText(text);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
       toast({ title: 'Copied', description: 'Prompt copied to clipboard.' });
     } catch (err) {
       toast({ title: 'Error', description: 'Clipboard copy failed.', variant: 'destructive' });
     }
+  };
+
+  const handleCopyPrompt = async (promptText: string, id: number) => {
+    const vars = extractVars(promptText);
+    if (vars.length > 0) {
+      setVarValues({});
+      setVarFill({ promptText, id, vars });
+      return;
+    }
+    await writeToClipboard(promptText, id);
+  };
+
+  const handleCopyWithValues = async () => {
+    if (!varFill) return;
+    const filled = varFill.promptText.replace(
+      /\{\{\s*([^{}]+?)\s*\}\}/g,
+      (match, name: string) => varValues[name]?.trim() || match,
+    );
+    await writeToClipboard(filled, varFill.id);
+    setVarFill(null);
   };
 
   const handleToggleFavorite = async (prompt: Prompt) => {
@@ -771,6 +801,37 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
         prompt={movePrompt}
         onOpenChange={(open) => { if (!open) setMovePrompt(null); }}
       />
+
+      {/* Fill-in dialog for {{variable}} prompts */}
+      <Dialog open={!!varFill} onOpenChange={(open) => { if (!open) setVarFill(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Fill in the blanks</DialogTitle>
+            <DialogDescription>This prompt has {varFill?.vars.length} variable{(varFill?.vars.length || 0) > 1 ? 's' : ''} — set them before copying.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            {varFill?.vars.map((v) => (
+              <div key={v} className="space-y-1.5">
+                <Label htmlFor={`var-${v}`} className="font-mono text-xs text-primary">{`{{${v}}}`}</Label>
+                <Input
+                  id={`var-${v}`}
+                  value={varValues[v] || ''}
+                  onChange={(e) => setVarValues((prev) => ({ ...prev, [v]: e.target.value }))}
+                  placeholder={v}
+                  autoFocus={v === varFill.vars[0]}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCopyWithValues(); }}
+                />
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVarFill(null)}>Cancel</Button>
+            <Button variant="gradient" onClick={handleCopyWithValues}>
+              <Copy className="h-4 w-4 mr-1.5" /> Copy filled prompt
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

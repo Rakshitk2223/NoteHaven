@@ -18,7 +18,7 @@ export interface CalendarEvent {
   };
 }
 
-export type CalendarView = 'month' | 'week';
+export type CalendarView = 'month' | 'week' | 'agenda';
 
 export interface CalendarFilters {
   task: boolean;

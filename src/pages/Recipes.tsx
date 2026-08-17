@@ -19,7 +19,7 @@ import { Stagger, StaggerItem } from '@/components/ui/motion';
 import { cn } from '@/lib/utils';
 import {
   ChefHat, Plus, Pencil, Trash2, Star, Clock, Users, Download, Search, Wand2,
-  ExternalLink, FolderPlus, Folder, Soup, X, Check, Utensils,
+  ExternalLink, FolderPlus, Folder, Soup, X, Check, Utensils, Sparkles, Mic,
 } from 'lucide-react';
 import {
   fetchRecipes, createRecipe, updateRecipe, deleteRecipe, setRecipeFields,
@@ -29,13 +29,19 @@ import {
   DIFFICULTY_META, DIFFICULTY_ORDER,
   type Recipe, type RecipeFolder, type RecipeDraft, type Difficulty, type MealHit,
 } from '@/lib/recipes';
+import { matchPantry, comparePantryMatches, type PantryMatch } from '@/lib/pantry-match';
+import { PantryPanel } from '@/components/recipes/PantryPanel';
+import { DictateParse } from '@/components/recipes/DictateParse';
+import type { ParsedRecipe } from '@/lib/recipe-parse';
 
 type FolderFilter = 'all' | 'favorites' | 'uncategorized' | number;
+
+const PANTRY_KEY = 'recipesPantry';
 
 const fmtTime = (mins: number) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60 ? `${mins % 60}m` : ''}`.trim() : `${mins}m`);
 
 // --- Card --------------------------------------------------------------------
-function RecipeCard({ recipe, onOpen, onFav }: { recipe: Recipe; onOpen: () => void; onFav: () => void }) {
+function RecipeCard({ recipe, onOpen, onFav, match }: { recipe: Recipe; onOpen: () => void; onFav: () => void; match?: PantryMatch }) {
   const total = totalMinutes(recipe);
   const diff = DIFFICULTY_META[(recipe.difficulty as Difficulty) || 'easy'];
   return (
@@ -67,6 +73,21 @@ function RecipeCard({ recipe, onOpen, onFav }: { recipe: Recipe; onOpen: () => v
       </div>
       <div className="flex flex-1 flex-col gap-2 p-3">
         <h3 className="line-clamp-2 font-semibold leading-snug">{recipe.title}</h3>
+        {match && match.total > 0 && (
+          <div className="space-y-0.5">
+            <span className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium',
+              match.have === match.total ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning',
+            )}>
+              <Check className="h-3 w-3" strokeWidth={3} /> You have {match.have} of {match.total}
+            </span>
+            {match.missing.length > 0 && (
+              <p className="line-clamp-1 text-[11px] text-muted-foreground">
+                missing: {match.missing.slice(0, 3).join(', ')}{match.missing.length > 3 ? ` +${match.missing.length - 3} more` : ''}
+              </p>
+            )}
+          </div>
+        )}
         <div className="mt-auto flex flex-wrap items-center gap-1.5 text-[11px]">
           {recipe.cuisine && <span className="rounded-full bg-secondary/60 px-2 py-0.5 text-muted-foreground">{recipe.cuisine}</span>}
           {recipe.category && <span className="rounded-full bg-secondary/60 px-2 py-0.5 text-muted-foreground">{recipe.category}</span>}
@@ -100,6 +121,19 @@ const Recipes = () => {
   const [importResults, setImportResults] = useState<MealHit[]>([]);
   const [importing, setImporting] = useState(false);
 
+  // "cook with what I have"
+  const [pantryOpen, setPantryOpen] = useState(false);
+  const [pantry, setPantry] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(PANTRY_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
+    } catch { return []; }
+  });
+
+  // dictate / paste mode inside the add-edit dialog
+  const [dictateOpen, setDictateOpen] = useState(false);
+
   // detail + cook + delete + folders
   const [detailId, setDetailId] = useState<number | null>(null);
   const [checked, setChecked] = useState<Set<number>>(new Set());
@@ -131,22 +165,46 @@ const Recipes = () => {
 
   const folderCount = (id: number) => recipes.filter((r) => r.folder_id === id).length;
 
+  useEffect(() => {
+    try { localStorage.setItem(PANTRY_KEY, JSON.stringify(pantry)); } catch { /* ignore */ }
+  }, [pantry]);
+
+  const pantryActive = pantryOpen && pantry.length > 0;
+
+  const pantryMatches = useMemo(() => {
+    if (!pantryActive) return null;
+    const m = new Map<number, PantryMatch>();
+    recipes.forEach((r) => m.set(r.id, matchPantry(r.ingredients ?? [], pantry)));
+    return m;
+  }, [recipes, pantry, pantryActive]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return recipes.filter((r) => {
+    let list = recipes.filter((r) => {
       if (folderFilter === 'favorites' && !r.is_favorite) return false;
       if (folderFilter === 'uncategorized' && r.folder_id != null) return false;
       if (typeof folderFilter === 'number' && r.folder_id !== folderFilter) return false;
       if (catFilter !== 'all' && r.category !== catFilter) return false;
-      if (q && !r.title.toLowerCase().includes(q) && !(r.cuisine ?? '').toLowerCase().includes(q) && !(r.category ?? '').toLowerCase().includes(q)) return false;
+      if (q) {
+        const haystack = [r.title, r.description ?? '', r.cuisine ?? '', r.category ?? '', ...(r.ingredients ?? [])]
+          .join('\n')
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
       return true;
     });
-  }, [recipes, search, folderFilter, catFilter]);
+    if (pantryActive && pantryMatches) {
+      list = list
+        .filter((r) => (pantryMatches.get(r.id)?.have ?? 0) > 0)
+        .sort((a, b) => comparePantryMatches(pantryMatches.get(a.id)!, pantryMatches.get(b.id)!));
+    }
+    return list;
+  }, [recipes, search, folderFilter, catFilter, pantryActive, pantryMatches]);
 
   const detail = detailId != null ? recipes.find((r) => r.id === detailId) ?? null : null;
 
-  const openAdd = () => { setEditing(null); setDraft(emptyDraft()); setDialogOpen(true); };
-  const openEdit = (r: Recipe) => { setEditing(r); setDraft(recipeToDraft(r)); setDialogOpen(true); };
+  const openAdd = () => { setEditing(null); setDraft(emptyDraft()); setDictateOpen(false); setDialogOpen(true); };
+  const openEdit = (r: Recipe) => { setEditing(r); setDraft(recipeToDraft(r)); setDictateOpen(false); setDialogOpen(true); };
   const openDetail = (r: Recipe) => { setDetailId(r.id); setChecked(new Set()); setCookMode(false); };
 
   const autoImage = async () => {
@@ -157,6 +215,35 @@ const Recipes = () => {
       if (url) { setDraft((d) => ({ ...d, image_url: url })); toast({ title: 'Image found ✨' }); }
       else toast({ title: 'No image found', description: 'Paste a URL instead.', variant: 'destructive' });
     } finally { setFetchingImg(false); }
+  };
+
+  const applyParsed = (p: ParsedRecipe) => {
+    const found =
+      p.title != null || p.ingredients.length > 0 || p.steps.length > 0 ||
+      p.servings != null || p.prep_minutes != null || p.cook_minutes != null;
+    if (!found) {
+      toast({ title: 'Nothing recognized', description: 'Try phrasing it as "…Ingredients: … Steps: …".', variant: 'destructive' });
+      return;
+    }
+    setDraft((d) => ({
+      ...d,
+      title: p.title ?? d.title,
+      ingredients: p.ingredients.length > 0 ? p.ingredients : d.ingredients,
+      instructions: p.steps.length > 0 ? p.steps.join('\n') : d.instructions,
+      servings: p.servings != null ? String(p.servings) : d.servings,
+      prep_minutes: p.prep_minutes != null ? String(p.prep_minutes) : d.prep_minutes,
+      cook_minutes: p.cook_minutes != null ? String(p.cook_minutes) : d.cook_minutes,
+    }));
+    const parts: string[] = [];
+    if (p.ingredients.length > 0) parts.push(`${p.ingredients.length} ingredient${p.ingredients.length === 1 ? '' : 's'}`);
+    if (p.steps.length > 0) parts.push(`${p.steps.length} step${p.steps.length === 1 ? '' : 's'}`);
+    if (p.servings != null) parts.push(`serves ${p.servings}`);
+    if (p.prep_minutes != null) parts.push(`prep ${p.prep_minutes}m`);
+    if (p.cook_minutes != null) parts.push(`cook ${p.cook_minutes}m`);
+    toast({
+      title: parts.length > 0 ? `Parsed ${parts.join(', ')}` : `Parsed "${p.title}"`,
+      description: 'Review the fields below, then save.',
+    });
   };
 
   const save = async () => {
@@ -268,15 +355,44 @@ const Recipes = () => {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input placeholder="Search recipes…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
           </div>
+          <Button
+            variant={pantryOpen ? 'default' : 'outline'}
+            onClick={() => setPantryOpen((o) => !o)}
+            aria-pressed={pantryOpen}
+          >
+            <Sparkles className="mr-2 h-4 w-4" /> What can I make?
+          </Button>
           <Button variant="outline" onClick={() => { setImportOpen(true); setImportQuery(''); setImportResults([]); setBrowsed(false); }}>
             <Download className="mr-2 h-4 w-4" /> Import
           </Button>
           <Button variant="gradient" onClick={openAdd}><Plus className="mr-2 h-4 w-4" /> Add Recipe</Button>
         </>
       }
-      mobileActions={<Button variant="gradient" size="icon-sm" onClick={openAdd} aria-label="Add recipe"><Plus className="h-4 w-4" /></Button>}
+      mobileActions={
+        <div className="flex items-center gap-2">
+          <Button
+            variant={pantryOpen ? 'default' : 'outline'}
+            size="icon-sm"
+            onClick={() => setPantryOpen((o) => !o)}
+            aria-label="What can I make?"
+            aria-pressed={pantryOpen}
+          >
+            <Sparkles className="h-4 w-4" />
+          </Button>
+          <Button variant="gradient" size="icon-sm" onClick={openAdd} aria-label="Add recipe"><Plus className="h-4 w-4" /></Button>
+        </div>
+      }
     >
       <div className="space-y-5">
+        {/* Cook with what I have */}
+        {pantryOpen && (
+          <PantryPanel
+            chips={pantry}
+            onChange={setPantry}
+            matchCount={pantryActive ? filtered.length : undefined}
+          />
+        )}
+
         {/* Folder rail */}
         {recipes.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
@@ -316,12 +432,16 @@ const Recipes = () => {
             </div>
           </div>
         ) : filtered.length === 0 ? (
-          <p className="py-16 text-center text-sm text-muted-foreground">No recipes match these filters.</p>
+          <p className="py-16 text-center text-sm text-muted-foreground">
+            {pantryActive
+              ? 'No recipes use any of those ingredients — try adding a few more, or clear the chips.'
+              : 'No recipes match these filters.'}
+          </p>
         ) : (
           <Stagger className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {filtered.map((r) => (
               <StaggerItem key={r.id}>
-                <RecipeCard recipe={r} onOpen={() => openDetail(r)} onFav={() => toggleFav(r)} />
+                <RecipeCard recipe={r} onOpen={() => openDetail(r)} onFav={() => toggleFav(r)} match={pantryMatches?.get(r.id)} />
               </StaggerItem>
             ))}
           </Stagger>
@@ -520,6 +640,20 @@ const Recipes = () => {
           </DialogHeader>
 
           <div className="grid gap-4 py-1">
+            <div className="grid gap-2">
+              <Button
+                type="button"
+                variant={dictateOpen ? 'secondary' : 'outline'}
+                size="sm"
+                className="justify-start"
+                onClick={() => setDictateOpen((o) => !o)}
+                aria-expanded={dictateOpen}
+              >
+                <Mic className="mr-2 h-4 w-4" /> Dictate / paste {dictateOpen ? '— hide' : ''}
+              </Button>
+              {dictateOpen && <DictateParse onApply={applyParsed} />}
+            </div>
+
             <div className="relative h-36 overflow-hidden rounded-xl border border-border">
               {draft.image_url ? <img src={draft.image_url} alt="" className="h-full w-full object-cover" /> : (
                 <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-500/30 to-amber-400/20"><Soup className="h-10 w-10 text-white/70" /></div>

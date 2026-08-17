@@ -312,6 +312,51 @@ export type Database = {
           },
         ]
       }
+      wishlist_items: {
+        Row: {
+          created_at: string
+          current_price: number | null
+          id: number
+          name: string
+          notes: string | null
+          price_drop_notified_at: string | null
+          price_history: Json
+          status: string
+          target_price: number | null
+          updated_at: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_price?: number | null
+          id?: never
+          name: string
+          notes?: string | null
+          price_drop_notified_at?: string | null
+          price_history?: Json
+          status?: string
+          target_price?: number | null
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          current_price?: number | null
+          id?: never
+          name?: string
+          notes?: string | null
+          price_drop_notified_at?: string | null
+          price_history?: Json
+          status?: string
+          target_price?: number | null
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       snippet_folders: {
         Row: {
           color: string | null

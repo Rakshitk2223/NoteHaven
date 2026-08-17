@@ -878,15 +878,15 @@ const Notes = () => {
 
   // Filter notes based on search query and selected tags
   const filteredNotes = notes.filter(note => {
-    // Search query filter
+    // Search query filter — every word must match somewhere (title, body, or tag names)
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      const title = (note.title || '').toLowerCase();
-      const contentText = (note.content || '')
-        .replace(/<[^>]+>/g, ' ')
-        .toLowerCase();
-      const matchesSearch = title.includes(query) || contentText.includes(query);
-      if (!matchesSearch) return false;
+      const words = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+      const haystack = [
+        note.title || '',
+        (note.content || '').replace(/<[^>]+>/g, ' '),
+        ...(note.tags?.map(t => t.name) || []),
+      ].join(' ').toLowerCase();
+      if (!words.every(w => haystack.includes(w))) return false;
     }
 
     // Tag filter

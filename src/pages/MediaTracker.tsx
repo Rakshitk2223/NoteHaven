@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp, Database, Upload, FileText, BarChart3, Eye, EyeOff } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp, Database, Upload, FileText, FileSpreadsheet, BarChart3, Eye, EyeOff } from "lucide-react";
+import { ToastAction } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1278,6 +1279,23 @@ const MediaTracker = () => {
       const { error } = await supabase.from('media_tracker').update(patch).eq('id', item.id);
       if (error) throw error;
       toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
+      // Auto-status: reaching the known final episode offers a one-tap Complete.
+      const knownTotal = item.last_known_total_episodes;
+      if (
+        field === 'current_episode' &&
+        knownTotal && newValue >= knownTotal &&
+        getStatusCategory(item.status) !== 'Completed'
+      ) {
+        toast({
+          title: 'All caught up! 🎉',
+          description: `${item.title} is at episode ${newValue} of ${knownTotal}.`,
+          action: (
+            <ToastAction altText="Mark Completed" onClick={() => patchMedia(item, { status: 'Completed' })}>
+              Mark Completed
+            </ToastAction>
+          ),
+        });
+      }
     } catch (e: unknown) {
       // Revert optimistic update on error
       queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
@@ -1413,50 +1431,118 @@ const MediaTracker = () => {
     }
   };
 
+  const triggerDownload = (content: string, mime: string, filename: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  const csvEscape = (v: unknown): string => {
+    if (v == null) return '';
+    const s = Array.isArray(v) ? v.join('; ') : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const handleExportCsv = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('Not authenticated');
+      const { data, error } = await supabase
+        .from('media_tracker')
+        .select('title, type, status, rating, current_season, current_episode, last_known_total_episodes, current_chapter, created_at, updated_at, media_tags(tags(name))')
+        .eq('user_id', user.id)
+        .order('type', { ascending: true })
+        .order('title', { ascending: true });
+      if (error) throw error;
+      const header = ['Title', 'Type', 'Status', 'My Rating', 'Season', 'Episode', 'Total Episodes', 'Chapter', 'Tags', 'Added', 'Updated'];
+      const rows = ((data || []) as Array<Record<string, unknown>>).map((row) => {
+        const mediaTags = row.media_tags as Array<{ tags: { name: string } | null }> | undefined;
+        const tags = Array.isArray(mediaTags)
+          ? mediaTags.map((mt) => mt.tags?.name).filter(Boolean)
+          : [];
+        return [
+          row.title, row.type, row.status, row.rating,
+          row.current_season, row.current_episode, row.last_known_total_episodes, row.current_chapter,
+          tags, String(row.created_at || '').slice(0, 10), String(row.updated_at || '').slice(0, 10),
+        ].map(csvEscape).join(',');
+      });
+      // BOM so Excel/Numbers detect UTF-8 (titles often contain non-ASCII).
+      const csv = '﻿' + [header.join(','), ...rows].join('\r\n');
+      triggerDownload(csv, 'text/csv;charset=utf-8', `notehaven_media_${dateToYMD(new Date())}.csv`);
+      toast({ title: 'Export started', description: `${rows.length} items exported as CSV.` });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Error';
+      toast({ title: 'Export failed', description: message, variant: 'destructive' });
+    }
+  };
+
   const handleExportTxt = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) throw new Error('Not authenticated');
-      
+
       let query = supabase.from('media_tracker').select('*').eq('user_id', user.id).order('title', { ascending: true });
-      
+
       // Apply type filter if types are selected
       if (txtExportSelectedTypes.length > 0) {
         query = query.in('type', txtExportSelectedTypes);
       }
-      
+
       const { data, error } = await query;
       if (error) throw error;
-      
-      const lines: string[] = [];
-      (data || []).forEach((item: MediaItem) => {
-        const parts: string[] = [item.title];
-        
-        // Add chapter for readable types
+
+      const items = (data || []) as MediaItem[];
+
+      // Readable layout: grouped by type, then by status category, one line per title.
+      const progressLine = (item: MediaItem): string => {
+        const parts: string[] = [];
         if (readableTypes.includes(item.type) && item.current_chapter) {
-          parts.push(`Chapter ${item.current_chapter}`);
+          parts.push(`Ch ${item.current_chapter}`);
+        } else if (watchableTypes.includes(item.type)) {
+          const season = item.current_season ? `S${item.current_season} ` : '';
+          const total = item.last_known_total_episodes ? `/${item.last_known_total_episodes}` : '';
+          if (item.current_episode) parts.push(`${season}Ep ${item.current_episode}${total}`);
         }
-        // Add episode for watchable types
-        else if (watchableTypes.includes(item.type) && item.current_episode) {
-          parts.push(`Episode ${item.current_episode}`);
-        }
-        
-        // Add season number if present
-        if (item.current_season) {
-          parts.push(`Season ${item.current_season}`);
-        }
-        
-        lines.push(parts.join(' - '));
+        if (item.rating) parts.push(`★ ${item.rating}/10`);
+        return parts.length ? ` — ${parts.join(' · ')}` : '';
+      };
+
+      const byType = new Map<string, MediaItem[]>();
+      items.forEach((item) => {
+        const list = byType.get(item.type) || [];
+        list.push(item);
+        byType.set(item.type, list);
       });
-      
-      const text = lines.join('\n');
-      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'notehaven_media_export.txt';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      toast({ title: 'Export complete', description: `${lines.length} items exported to text file.` });
+
+      const STATUS_ORDER = ['Active', 'Planned', 'Completed', 'Other'];
+      const out: string[] = [
+        'NOTEHAVEN — MEDIA LIBRARY',
+        `Exported ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })} · ${items.length} titles`,
+        '',
+      ];
+      [...byType.entries()].sort(([a], [b]) => a.localeCompare(b)).forEach(([type, list]) => {
+        out.push(`═══ ${type.toUpperCase()} (${list.length}) ${'═'.repeat(Math.max(3, 40 - type.length))}`);
+        const byStatus = new Map<string, MediaItem[]>();
+        list.forEach((item) => {
+          const cat = getStatusCategory(item.status) || 'Other';
+          const sub = byStatus.get(cat) || [];
+          sub.push(item);
+          byStatus.set(cat, sub);
+        });
+        STATUS_ORDER.filter((s) => byStatus.has(s)).forEach((cat) => {
+          const sub = byStatus.get(cat)!;
+          out.push('', `  ${cat} (${sub.length})`);
+          sub.forEach((item) => out.push(`    • ${item.title}${progressLine(item)}`));
+        });
+        out.push('');
+      });
+
+      triggerDownload(out.join('\n'), 'text/plain;charset=utf-8', `notehaven_media_${dateToYMD(new Date())}.txt`);
+      toast({ title: 'Export complete', description: `${items.length} items exported to text file.` });
       setTxtExportDialogOpen(false);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error';
@@ -2709,6 +2795,9 @@ const MediaTracker = () => {
                       <DropdownMenuItem onClick={handleExportJson}>
                         <Download className="h-4 w-4 mr-2" /> Export JSON
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleExportCsv}>
+                        <FileSpreadsheet className="h-4 w-4 mr-2" /> Export CSV
+                      </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setTxtExportDialogOpen(true)}>
                         <FileText className="h-4 w-4 mr-2" /> Export TXT
                       </DropdownMenuItem>
@@ -2817,6 +2906,9 @@ const MediaTracker = () => {
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={handleExportJson}>
                           <Download className="h-4 w-4 mr-2" /> Export JSON
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={handleExportCsv}>
+                          <FileSpreadsheet className="h-4 w-4 mr-2" /> Export CSV
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setTxtExportDialogOpen(true)}>
                           <FileText className="h-4 w-4 mr-2" /> Export TXT

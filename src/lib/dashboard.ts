@@ -13,11 +13,13 @@ import {
   Tag,
   Clock,
   LayoutGrid,
+  Sun,
   type LucideIcon
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 export type WidgetType =
+  | 'today'
   | 'stats'
   | 'tasks'
   | 'notes'
@@ -75,6 +77,7 @@ export const sizeLabels: Record<WidgetSize, string> = {
 };
 
 export const DEFAULT_WIDGETS: DashboardWidget[] = [
+  { id: 'today', type: 'today', title: 'Today', visible: true, position: 0, size: 'half' },
   { id: 'calendar', type: 'calendar-mini', title: 'Calendar', visible: true, position: 0, size: 'full' },
   { id: 'notes', type: 'notes', title: 'Recent Notes', visible: true, position: 1, size: 'half' },
   { id: 'tasks', type: 'tasks', title: 'Pending Tasks', visible: true, position: 2, size: 'half' },
@@ -166,6 +169,12 @@ export async function resetWidgets(): Promise<DashboardWidget[]> {
 }
 
 export const widgetMetadata: Record<WidgetType, { title: string; description: string; icon: LucideIcon; defaultSize: WidgetSize }> = {
+  today: {
+    title: 'Today',
+    description: 'Overdue and due-today tasks plus today\'s birthdays, renewals and countdowns',
+    icon: Sun,
+    defaultSize: 'half'
+  },
   'calendar-mini': {
     title: 'Calendar',
     description: 'Monthly calendar view with upcoming events and tasks',

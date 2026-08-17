@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import AppSidebar from '@/components/AppSidebar';
 import { MonthView } from '@/components/calendar/MonthView';
 import { WeekView } from '@/components/calendar/WeekView';
+import { AgendaView } from '@/components/calendar/AgendaView';
 import { CalendarHeader } from '@/components/calendar/CalendarHeader';
 import { DayDetailModal } from '@/components/calendar/DayDetailModal';
 import { QuickAddDialog } from '@/components/calendar/QuickAddDialog';
@@ -132,6 +133,11 @@ const Calendar = () => {
                     events={events}
                     onDateClick={handleDateClick}
                     selectedDate={selectedDate}
+                  />
+                ) : view === 'agenda' ? (
+                  <AgendaView
+                    events={events}
+                    onDateClick={handleDateClick}
                   />
                 ) : (
                   <WeekView
