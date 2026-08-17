@@ -8,7 +8,7 @@ Guidance for AI assistants (and humans) working in the NoteHaven codebase. For d
 
 NoteHaven is a personal productivity & media companion: a React 18 + TypeScript + Vite single-page app backed entirely by Supabase (PostgreSQL + RLS, Auth, Storage, Realtime, RPC, one Edge Function). There is **no custom server** — the client talks to Supabase directly.
 
-Features: Notes (rich text, auto-save, share links), Tasks, AI Prompt library, Code Snippets, Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger (accounts + cumulative "money in hand"), Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a **Bucket List**, a **Recipes** cookbook, a cross-cutting Tags system, and a customizable widget Dashboard.
+Features: Notes (rich text, auto-save, share links), Tasks, AI Prompt library, Code Snippets, a per-project Commands bank (shares the snippet project folders), Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger (accounts + cumulative "money in hand"), Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a **Bucket List**, a **Recipes** cookbook, a cross-cutting Tags system, and a customizable widget Dashboard.
 
 ---
 
@@ -78,9 +78,9 @@ context/                  # frontend.md, backend.md (architecture docs)
 
 The `supabase/` folder is git-tracked: `config.toml`, the `media-search` edge function, and the SQL migrations. (`supabase/.temp/` is CLI cache — untracked.)
 
-**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it. New changes go in their own numbered file (`21_*.sql` next).
+**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it, then `21_commands.sql` (the Library Commands tab's `commands` table). New changes go in their own numbered file (`22_*.sql` next).
 
-Migrations are applied **by hand in the Supabase SQL editor**, in filename order — there is no migration runner. `00` and `20` must be run explicitly on a new project. `00` is already live on the production database; `20` is not (see below).
+Migrations are applied **by hand in the Supabase SQL editor**, in filename order — there is no migration runner. `00`, `20`, and `21` must be run explicitly on a new project. `00` is already live on the production database; `20` and `21` are not (see below — the Commands tab errors on fetch until `21` is run).
 
 `00_baseline_schema.sql` plus `src/integrations/supabase/types.ts` are the schema source of truth.
 

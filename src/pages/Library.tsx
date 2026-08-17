@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Code, MessageSquare, Search, ChevronDown, ChevronRight, ChevronLeft, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil, Library as LibraryIcon } from "lucide-react";
+import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Code, MessageSquare, Search, ChevronDown, ChevronRight, ChevronLeft, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil, Terminal, Library as LibraryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -45,6 +45,7 @@ import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchPromptTags, setPromptTags, createTag, TAG_COLORS, type Tag } from "@/lib/tags";
 import CodeEditor from "@/components/CodeEditor";
+import { CommandsTab, MoveToCommandsDialog } from "@/components/library/CommandsTab";
 import {
   type CodeSnippet,
   type SnippetFolder,
@@ -88,7 +89,7 @@ const PANE_HEIGHT = 'h-[calc(100dvh-250px)] min-h-[24rem]';
 const readStoredTab = (): string => {
   try {
     const v = localStorage.getItem(TAB_STORAGE_KEY);
-    return v === 'snippets' || v === 'prompts' ? v : 'prompts';
+    return v === 'snippets' || v === 'prompts' || v === 'commands' ? v : 'prompts';
   } catch {
     return 'prompts';
   }
@@ -103,7 +104,7 @@ const Library = () => {
   const paramSnippet = searchParams.get('snippet');
 
   const [activeTab, setActiveTab] = useState<string>(() => {
-    if (paramTab === 'snippets' || paramTab === 'prompts') return paramTab;
+    if (paramTab === 'snippets' || paramTab === 'prompts' || paramTab === 'commands') return paramTab;
     if (paramSnippet) return 'snippets';
     if (paramPrompt) return 'prompts';
     return readStoredTab();
@@ -119,7 +120,11 @@ const Library = () => {
   return (
     <PageShell
       title="Library"
-      subtitle={activeTab === 'snippets' ? 'Your code snippets, organised into project folders' : 'Your reusable AI prompts'}
+      subtitle={
+        activeTab === 'snippets' ? 'Your code snippets, organised into project folders'
+        : activeTab === 'commands' ? 'Per-project commands, one click from the clipboard'
+        : 'Your reusable AI prompts'
+      }
       icon={LibraryIcon}
     >
       <Tabs value={activeTab} onValueChange={handleTabChange}>
@@ -138,6 +143,13 @@ const Library = () => {
             <Code className="h-4 w-4 text-accent-2" />
             Code Snippets
           </TabsTrigger>
+          <TabsTrigger
+            value="commands"
+            className="gap-2 rounded-md text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow"
+          >
+            <Terminal className="h-4 w-4 text-success" />
+            Commands
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="prompts">
@@ -146,6 +158,10 @@ const Library = () => {
 
         <TabsContent value="snippets">
           <SnippetsTab focusId={paramSnippet ? Number(paramSnippet) : null} />
+        </TabsContent>
+
+        <TabsContent value="commands">
+          <CommandsTab />
         </TabsContent>
       </Tabs>
     </PageShell>
@@ -216,6 +232,7 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
   const [formData, setFormData] = useState({ title: "", prompt_text: "", category: "" });
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
+  const [movePrompt, setMovePrompt] = useState<Prompt | null>(null);
 
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [formTags, setFormTags] = useState<Tag[]>([]);
@@ -724,6 +741,9 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
                       <DropdownMenuItem onClick={() => handleEditPrompt(prompt)}>
                         <Edit className="h-4 w-4 mr-2" /> Edit
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setMovePrompt(prompt)}>
+                        <Terminal className="h-4 w-4 mr-2" /> Move to Commands
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => setDeleteConfirm({ open: true, id: prompt.id })} className="text-destructive focus:text-destructive">
                         <Trash2 className="h-4 w-4 mr-2" /> Delete
@@ -742,6 +762,11 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
         onConfirm={handleDeletePrompt}
         title="Delete Prompt"
         description="Are you sure you want to delete this prompt? This action cannot be undone."
+      />
+
+      <MoveToCommandsDialog
+        prompt={movePrompt}
+        onOpenChange={(open) => { if (!open) setMovePrompt(null); }}
       />
     </>
   );

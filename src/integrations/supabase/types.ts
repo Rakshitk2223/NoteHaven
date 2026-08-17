@@ -259,6 +259,59 @@ export type Database = {
           },
         ]
       }
+      commands: {
+        Row: {
+          category: string | null
+          command: string
+          created_at: string | null
+          description: string | null
+          folder_id: number | null
+          id: number
+          is_favorited: boolean | null
+          is_pinned: boolean | null
+          label: string
+          sort_order: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          command: string
+          created_at?: string | null
+          description?: string | null
+          folder_id?: number | null
+          id?: number
+          is_favorited?: boolean | null
+          is_pinned?: boolean | null
+          label: string
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          command?: string
+          created_at?: string | null
+          description?: string | null
+          folder_id?: number | null
+          id?: number
+          is_favorited?: boolean | null
+          is_pinned?: boolean | null
+          label?: string
+          sort_order?: number | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "commands_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "snippet_folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       snippet_folders: {
         Row: {
           color: string | null
