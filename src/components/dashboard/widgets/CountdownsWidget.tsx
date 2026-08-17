@@ -146,7 +146,7 @@ export function CountdownsWidget({
                 variant="ghost"
                 size="icon"
                 aria-label={`Delete countdown ${countdown.event_name}`}
-                className="h-7 w-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                className="h-9 w-9 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
                 onClick={() => onDelete(countdown.id)}
               >
                 <Trash2 className="h-4 w-4 text-destructive" />

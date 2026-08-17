@@ -234,9 +234,9 @@ const AppSidebar = () => {
           ? "-translate-x-full lg:translate-x-0 lg:w-16"
           : "translate-x-0 w-64 lg:w-64"
       )}>
-        {/* Header / brand */}
+        {/* Header / brand — safe-area padding keeps it below the iOS status bar in standalone mode */}
         <div className={cn(
-          "flex items-center border-b border-sidebar-border h-16",
+          "flex items-center border-b border-sidebar-border h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] lg:h-16 lg:pt-0",
           isCollapsed ? "lg:justify-center lg:px-2" : "justify-between px-4"
         )}>
           <div className="flex items-center gap-2.5 min-w-0">
@@ -250,9 +250,10 @@ const AppSidebar = () => {
           </div>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon"
             onClick={toggle}
             className="lg:hidden"
+            aria-label="Close menu"
           >
             <X className="h-4 w-4" />
           </Button>
@@ -322,7 +323,7 @@ const AppSidebar = () => {
           "border-t border-sidebar-border mt-auto flex flex-col",
           isCollapsed
             ? "lg:p-2 lg:space-y-2"
-            : "p-3 space-y-1"
+            : "p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] lg:pb-3 space-y-1"
         )}>
           {bottomNavigation.map((item) => (
             <SidebarItem

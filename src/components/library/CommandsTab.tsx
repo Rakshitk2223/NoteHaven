@@ -581,7 +581,7 @@ export const CommandsTab = () => {
                 placeholder="e.g. uvicorn app.main:app --reload --port 8000"
                 rows={3}
                 required
-                className="font-mono text-sm"
+                className="font-mono text-base md:text-sm"
               />
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -792,7 +792,7 @@ export const MoveToCommandsDialog = ({
               value={form.command}
               onChange={(e) => setForm(prev => ({ ...prev, command: e.target.value }))}
               rows={3}
-              className="font-mono text-sm"
+              className="font-mono text-base md:text-sm"
             />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

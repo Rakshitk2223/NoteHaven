@@ -54,12 +54,12 @@ export function PageShell({
   const { toggle } = useSidebar();
 
   return (
-    <div className={cn("relative flex", fullHeight ? "h-screen overflow-hidden" : "min-h-screen")}>
+    <div className={cn("relative flex", fullHeight ? "h-dvh overflow-hidden" : "min-h-dvh")}>
       <AppSidebar />
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Mobile header */}
-        <header className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-2 px-3 h-14 border-b border-border/60 bg-background/70 backdrop-blur-xl">
-          <Button variant="ghost" size="icon-sm" onClick={toggle} aria-label="Open menu">
+        {/* Mobile header — pt/h account for the iOS status bar in installed (standalone) mode */}
+        <header className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-2 px-3 h-[calc(3.5rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] border-b border-border/60 bg-background/70 backdrop-blur-xl">
+          <Button variant="ghost" size="icon" onClick={toggle} aria-label="Open menu">
             <Menu className="h-5 w-5" />
           </Button>
           <h1 className="font-heading font-bold text-base truncate">{title}</h1>

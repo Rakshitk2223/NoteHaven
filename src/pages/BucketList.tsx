@@ -113,8 +113,9 @@ function BucketCard({
           </span>
         )}
 
-        {/* Hover actions */}
-        <div className="absolute bottom-2 right-2 flex translate-y-2 items-center gap-1 opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+        {/* Actions — hover-revealed on desktop, always visible on touch (an invisible-but-tappable
+            Delete here used to intercept card taps on iPhone/iPad) */}
+        <div className="absolute bottom-2 right-2 flex translate-y-2 items-center gap-1 opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100 [@media(hover:none)]:translate-y-0 [@media(hover:none)]:opacity-100">
           <button
             onClick={(e) => { e.stopPropagation(); onToggleAchieved(); }}
             title={achieved ? 'Mark as not done' : 'Mark achieved'}
@@ -345,7 +346,7 @@ const BucketList = () => {
 
         {/* Grid / states */}
         {loading ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="loading-shimmer h-64 rounded-2xl" />
             ))}
@@ -362,7 +363,7 @@ const BucketList = () => {
         ) : filtered.length === 0 ? (
           <p className="py-16 text-center text-sm text-muted-foreground">No dreams match these filters.</p>
         ) : (
-          <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
             {filtered.map((item) => (
               <StaggerItem key={item.id}>
                 <BucketCard
@@ -457,11 +458,22 @@ const BucketList = () => {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button variant="gradient" onClick={save} disabled={saving || !draft.title.trim()}>
-              {saving ? 'Saving…' : editing ? 'Save' : 'Add dream'}
-            </Button>
+          <DialogFooter className={editing ? 'sm:justify-between' : undefined}>
+            {editing && (
+              <Button
+                variant="ghost"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => { setDialogOpen(false); setDeleteId(editing.id); }}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" /> Delete
+              </Button>
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-2">
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+              <Button variant="gradient" onClick={save} disabled={saving || !draft.title.trim()}>
+                {saving ? 'Saving…' : editing ? 'Save' : 'Add dream'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

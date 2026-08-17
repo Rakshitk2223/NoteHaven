@@ -912,61 +912,66 @@ const Notes = () => {
   }, [searchQuery, selectedTags]);
 
   return (
-    <div className="h-screen overflow-hidden">
+    <div className="h-dvh overflow-hidden">
       <div className="flex h-full">
         <AppSidebar />
-        
-        <div className="flex-1 lg:ml-0 min-w-0 h-full overflow-hidden">
-          {/* Mobile Header */}
-          {isMobileView && (
-            <div className="sticky top-0 z-30 flex items-center justify-between p-3 sm:p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={toggleSidebar}
-                  className="touch-manipulation"
-                  title="Main menu"
-                >
-                  <Menu className="h-5 w-5" />
-                </Button>
-                {showNoteList && (
-                  <span className="text-muted-foreground text-sm">|</span>
-                )}
-                <Button
-                  variant={showNoteList ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => setShowNoteList(!showNoteList)}
-                  className="touch-manipulation"
-                  title="Toggle notes list"
-                >
-                  <List className="h-5 w-5" />
-                </Button>
-              </div>
-              <h1 className="font-heading font-bold text-base sm:text-lg">{showNoteList ? 'All Notes' : (selectedNote?.title || 'Notes')}</h1>
-              <Button
-                size="sm"
-                onClick={createNote}
-                disabled={loading}
-                className="touch-manipulation"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
 
-          <div className="flex h-full overflow-hidden">
+        <div className="flex-1 lg:ml-0 min-w-0 h-full overflow-hidden flex flex-col">
+          {/* Mobile/tablet header — class-gated (lg:hidden), not isMobileView-gated: at 768–1023px
+              (portrait iPad) the sidebar is off-canvas, so this is the only way to open navigation. */}
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-3 sm:p-4 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))] border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSidebar}
+                className="touch-manipulation"
+                aria-label="Main menu"
+                title="Main menu"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              {isMobileView && (
+                <>
+                  <span className="text-muted-foreground text-sm">|</span>
+                  <Button
+                    variant={showNoteList ? "default" : "ghost"}
+                    size="icon"
+                    onClick={() => setShowNoteList(!showNoteList)}
+                    className="touch-manipulation"
+                    aria-label="Toggle notes list"
+                    title="Toggle notes list"
+                  >
+                    <List className="h-5 w-5" />
+                  </Button>
+                </>
+              )}
+            </div>
+            <h1 className="font-heading font-bold text-base sm:text-lg truncate">{showNoteList && isMobileView ? 'All Notes' : (selectedNote?.title || 'Notes')}</h1>
+            <Button
+              size="icon"
+              onClick={createNote}
+              disabled={loading}
+              className="touch-manipulation"
+              aria-label="New note"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="flex flex-1 min-h-0 overflow-hidden">
             {/* Notes List Pane */}
             <div className={`
-              ${isMobileView 
-                ? (showNoteList ? 'w-full' : 'hidden') 
-                : 'w-72 md:w-80 lg:w-96 border-r border-border'
+              ${isMobileView
+                ? (showNoteList ? 'w-full' : 'hidden')
+                : 'w-72 md:w-80 xl:w-96 border-r border-border'
               }
               flex flex-col bg-card h-full overflow-hidden
             `}>
-              {/* Desktop Header */}
-              {!isMobileView && (
-                <div className="p-3 md:p-4 border-b border-border sticky top-0 bg-card z-10">
+              {/* List header — search + tag filter render on every size; title/New row is desktop-only
+                  (the mobile top bar already has a New button). */}
+              <div className="p-3 md:p-4 border-b border-border sticky top-0 bg-card z-10">
+                {!isMobileView && (
                   <div className="flex items-center justify-between mb-3">
                     <h2 className="text-base md:text-lg font-semibold text-foreground gradient-text-soft">Notes</h2>
                     <Button
@@ -979,32 +984,33 @@ const Notes = () => {
                       <span className="hidden md:inline">New</span>
                     </Button>
                   </div>
-                  {/* Search Bar */}
-                  <div className="relative mb-2">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search notes..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9 pr-8 text-sm"
-                    />
-                    {searchQuery && (
-                      <button
-                        onClick={() => setSearchQuery('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground touch-manipulation"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                  {/* Tag Filter */}
-                  <TagFilter
-                    availableTags={availableTags}
-                    selectedTags={selectedTags}
-                    onChange={setSelectedTags}
+                )}
+                {/* Search Bar */}
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search notes..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 pr-9"
                   />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-0 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center text-muted-foreground hover:text-foreground touch-manipulation"
+                      aria-label="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
-              )}
+                {/* Tag Filter */}
+                <TagFilter
+                  availableTags={availableTags}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                />
+              </div>
 
               {/* Notes List */}
               <div className="flex-1 overflow-y-auto">
@@ -1098,9 +1104,9 @@ const Notes = () => {
                            style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
                            dangerouslySetInnerHTML={{ __html: sanitizePreview(note.content || '') }} 
                          />
-                         {/* Tags (show on hover) */}
+                         {/* Tags (hover-revealed on desktop, always visible on touch) */}
                          {note.tags && note.tags.length > 0 && (
-                           <div className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-wrap gap-1">
+                           <div className="mt-2 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity flex flex-wrap gap-1">
                              {note.tags.map(tag => (
                                <TagBadge key={tag.id} tag={tag} size="sm" />
                              ))}
@@ -1261,7 +1267,7 @@ const Notes = () => {
                               <div className="space-y-2">
                                 <label className="text-xs font-medium text-muted-foreground">Share URL</label>
                                 <div className="flex gap-2">
-                                  <Input readOnly value={shareLink} className="text-xs" />
+                                  <Input readOnly value={shareLink} className="text-base md:text-xs" />
                                   <Button
                                     type="button"
                                     size="sm"
@@ -1286,15 +1292,15 @@ const Notes = () => {
                   <div className="flex-1 p-2 sm:p-4 flex flex-col gap-3 overflow-hidden">
                     <div className="flex-1 flex flex-col border rounded-md overflow-hidden">
                       <div className="sticky top-0 bg-background z-10 flex items-center gap-0.5 sm:gap-1 flex-wrap border-b border-border p-1 text-xs">
-                        <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Bold className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Italic className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('underline') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline (Ctrl+U)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><UnderlineIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('bold') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBold().run()} title="Bold (Ctrl+B)" className="h-10 w-10 sm:h-9 sm:w-9 p-0 touch-manipulation"><Bold className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('italic') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleItalic().run()} title="Italic (Ctrl+I)" className="h-10 w-10 sm:h-9 sm:w-9 p-0 touch-manipulation"><Italic className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('underline') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleUnderline().run()} title="Underline (Ctrl+U)" className="h-10 w-10 sm:h-9 sm:w-9 p-0 touch-manipulation"><UnderlineIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
                         <div className="w-px h-4 sm:h-5 bg-border mx-0.5 sm:mx-1" />
-                        <Button size="sm" variant={editor?.isActive('bulletList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><List className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
-                        <Button size="sm" variant={editor?.isActive('orderedList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Ordered List" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><ListOrdered className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('bulletList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet List" className="h-10 w-10 sm:h-9 sm:w-9 p-0 touch-manipulation"><List className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant={editor?.isActive('orderedList') ? 'default' : 'ghost'} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Ordered List" className="h-10 w-10 sm:h-9 sm:w-9 p-0 touch-manipulation"><ListOrdered className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
                         <div className="w-px h-4 sm:h-5 bg-border mx-0.5 sm:mx-1" />
-                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo (Ctrl+Z)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Undo className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo (Ctrl+Y)" className="h-8 w-8 sm:h-9 sm:w-9 p-0 touch-manipulation"><Redo className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo (Ctrl+Z)" className="h-10 w-10 sm:h-9 sm:w-9 p-0 touch-manipulation"><Undo className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo (Ctrl+Y)" className="h-10 w-10 sm:h-9 sm:w-9 p-0 touch-manipulation"><Redo className="h-3.5 w-3.5 sm:h-4 sm:w-4" /></Button>
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 sm:p-4 flex">
                         {editor && (

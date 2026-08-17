@@ -262,7 +262,7 @@ const Birthdays = () => {
             {isToday ? '🎉 Today!' : `In ${days} ${days === 1 ? 'day' : 'days'}`}
           </span>
         </div>
-        <div className="flex flex-shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex flex-shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100">
           <Button size="icon" variant="ghost" onClick={() => openEditModal(birthday)} className="h-8 w-8 hover:bg-secondary">
             <Edit className="h-4 w-4" />
           </Button>
@@ -355,7 +355,7 @@ const Birthdays = () => {
                 {filteredBirthdays.length === 0 ? (
                   <p className="py-8 text-center text-muted-foreground">No birthdays found matching "{searchQuery}"</p>
                 ) : (
-                  <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {filteredBirthdays.map(b => (
                       <StaggerItem key={b.id} hover={false}>
                         <BirthdayCard birthday={b} />
@@ -376,7 +376,7 @@ const Birthdays = () => {
                       <Cake className="h-5 w-5 text-primary" /> This month
                       <span className="text-sm font-normal text-muted-foreground">({groups.thisMonth.length})</span>
                     </h2>
-                    <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {groups.thisMonth.map(b => (
                         <StaggerItem key={b.id} hover={false}>
                           <BirthdayCard birthday={b} />
@@ -392,7 +392,7 @@ const Birthdays = () => {
                     <CalendarDays className="h-5 w-5 text-muted-foreground" /> All birthdays
                     <span className="text-sm font-normal text-muted-foreground">· soonest first</span>
                   </h2>
-                  <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {groups.all.map(b => (
                       <StaggerItem key={b.id} hover={false}>
                         <BirthdayCard birthday={b} />

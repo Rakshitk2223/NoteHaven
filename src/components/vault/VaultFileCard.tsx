@@ -137,7 +137,7 @@ export function VaultFileCard({
             onClick={(e) => e.stopPropagation()}
             className={cn(
               "flex-shrink-0 transition-opacity",
-              checkboxVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              checkboxVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
             )}
           >
             <Checkbox checked={selected} onCheckedChange={() => onToggleSelect()} aria-label={`Select ${file.name}`} />
@@ -178,7 +178,7 @@ export function VaultFileCard({
             onClick={(e) => e.stopPropagation()}
             className={cn(
               "absolute top-2 left-2 z-10 rounded-md bg-background/85 p-1 shadow-sm ring-1 ring-border/50 backdrop-blur-sm transition-opacity",
-              checkboxVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              checkboxVisible ? "opacity-100" : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
             )}
           >
             <Checkbox checked={selected} onCheckedChange={() => onToggleSelect()} aria-label={`Select ${file.name}`} />
@@ -192,7 +192,7 @@ export function VaultFileCard({
           ) : (
             <Icon className="h-9 w-9 text-muted-foreground/70" />
           )}
-          <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             {menu}
           </div>
         </div>

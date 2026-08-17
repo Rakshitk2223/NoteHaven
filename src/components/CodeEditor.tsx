@@ -64,11 +64,16 @@ interface CodeEditorProps {
   minHeight?: string;
 }
 
+// iOS Safari zooms the page when a focused editable's font is under 16px,
+// so touch devices get 16px while desktop keeps the compact 13px.
+const isTouchPrimary = () =>
+  typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
+
 const baseTheme = (minHeight: string) =>
   EditorView.theme({
     '&': {
       minHeight,
-      fontSize: '13px',
+      fontSize: isTouchPrimary() ? '16px' : '13px',
       border: '1px solid hsl(var(--border))',
       borderRadius: '0.5rem',
       overflow: 'hidden',

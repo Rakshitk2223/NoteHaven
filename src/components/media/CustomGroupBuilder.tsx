@@ -180,14 +180,15 @@ export const CustomGroupBuilder = ({
               {renderCount(group.id, active)}
             </button>
 
-            {/* Edit/Delete buttons on hover */}
-            <div className="absolute -top-2 -right-2 hidden group-hover:flex gap-1">
+            {/* Edit/Delete buttons — hover-revealed on desktop, always visible on touch
+                (there is no other way to edit/delete a group) */}
+            <div className="absolute -top-2 -right-2 hidden group-hover:flex [@media(hover:none)]:flex gap-1">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleEditGroup(group);
                 }}
-                className="w-5 h-5 rounded-full bg-secondary flex items-center justify-center hover:bg-muted hover:text-foreground"
+                className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center hover:bg-muted hover:text-foreground"
                 aria-label={`Edit group ${group.name}`}
                 title={`Edit group ${group.name}`}
               >
@@ -198,7 +199,7 @@ export const CustomGroupBuilder = ({
                   e.stopPropagation();
                   setDeleteTarget(group);
                 }}
-                className="w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:bg-destructive/90"
+                className="w-6 h-6 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:bg-destructive/90"
                 aria-label={`Delete group ${group.name}`}
                 title={`Delete group ${group.name}`}
               >

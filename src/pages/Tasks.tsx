@@ -336,7 +336,7 @@ const Tasks = () => {
   const completedTasks = filterTasksByTags(tasks.filter(task => task.is_completed)).sort((a,b) => (b.is_pinned?1:0) - (a.is_pinned?1:0));
 
   return (
-    <PageShell title="Tasks" icon={ListTodo} subtitle={`${todoTasks.length} to do · ${completedTasks.length} done`}>
+    <PageShell title="Tasks" icon={ListTodo} subtitle={`${todoTasks.length} to do · ${completedTasks.length} done`} maxWidth="5xl">
             {error && (
               <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive">
                 {error}
@@ -485,7 +485,7 @@ const Tasks = () => {
                             )}
                             {/* Tags (show on hover) */}
                             {task.tags && task.tags.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex flex-wrap gap-1 mt-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                                 {task.tags.map(tag => (
                                   <TagBadge key={tag.id} tag={tag} size="sm" />
                                 ))}
@@ -582,7 +582,7 @@ const Tasks = () => {
                             )}
                             {/* Tags (show on hover) */}
                             {task.tags && task.tags.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex flex-wrap gap-1 mt-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                                 {task.tags.map(tag => (
                                   <TagBadge key={tag.id} tag={tag} size="sm" />
                                 ))}

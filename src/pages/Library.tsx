@@ -83,6 +83,9 @@ const TAB_STORAGE_KEY = 'library-active-tab';
 
 /** Shared height for the snippets master/detail panes (was inlined 3×). */
 const PANE_HEIGHT = 'h-[calc(100dvh-250px)] min-h-[24rem]';
+// Tailwind only generates classes it can see verbatim — `md:${PANE_HEIGHT}` produced
+// "md:h-[calc(…)]" at runtime, which never exists in the CSS. Keep the md: variant literal.
+const PANE_HEIGHT_MD = 'md:h-[calc(100dvh-250px)] md:min-h-[24rem]';
 
 // localStorage can throw outright (Safari private mode), and this runs inside a
 // useState initialiser — an unguarded read would crash the page during render.
@@ -473,7 +476,7 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
 
   return (
     <>
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -512,7 +515,7 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
               Add Prompt
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="sm:max-w-[500px] md:max-w-2xl">
             <DialogHeader>
               <DialogTitle>
                 {editingPrompt ? 'Edit Prompt' : 'Create New Prompt'}
@@ -1117,7 +1120,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
 
   if (loading) {
     return (
-      <div className={`flex flex-col gap-4 md:flex-row md:${PANE_HEIGHT}`}>
+      <div className={`flex flex-col gap-4 md:flex-row ${PANE_HEIGHT_MD}`}>
         <div className="w-full md:w-64 flex-shrink-0 space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
@@ -1141,7 +1144,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
 
   return (
     <>
-      <div className={cn("flex flex-col gap-4 md:flex-row", `md:${PANE_HEIGHT}`)}>
+      <div className={cn("flex flex-col gap-4 md:flex-row", PANE_HEIGHT_MD)}>
         <div className={cn("w-full md:w-64 flex-shrink-0 border border-border rounded-lg overflow-hidden flex-col bg-card md:h-auto", PANE_HEIGHT, showDetail ? "hidden md:flex" : "flex")}>
           <div className="p-3 border-b border-border space-y-2">
             <div className="flex gap-2">
@@ -1159,7 +1162,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
                 placeholder="Search..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="h-8 pl-7 text-sm"
+                className="h-9 md:h-8 pl-7 text-base md:text-sm"
                 aria-label="Search snippets"
               />
               {searchInput && (
@@ -1245,7 +1248,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
                         <span className="flex-shrink-0 opacity-70">({group.items.length})</span>
                       </button>
                       {group.folder && (
-                        <div className="flex items-center opacity-0 group-hover/folder:opacity-100 transition-opacity">
+                        <div className="flex items-center opacity-0 group-hover/folder:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                           <button
                             onClick={() => startCreating(group.folder!.id)}
                             className="p-1 text-muted-foreground hover:text-foreground"
@@ -1305,7 +1308,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <button
-                                    className="p-1 mr-0.5 text-muted-foreground hover:text-foreground opacity-0 group-hover/file:opacity-100 transition-opacity"
+                                    className="p-1.5 mr-0.5 text-muted-foreground hover:text-foreground opacity-0 group-hover/file:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
                                     title="Move to folder"
                                   >
                                     <MoreVertical className="h-3.5 w-3.5" />
@@ -1395,7 +1398,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
                     value={formData.filename}
                     onChange={(e) => setFormData(prev => ({ ...prev, filename: e.target.value }))}
                     placeholder={`Filename (e.g. config${LANGUAGE_EXTENSIONS[formData.language] || ''})`}
-                    className="flex-1 font-mono text-sm"
+                    className="flex-1 font-mono text-base md:text-sm"
                   />
                 </div>
                 <Input

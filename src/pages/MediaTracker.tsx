@@ -348,7 +348,7 @@ const MediaListRow = ({
       </div>
 
       {/* Ratings — source vs yours */}
-      <div className="hidden w-[88px] flex-shrink-0 flex-col items-end gap-0.5 text-xs xl:flex">
+      <div className="hidden w-[88px] flex-shrink-0 flex-col items-end gap-0.5 text-xs lg:flex">
         {sourceRating ? (
           <span className="inline-flex items-center gap-1" title="Source / community rating">
             <Star className="h-3.5 w-3.5 fill-warning text-warning" />
@@ -2650,10 +2650,10 @@ const MediaTracker = () => {
             </SheetContent>
           </Sheet>
           {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-3 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-2 p-3 pt-[calc(0.75rem+env(safe-area-inset-top))] border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={toggleSidebar}
               className="touch-manipulation"
               aria-label="Toggle sidebar"
@@ -2661,12 +2661,12 @@ const MediaTracker = () => {
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg">Media Tracker</h1>
+            <h1 className="font-heading font-bold text-base sm:text-lg truncate">Media Tracker</h1>
             <div className="flex items-center gap-1">
-              <Button size="sm" variant="default" onClick={() => setQuickAddOpen(true)} className="h-8 w-8 p-0" aria-label="Add media" title="Add">
+              <Button size="sm" variant="default" onClick={() => setQuickAddOpen(true)} className="h-10 w-10 p-0 touch-manipulation" aria-label="Add media" title="Add">
                 <Plus className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant={hasActiveFilters ? 'default' : 'outline'} onClick={() => setFiltersOpen(true)} className="relative h-8 w-8 p-0" aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'} title="Filters">
+              <Button size="sm" variant={hasActiveFilters ? 'default' : 'outline'} onClick={() => setFiltersOpen(true)} className="relative h-10 w-10 p-0 touch-manipulation" aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'} title="Filters">
                 <Filter className="h-4 w-4" />
                 {activeFilterCount > 0 && (
                   <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
@@ -2674,9 +2674,48 @@ const MediaTracker = () => {
                   </span>
                 )}
               </Button>
-              <Button size="sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-8 w-8 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
+              <Button size="sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-10 w-10 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
                 {viewMode === 'grid' ? <ListIcon className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
               </Button>
+              {/* Same actions as the desktop More menu — without this, stats/rails/refresh/import-export are unreachable below lg */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="touch-manipulation" aria-label="More actions" title="More actions">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => setStatsOpen(true)}>
+                    <BarChart3 className="h-4 w-4 mr-2" /> Library stats
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={toggleRails}>
+                    {showRails
+                      ? <><EyeOff className="h-4 w-4 mr-2" /> Hide Continue &amp; Airing</>
+                      : <><Eye className="h-4 w-4 mr-2" /> Show Continue &amp; Airing</>}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setRefreshLibraryOpen(true)}>
+                    <RefreshCw className="h-4 w-4 mr-2" /> Refresh Library…
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Database className="h-4 w-4 mr-2" /> Import / Export
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+                        <Upload className="h-4 w-4 mr-2" /> Import JSON…
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleExportJson}>
+                        <Download className="h-4 w-4 mr-2" /> Export JSON
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setTxtExportDialogOpen(true)}>
+                        <FileText className="h-4 w-4 mr-2" /> Export TXT
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
@@ -3251,7 +3290,7 @@ const MediaTracker = () => {
 
             {/* Selection toolbar — floating glass action bar (Gmail/Photos-style) */}
             {selectedIds.size > 0 && (
-              <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 animate-fade-in-scale">
+              <div className="pointer-events-none fixed inset-x-0 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 animate-fade-in-scale">
                 <div className="glass pointer-events-auto flex flex-wrap items-center gap-2 px-3 py-2">
                   <span className="px-2 text-sm font-bold tabular-nums text-foreground">
                     {selectedIds.size} <span className="font-normal text-muted-foreground">selected</span>
@@ -3399,7 +3438,8 @@ const MediaTracker = () => {
                   <div className="space-y-10">
                     {groupedByStatus.keys.map((statusKey) => (
                       <div key={statusKey}>
-                        <div className="sticky top-0 z-10 -mx-1 mb-4 flex items-center gap-2 bg-background/85 backdrop-blur px-1 py-2">
+                        {/* Below lg the mobile header occupies the top ~4rem (+ notch), so offset the sticky captions under it */}
+                        <div className="sticky top-[calc(4rem+env(safe-area-inset-top))] lg:top-0 z-10 -mx-1 mb-4 flex items-center gap-2 bg-background/85 backdrop-blur px-1 py-2">
                           <span className={cn('h-2.5 w-2.5 rounded-full', SECTION_DOT[statusKey] || 'bg-muted-foreground')} aria-hidden="true" />
                           <h2 className="text-base font-semibold">{statusKey}</h2>
                           <span className="text-muted-foreground text-sm font-normal">{groupedByStatus.groups[statusKey].length}</span>

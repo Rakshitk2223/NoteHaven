@@ -77,8 +77,8 @@ const Calendar = () => {
 
         <div className="flex-1 min-w-0">
           {/* Mobile Header */}
-          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <Button variant="ghost" size="sm" onClick={toggleSidebar} className="touch-manipulation">
+          <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between p-4 pt-[calc(1rem+env(safe-area-inset-top))] border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <Button variant="ghost" size="icon" onClick={toggleSidebar} className="touch-manipulation" aria-label="Open menu">
               <Menu className="h-5 w-5" />
             </Button>
             <h1 className="font-heading font-bold text-base sm:text-lg gradient-text-soft">Calendar</h1>
