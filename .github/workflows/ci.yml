@@ -1,0 +1,44 @@
+# Every push and PR proves itself: typecheck, lint, unit tests, production build.
+#
+# No secrets required — the build does not need Supabase env vars (the client
+# reads import.meta.env at runtime, not build time), and the insight tests are
+# pure functions with no network or database access. That is deliberate: CI
+# that needs production credentials to pass is CI nobody dares run on a fork.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Zero errors is the bar; the ~19 exhaustive-deps warnings on deliberate
+      # mount-only effects are pre-existing and allowed (matches CLAUDE.md).
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests (media insights)
+        run: npm run test:insights
+
+      # Runs typecheck first (build = typecheck && vite build).
+      - name: Build
+        run: npm run build
+
+      # The edge function is Deno code that Vite never touches — a syntax error
+      # here would otherwise surface only at deploy time.
+      - name: Edge function parses
+        run: npx --yes esbuild@0.21 supabase/functions/media-search/index.ts --bundle --format=esm --platform=neutral "--external:https://*" --outfile=/dev/null

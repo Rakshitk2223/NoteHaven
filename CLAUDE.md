@@ -78,7 +78,7 @@ context/                  # frontend.md, backend.md (architecture docs)
 
 The `supabase/` folder is git-tracked: `config.toml`, the `media-search` edge function, and the SQL migrations. (`supabase/.temp/` is CLI cache — untracked.)
 
-**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it, then `21_commands.sql` (the Library Commands tab's `commands` table). New changes go in their own numbered file (`22_*.sql` next).
+**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it, then `21_commands.sql` (the Library Commands tab's `commands` table) and `22_security_lint.sql` (dashboard-linter fixes; also documents which warnings are accepted by design). New changes go in their own numbered file (`23_*.sql` next).
 
 Migrations are applied **by hand in the Supabase SQL editor**, in filename order — there is no migration runner. `00`, `20`, and `21` must be run explicitly on a new project. `00` is already live on the production database; `20` and `21` are not (see below — the Commands tab errors on fetch until `21` is run).
 
