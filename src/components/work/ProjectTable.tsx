@@ -1,4 +1,5 @@
 import { Trash2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { StatusPill } from '@/components/work/ProjectCard';
 import { formatMonth, formatDuration, type WorkProject, type WorkStatus } from '@/lib/work';
 
@@ -21,10 +22,13 @@ export function ProjectTable({ projects, onEdit, onDelete }: {
           <tr className="bg-secondary/50">
             {HEADINGS.map((h, i) => (
               <th
-                key={h || `spacer-${i}`}
-                className="whitespace-nowrap border-b border-border px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                key={h || `actions-${i}`}
+                className={cn(
+                  'whitespace-nowrap border-b border-border px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground',
+                  h === '' && 'w-12',
+                )}
               >
-                {h}
+                {h === '' ? <span className="sr-only">Actions</span> : h}
               </th>
             ))}
           </tr>
@@ -37,7 +41,9 @@ export function ProjectTable({ projects, onEdit, onDelete }: {
               className="group cursor-pointer border-b border-border/70 transition-colors last:border-0 hover:bg-secondary/40"
             >
               <td className="px-4 py-3 text-sm font-medium">{p.name}</td>
-              <td className="px-4 py-3 text-sm text-muted-foreground">{p.helped.join(', ') || '—'}</td>
+              <td className="max-w-[22rem] px-4 py-3 text-sm text-muted-foreground">
+                <span className="line-clamp-2">{p.helped.join(', ') || '—'}</span>
+              </td>
               <td className="px-4 py-3 text-sm text-muted-foreground">{p.team || '—'}</td>
               <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-muted-foreground">
                 {formatMonth(p.month)}

@@ -25,7 +25,39 @@ export function CompactTagSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Open upward when there isn't room below. Without this the dropdown is
+  // clipped by any scrollable ancestor — e.g. when Tags is the last field of a
+  // dialog, which is exactly where it usually sits.
+  const [dropUp, setDropUp] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  /** Roughly the dropdown's height: the new-tag input plus the max-h-48 list. */
+  const DROPDOWN_H = 260;
+
+  const openDropdown = () => {
+    const anchor = dropdownRef.current?.getBoundingClientRect();
+    if (anchor) {
+      // Measure against the nearest scrollable ancestor when there is one, since
+      // that — not the viewport — is what actually clips.
+      let clipBottom = window.innerHeight;
+      let clipTop = 0;
+      let node = dropdownRef.current?.parentElement;
+      while (node && node !== document.body) {
+        const overflowY = getComputedStyle(node).overflowY;
+        if (overflowY === 'auto' || overflowY === 'scroll') {
+          const box = node.getBoundingClientRect();
+          clipBottom = Math.min(clipBottom, box.bottom);
+          clipTop = Math.max(clipTop, box.top);
+          break;
+        }
+        node = node.parentElement;
+      }
+      const below = clipBottom - anchor.bottom;
+      const above = anchor.top - clipTop;
+      setDropUp(below < DROPDOWN_H && above > below);
+    }
+    setIsOpen(true);
+  };
 
   const isMaxReached = selectedTags.length >= maxTags;
 
@@ -125,7 +157,7 @@ export function CompactTagSelector({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => setIsOpen(!isOpen)}
+            onClick={() => (isOpen ? setIsOpen(false) : openDropdown())}
             className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
           >
             <Plus className="h-3 w-3 mr-1" />
@@ -136,7 +168,12 @@ export function CompactTagSelector({
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute z-50 mt-1 w-64 bg-popover border rounded-md shadow-lg">
+        <div
+          className={cn(
+            'absolute z-50 w-64 rounded-md border bg-popover shadow-lg',
+            dropUp ? 'bottom-full mb-1' : 'top-full mt-1',
+          )}
+        >
           {/* New Tag Input */}
           <div className="p-2 border-b">
             <div className="flex gap-2">

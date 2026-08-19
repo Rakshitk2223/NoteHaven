@@ -458,7 +458,10 @@ const Work = () => {
                     </SelectContent>
                   </Select>
 
-                  <div className="ml-auto flex items-center gap-2">
+                  {/* ml-auto only from sm up: on a phone this group wraps onto its
+                      own row, where being pushed right left an odd gap on the
+                      left. Full-width + justify-between reads as deliberate. */}
+                  <div className="flex w-full items-center justify-between gap-2 sm:ml-auto sm:w-auto sm:justify-end">
                     <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
                       <SelectTrigger className="w-auto min-w-[9rem]"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -545,7 +548,7 @@ const Work = () => {
             <DialogDescription>Log something you built or fixed for someone.</DialogDescription>
           </DialogHeader>
 
-          <div className="grid max-h-[65vh] gap-4 overflow-y-auto py-1 pr-1">
+          <div className="grid gap-4 py-1">
             <div className="grid gap-2">
               <label className="text-sm font-medium" htmlFor="wp-name">Project name</label>
               <Input
@@ -680,7 +683,7 @@ const Work = () => {
             </div>
           </div>
 
-          <DialogFooter className={editing ? 'sm:justify-between' : undefined}>
+          <DialogFooter className={cn('mt-1 border-t border-border pt-4', editing && 'sm:justify-between')}>
             {editing && (
               <Button
                 variant="ghost"

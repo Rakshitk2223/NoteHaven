@@ -85,19 +85,27 @@ export function ProjectCard({ project, tags, onEdit, onDelete }: {
 
       <HelpedLine project={project} />
 
-      <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-3">
-        <span className="inline-flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
-          <CalendarIcon className="h-3 w-3 text-muted-foreground/70" />
+      {/* Tags sit in the body, not the footer. Keeping them out of the footer row
+          is what makes every card's footer exactly one line high — otherwise a
+          card with a tag + link wrapped to two lines while its neighbours
+          stayed at one, and the row looked ragged. */}
+      {tags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {tags.slice(0, 3).map((tag) => <TagBadge key={tag.id} tag={tag} size="sm" />)}
+        </div>
+      )}
+
+      <div className="mt-auto flex items-center gap-3 border-t border-border pt-3">
+        <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
+          <CalendarIcon className="h-3 w-3 shrink-0 text-muted-foreground/70" />
           {formatMonth(project.month)}
         </span>
-        <span className="inline-flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
-          <Clock className="h-3 w-3 text-muted-foreground/70" />
-          {formatDuration(project)}
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
+          <Clock className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+          <span className="truncate">{formatDuration(project)}</span>
         </span>
 
-        <div className="ml-auto flex items-center gap-1.5">
-          {tags.slice(0, 2).map((tag) => <TagBadge key={tag.id} tag={tag} size="sm" />)}
-
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {project.link && (
             <a
               href={project.link}
