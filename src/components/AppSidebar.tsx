@@ -19,7 +19,8 @@ import {
   FolderLock,
   Compass,
   ChefHat,
-  Gift
+  Gift,
+  Briefcase
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ interface NavItem {
 const defaultMainNavigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Calendar", href: "/calendar", icon: Calendar },
+  { name: "Work", href: "/work", icon: Briefcase },
   { name: "Library", href: "/library", icon: Library },
   { name: "Media", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },

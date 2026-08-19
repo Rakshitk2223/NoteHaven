@@ -8,6 +8,7 @@
 const loaders: Record<string, () => Promise<unknown>> = {
   "/dashboard": () => import("@/pages/Dashboard"),
   "/calendar": () => import("@/pages/Calendar"),
+  "/work": () => import("@/pages/Work"),
   "/library": () => import("@/pages/Library"),
   "/prompts": () => import("@/pages/Library"),
   "/media": () => import("@/pages/MediaTracker"),

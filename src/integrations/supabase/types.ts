@@ -1167,6 +1167,87 @@ export type Database = {
         }
         Relationships: []
       }
+      work_projects: {
+        Row: {
+          created_at: string
+          description: string | null
+          duration_unit: string | null
+          duration_value: number | null
+          helped: string[]
+          hours: number | null
+          id: number
+          link: string | null
+          month: string
+          name: string
+          status: string
+          team: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          duration_unit?: string | null
+          duration_value?: number | null
+          helped?: string[]
+          hours?: number | null
+          id?: never
+          link?: string | null
+          month?: string
+          name: string
+          status?: string
+          team?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          duration_unit?: string | null
+          duration_value?: number | null
+          helped?: string[]
+          hours?: number | null
+          id?: never
+          link?: string | null
+          month?: string
+          name?: string
+          status?: string
+          team?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      work_project_tags: {
+        Row: {
+          project_id: number
+          tag_id: number
+        }
+        Insert: {
+          project_id: number
+          tag_id: number
+        }
+        Update: {
+          project_id?: number
+          tag_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_project_tags_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "work_projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_project_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1398,6 +1479,9 @@ export type PromptWithTags = Database["public"]["Tables"]["prompts"]["Row"] & {
   tags?: Tag[]
 }
 export type CodeSnippetWithTags = Database["public"]["Tables"]["code_snippets"]["Row"] & {
+  tags?: Tag[]
+}
+export type WorkProjectWithTags = Database["public"]["Tables"]["work_projects"]["Row"] & {
   tags?: Tag[]
 }
 

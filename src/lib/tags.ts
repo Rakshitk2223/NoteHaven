@@ -1,7 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
-import type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags, CodeSnippetWithTags } from '@/integrations/supabase/types';
+import type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags, CodeSnippetWithTags, WorkProjectWithTags } from '@/integrations/supabase/types';
 
-export type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags, CodeSnippetWithTags };
+export type { Tag, NoteWithTags, TaskWithTags, MediaWithTags, PromptWithTags, CodeSnippetWithTags, WorkProjectWithTags };
 
 // Tag color palette (must be defined here since types file uses it differently)
 export const TAG_COLORS = [
@@ -130,6 +130,43 @@ export async function fetchPromptTags(promptId: number): Promise<Tag[]> {
   return (data || []).map((item: { tags: Tag }) => item.tags);
 }
 
+/**
+ * Fetch tags for a specific work project
+ */
+export async function fetchWorkProjectTags(projectId: number): Promise<Tag[]> {
+  const { data, error } = await supabase
+    .from('work_project_tags')
+    .select('tag_id, tags(*)')
+    .eq('project_id', projectId);
+
+  if (error) throw error;
+  return (data || []).map((item: { tags: Tag }) => item.tags);
+}
+
+/**
+ * Fetch tags for MANY work projects in one round-trip, keyed by project id.
+ * The Work page renders every card's tags at once, so per-card fetches would be
+ * an N+1; this mirrors how Library bulk-loads prompt tags.
+ */
+export async function fetchTagsForWorkProjects(projectIds: number[]): Promise<Record<number, Tag[]>> {
+  if (projectIds.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from('work_project_tags')
+    .select('project_id, tags(*)')
+    .in('project_id', projectIds);
+
+  if (error) throw error;
+
+  const byProject: Record<number, Tag[]> = {};
+  (data as { project_id: number; tags: Tag | null }[] | null)?.forEach((item) => {
+    if (!item.tags) return;
+    if (!byProject[item.project_id]) byProject[item.project_id] = [];
+    byProject[item.project_id].push(item.tags);
+  });
+  return byProject;
+}
+
 // ============================================
 // TAG CRUD
 // ============================================
@@ -251,6 +288,21 @@ export async function setSnippetTags(snippetId: number, tagIds: number[]): Promi
   }
 }
 
+/**
+ * Set tags for a work project (replaces existing tags)
+ */
+export async function setWorkProjectTags(projectId: number, tagIds: number[]): Promise<void> {
+  await supabase.from('work_project_tags').delete().eq('project_id', projectId);
+
+  if (tagIds.length > 0) {
+    const { error } = await supabase
+      .from('work_project_tags')
+      .insert(tagIds.map(tagId => ({ project_id: projectId, tag_id: tagId })));
+
+    if (error) throw error;
+  }
+}
+
 // ============================================
 // SEARCH BY TAG
 // ============================================
@@ -261,6 +313,7 @@ export interface TaggedItems {
   media: MediaWithTags[];
   prompts: PromptWithTags[];
   snippets: CodeSnippetWithTags[];
+  workProjects: WorkProjectWithTags[];
 }
 
 /**
@@ -282,10 +335,10 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
     .eq('name', normalizedName)
     .single();
 
-  if (!tag) return { notes: [], tasks: [], media: [], prompts: [], snippets: [] };
+  if (!tag) return { notes: [], tasks: [], media: [], prompts: [], snippets: [], workProjects: [] };
 
   // Fetch all items with this tag
-  const [notesResult, tasksResult, mediaResult, promptsResult, snippetsResult] = await Promise.all([
+  const [notesResult, tasksResult, mediaResult, promptsResult, snippetsResult, workProjectsResult] = await Promise.all([
     supabase
       .from('note_tags')
       .select('notes(*)')
@@ -310,7 +363,12 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
       .from('code_snippet_tags')
       .select('code_snippets(*)')
       .eq('tag_id', tag.id)
-      .then(({ data }) => (data || []).map((item: { code_snippets: CodeSnippetWithTags }) => item.code_snippets))
+      .then(({ data }) => (data || []).map((item: { code_snippets: CodeSnippetWithTags }) => item.code_snippets)),
+    supabase
+      .from('work_project_tags')
+      .select('work_projects(*)')
+      .eq('tag_id', tag.id)
+      .then(({ data }) => (data || []).map((item: { work_projects: WorkProjectWithTags }) => item.work_projects))
   ]);
 
   return {
@@ -318,7 +376,8 @@ export async function searchByTag(tagName: string): Promise<TaggedItems> {
     tasks: tasksResult,
     media: mediaResult,
     prompts: promptsResult,
-    snippets: snippetsResult
+    snippets: snippetsResult,
+    workProjects: workProjectsResult
   };
 }
 

@@ -8,7 +8,7 @@ Guidance for AI assistants (and humans) working in the NoteHaven codebase. For d
 
 NoteHaven is a personal productivity & media companion: a React 18 + TypeScript + Vite single-page app backed entirely by Supabase (PostgreSQL + RLS, Auth, Storage, Realtime, RPC, one Edge Function). There is **no custom server** — the client talks to Supabase directly.
 
-Features: Notes (rich text, auto-save, share links), Tasks, AI Prompt library, Code Snippets, a per-project Commands bank (shares the snippet project folders), Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger (accounts + cumulative "money in hand"), Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a **Bucket List**, a **Recipes** cookbook, a cross-cutting Tags system, and a customizable widget Dashboard.
+Features: Notes (rich text, auto-save, share links), Tasks, AI Prompt library, Code Snippets, a per-project Commands bank (shares the snippet project folders), Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger (accounts + cumulative "money in hand"), Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a **Bucket List**, a **Recipes** cookbook, a **Work** log (office projects + who you helped), a cross-cutting Tags system, and a customizable widget Dashboard.
 
 ---
 
@@ -63,6 +63,7 @@ src/
     dashboard/widgets/    # 12 dashboard widgets
     calendar/             # calendar views/modals
     media/                # MediaCard, CustomGroupBuilder
+    work/                 # ProjectCard, ProjectTable, PeopleInput
     PageShell.tsx         # shared page frame (sidebar + gradient header + transition)
     AppSidebar.tsx        # Aurora glass rail (⌘K trigger, hover route-prefetch)
     CommandPalette.tsx    # ⌘K launcher  · AuroraBackdrop.tsx · RouteFallback.tsx
@@ -78,9 +79,9 @@ context/                  # frontend.md, backend.md (architecture docs)
 
 The `supabase/` folder is git-tracked: `config.toml`, the `media-search` edge function, and the SQL migrations. (`supabase/.temp/` is CLI cache — untracked.)
 
-**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it, then `21_commands.sql` (the Library Commands tab's `commands` table) and `22_security_lint.sql` (dashboard-linter fixes; also documents which warnings are accepted by design). New changes go in their own numbered file (`23_*.sql` next).
+**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it, then `21_commands.sql` (the Library Commands tab's `commands` table) and `22_security_lint.sql` (dashboard-linter fixes; also documents which warnings are accepted by design). New changes go in their own numbered file (`24_*.sql` next — note `22` was used twice, by `22_security_lint.sql` and `22_wishlist.sql`).
 
-Migrations are applied **by hand in the Supabase SQL editor**, in filename order — there is no migration runner. `00`, `20`, and `21` must be run explicitly on a new project. `00` is already live on the production database; `20` and `21` are not (see below — the Commands tab errors on fetch until `21` is run).
+Migrations are applied **by hand in the Supabase SQL editor**, in filename order — there is no migration runner. `00`, `20`, `21`, `22_wishlist.sql` and `23` must be run explicitly on a new project. `00` is already live on the production database; the rest are not (see below — the Commands tab errors on fetch until `21` is run, and `/work` shows a setup panel until `23` is run). Each is idempotent, so a re-run is safe.
 
 `00_baseline_schema.sql` plus `src/integrations/supabase/types.ts` are the schema source of truth.
 
@@ -115,13 +116,14 @@ These are real, current, and worth knowing before you touch related code.
 3. **The edge function verifies JWTs.** Call it via `lib/edge-function.ts` (`mediaSearchGet`), which attaches the session token. A bare `fetch()` will 401.
 4. **`media_metadata` is a shared, cross-tenant cache** with no `user_id`. Writes are limited to `authenticated`. Treat anything read from it as untrusted third-party data.
 5. **`ledger_buckets` is retired.** The envelope-budgeting UI was removed long ago. `20_data_cleanup.sql` drops the table and the two `ledger_entries` columns; the code and `types.ts` no longer reference them. Confirmed safe first — zero entries referenced a bucket. **Run migration 20 before deploying**, or leave the dead table in place; do not half-apply.
-6. **`/prompts` is a working alias** that renders `Library` (same as `/library`).
-7. **Responsive/mobile**: `PageShell` renders the `lg:hidden` hamburger header for migrated content pages (bespoke full-height pages — Notes/MediaTracker/Calendar — keep their own). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` and `ui/sheet.tsx` are mobile-safe, so prefer those defaults over per-dialog width hacks.
-8. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components.
-9. **Toasts**: only the shadcn `Toaster` (`use-toast`) is mounted.
-10. **Rotate the TMDB key.** `381f2d0e…` was committed in `aea34a8` and is still readable in git history. `deploy-edge-function.sh` no longer contains it, but removing it from HEAD does not un-leak it.
-11. **Use `getSession()`, not `getUser()`**, for "who am I" reads in the data layer — `getUser()` is a network round-trip per call.
-12. **Large page files** (Notes ~1300, MediaTracker ~1900 lines) mix data fetching, state, and JSX. Prefer extracting when making substantial changes, but keep diffs scoped.
+6. **`/work` needs migration `23_work_projects.sql`.** Until it's run in the SQL editor the page renders a "tables not set up" panel with a Retry button instead of erroring — `lib/work.ts` `isMissingTableError()` detects the missing table via PostgREST's `PGRST205` / Postgres `42P01`. `helped` is a real `TEXT[]`, not a comma-separated string: that's what makes the "people helped" stat and a future People tab an `unnest` + `GROUP BY` rather than a text re-parse, so don't flatten it. Duration is deliberately two columns (`duration_value` + `duration_unit`) so "longest first" can sort, and `hours` is deliberately separate from duration (a six-week project can be forty hours).
+7. **`/prompts` is a working alias** that renders `Library` (same as `/library`).
+8. **Responsive/mobile**: `PageShell` renders the `lg:hidden` hamburger header for migrated content pages (bespoke full-height pages — Notes/MediaTracker/Calendar — keep their own). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` and `ui/sheet.tsx` are mobile-safe, so prefer those defaults over per-dialog width hacks.
+9. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components.
+10. **Toasts**: only the shadcn `Toaster` (`use-toast`) is mounted.
+11. **Rotate the TMDB key.** `381f2d0e…` was committed in `aea34a8` and is still readable in git history. `deploy-edge-function.sh` no longer contains it, but removing it from HEAD does not un-leak it.
+12. **Use `getSession()`, not `getUser()`**, for "who am I" reads in the data layer — `getUser()` is a network round-trip per call.
+13. **Large page files** (Notes ~1300, MediaTracker ~1900 lines) mix data fetching, state, and JSX. Prefer extracting when making substantial changes, but keep diffs scoped.
 
 ---
 

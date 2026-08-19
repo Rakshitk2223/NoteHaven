@@ -9,9 +9,13 @@ import { SettingsSection, SettingRow } from '@/components/settings/primitives';
 
 interface SidebarItem { name: string; href: string; }
 
+// Must stay in sync with `defaultMainNavigation` in AppSidebar.tsx — an item
+// missing here is still rendered in the rail (AppSidebar appends unknown
+// defaults) but can never be reordered. Wishlist had drifted out that way.
 const DEFAULT_ORDER: SidebarItem[] = [
   { name: 'Dashboard', href: '/dashboard' },
   { name: 'Calendar', href: '/calendar' },
+  { name: 'Work', href: '/work' },
   { name: 'Library', href: '/library' },
   { name: 'Media', href: '/media' },
   { name: 'Tasks', href: '/tasks' },
@@ -19,6 +23,7 @@ const DEFAULT_ORDER: SidebarItem[] = [
   { name: 'Vault', href: '/vault' },
   { name: 'Birthdays', href: '/birthdays' },
   { name: 'Bucket List', href: '/bucket-list' },
+  { name: 'Wishlist', href: '/wishlist' },
   { name: 'Recipes', href: '/recipes' },
   { name: 'Money Ledger', href: '/ledger' },
   { name: 'Subscriptions', href: '/subscriptions' },

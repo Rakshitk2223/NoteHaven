@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, CheckSquare, Play, MessageSquare, Code2, Tag as TagIcon } from 'lucide-react';
+import { ArrowLeft, FileText, CheckSquare, Play, MessageSquare, Code2, Briefcase, Tag as TagIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageShell } from '@/components/PageShell';
@@ -20,7 +20,8 @@ export default function TagView() {
     tasks: [],
     media: [],
     prompts: [],
-    snippets: []
+    snippets: [],
+    workProjects: []
   });
   const [tag, setTag] = useState<Tag | null>(null);
 
@@ -72,7 +73,7 @@ export default function TagView() {
   // rendered, so a tag used only on snippets showed "No items found" (audit BUG-04).
   const totalItems =
     items.notes.length + items.tasks.length + items.media.length +
-    items.prompts.length + items.snippets.length;
+    items.prompts.length + items.snippets.length + items.workProjects.length;
 
   return (
     <PageShell
@@ -261,6 +262,31 @@ export default function TagView() {
                           <p className="font-medium truncate">{snippet.title}</p>
                           <p className="text-xs text-muted-foreground">
                             {snippet.filename || snippet.language}
+                          </p>
+                        </button>
+                      </StaggerItem>
+                    ))}
+                  </Stagger>
+                </section>
+              )}
+
+              {/* Work Projects Section */}
+              {items.workProjects.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Briefcase className="h-5 w-5 text-primary" />
+                    <h2 className="text-lg font-semibold">Work Projects ({items.workProjects.length})</h2>
+                  </div>
+                  <Stagger className="grid gap-2">
+                    {items.workProjects.map(project => (
+                      <StaggerItem key={project.id} hover={false}>
+                        <button
+                          onClick={() => navigate('/work?tab=projects')}
+                          className="w-full text-left p-3 rounded-lg border hover:bg-accent transition-colors"
+                        >
+                          <p className="font-medium truncate">{project.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {project.helped.length > 0 ? `for ${project.helped.join(', ')}` : 'No one recorded'}
                           </p>
                         </button>
                       </StaggerItem>

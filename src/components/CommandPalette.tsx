@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Calendar, Library, Monitor, CheckSquare, FileText,
   Cake, Wallet, CreditCard, Settings as SettingsIcon, Plus, Sparkles,
-  SunMedium, Moon, FolderLock, Compass, ChefHat, Gift,
+  SunMedium, Moon, FolderLock, Compass, ChefHat, Gift, Briefcase,
 } from "lucide-react";
 import {
   CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup,
@@ -61,6 +61,7 @@ export function CommandPalette() {
   const nav: Cmd[] = [
     { icon: LayoutDashboard, label: "Dashboard", perform: () => go("/dashboard") },
     { icon: Calendar, label: "Calendar", perform: () => go("/calendar") },
+    { icon: Briefcase, label: "Work", perform: () => go("/work"), keywords: "office projects helped colleagues appraisal" },
     { icon: Library, label: "Library", perform: () => go("/library"), keywords: "prompts snippets code" },
     { icon: Monitor, label: "Media Tracker", perform: () => go("/media"), keywords: "anime manga movies series" },
     { icon: CheckSquare, label: "Tasks", perform: () => go("/tasks"), keywords: "todo" },
@@ -77,6 +78,7 @@ export function CommandPalette() {
 
   const actions: Cmd[] = [
     { icon: Plus, label: "New Note", perform: () => go("/notes?new=1"), keywords: "create write" },
+    { icon: Plus, label: "Log Work Project", perform: () => go("/work?new=1"), keywords: "create office helped" },
     { icon: Plus, label: "New Task", perform: () => go("/tasks?new=1"), keywords: "create add todo" },
     { icon: Plus, label: "Add Media", perform: () => go("/media?new=1"), keywords: "track watch" },
   ];

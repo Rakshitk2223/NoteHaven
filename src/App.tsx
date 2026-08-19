@@ -41,6 +41,7 @@ const Vault = lazy(() => import("./pages/Vault"));
 const BucketList = lazy(() => import("./pages/BucketList"));
 const Wishlist = lazy(() => import("./pages/Wishlist"));
 const Recipes = lazy(() => import("./pages/Recipes"));
+const Work = lazy(() => import("./pages/Work"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -98,6 +99,7 @@ const AppInner = () => {
           <Route path="/bucket-list" element={<ProtectedRoute><BucketList /></ProtectedRoute>} />
           <Route path="/wishlist" element={<ProtectedRoute><Wishlist /></ProtectedRoute>} />
           <Route path="/recipes" element={<ProtectedRoute><Recipes /></ProtectedRoute>} />
+          <Route path="/work" element={<ProtectedRoute><Work /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
