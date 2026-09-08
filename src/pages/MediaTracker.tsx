@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSidebar } from "@/contexts/SidebarContext";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp, Database, Upload, FileText, FileSpreadsheet, BarChart3, Eye, EyeOff } from "lucide-react";
 import { ToastAction } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -48,7 +48,6 @@ import AppSidebar from "@/components/AppSidebar";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
-import { motion } from "framer-motion";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useInView } from "react-intersection-observer";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -173,6 +172,26 @@ const persistMetaCache = (map: Map<number, MediaMeta>) => {
 };
 
 // Big, frictionless +/- control for progress fields in the detail drawer.
+/**
+ * PostgREST caps a plain `.select()` at 1000 rows. Every export used one, so a
+ * library larger than that was silently truncated and the toast still reported
+ * the short count as a success. Page until the source is exhausted.
+ */
+async function fetchAllPaged<T>(
+  makeQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const CHUNK = 1000;
+  const out: T[] = [];
+  for (let from = 0; ; from += CHUNK) {
+    const { data, error } = await makeQuery(from, from + CHUNK - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < CHUNK) break;
+  }
+  return out;
+}
+
 function ProgressStepper({ label, value, onDec, onInc }: { label: string; value: number; onDec: () => void; onInc: () => void }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -423,6 +442,8 @@ const MediaListRow = ({
 
 const MediaTracker = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  useDocumentTitle("Media");
   const queryClient = useQueryClient();
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   // Persisted view mode (grid = categorized, list = table). Initialize from localStorage.
@@ -489,6 +510,18 @@ const MediaTracker = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [tabsManageOpen, setTabsManageOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+
+  // ?new=1 (command palette "Add Media") opens Quick Add. The param is consumed
+  // once and stripped, so a re-render can't reopen the dialog after you close it.
+  const consumedNewParamRef = useRef(false);
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('new') !== '1') return;
+    if (consumedNewParamRef.current) return;
+    consumedNewParamRef.current = true;
+    setQuickAddOpen(true);
+    navigate(location.pathname, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [sortBy, setSortBy] = useState<'title' | 'rating' | 'updated_at' | 'created_at' | 'pct_complete' | 'ext_rating'>(() => {
@@ -500,7 +533,11 @@ const MediaTracker = () => {
     }
     return 'title';
   });
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(() => {
+    // sortBy was persisted but sortOrder wasn't, so "newest first" silently
+    // came back as "oldest first" on every reload.
+    try { return (localStorage.getItem('mediaTrackerSortOrder') as 'asc' | 'desc') || 'asc'; } catch { return 'asc'; }
+  });
   const [quickAddTitle, setQuickAddTitle] = useState('');
   const [quickAddType, setQuickAddType] = useState<MediaItem['type']>('');
   const [quickAddProgress, setQuickAddProgress] = useState('');
@@ -580,14 +617,18 @@ const MediaTracker = () => {
     }
   }, [viewMode]);
 
-  // Persist sort preference.
+  // Persist sort preference (field and direction — saving only the field made a
+  // restored sort mean the opposite of what was chosen).
   useEffect(() => {
     try {
-      if (typeof window !== 'undefined') localStorage.setItem('mediaTrackerSortBy', sortBy);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('mediaTrackerSortBy', sortBy);
+        localStorage.setItem('mediaTrackerSortOrder', sortOrder);
+      }
     } catch {
       // Ignore localStorage errors
     }
-  }, [sortBy]);
+  }, [sortBy, sortOrder]);
 
   // Type sets for conditional progress logic (alias module-scope constants)
   const readableTypes = READABLE_TYPES;
@@ -1099,6 +1140,26 @@ const MediaTracker = () => {
 
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
+  // Statuses valid for everything currently selected. Bulk previously offered
+  // all five regardless of type, so Manga could be set to "Watching" and Movies
+  // to "Plan to Read" — both pass the DB CHECK and then confuse the grouping.
+  const bulkStatusOptions = useMemo(() => {
+    if (selectedItems.length === 0) return [] as string[];
+    const anyReadable = selectedItems.some((i) => READABLE_TYPES.includes(i.type));
+    const anyWatchable = selectedItems.some((i) => !READABLE_TYPES.includes(i.type));
+    if (anyReadable && anyWatchable) return ['Completed'];
+    return anyReadable
+      ? ['Reading', 'Plan to Read', 'Completed']
+      : ['Watching', 'Plan to Watch', 'Completed'];
+  }, [selectedItems]);
+
+  // Changing what's on screen invalidates the selection: ids for rows no longer
+  // loaded stayed in the Set, so the toolbar could say "300 selected" while a
+  // bulk delete only touched the handful still in memory.
+  useEffect(() => {
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
+  }, [filterStatus, searchTerm, sortBy, sortOrder, activeCategory, progressFilter, needsCoverOnly, selectedGenres]);
+
   const toggleSelected = useCallback((id: number, next?: boolean) => {
     setSelectedIds(prev => {
       const n = new Set(prev);
@@ -1144,11 +1205,15 @@ const MediaTracker = () => {
       toast({ title: 'Status updated', description: `${ids.length} items set to ${newStatus}` });
       clearSelection();
       refetch();
+      // The status pills read ['groupCounts'], which is only invalidated on a
+      // count change — a bulk status edit leaves the count identical.
+      queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
+      queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Update failed', description: message, variant: 'destructive' });
     }
-  }, [selectedItems, toast, clearSelection, refetch]);
+  }, [selectedItems, toast, clearSelection, refetch, queryClient]);
 
   // Bulk delete all selected items (after confirmation).
   const bulkDelete = useCallback(async () => {
@@ -1160,13 +1225,15 @@ const MediaTracker = () => {
       toast({ title: 'Deleted', description: `${ids.length} items removed` });
       clearSelection();
       refetch();
+      queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
+      queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Delete failed', description: message, variant: 'destructive' });
     } finally {
       setBulkDeleteOpen(false);
     }
-  }, [selectedItems, toast, clearSelection, refetch]);
+  }, [selectedItems, toast, clearSelection, refetch, queryClient]);
 
   // Calculate category counts - use database counts instead of loaded items
   const categoryCounts = useMemo(() => {
@@ -1243,6 +1310,28 @@ const MediaTracker = () => {
   }, [finalItems]);
 
   const handleQuickUpdate = async (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => {
+    // A row recorded as "season N, episode 0" means season N was finished, so the
+    // next episode is S(N+1)E1. Adding 1 to the episode here set episode 1 while
+    // leaving the season at N, which rewound progress by a whole season — and no
+    // control could set the episode back to 0, so it was unrecoverable. Route
+    // these through the same logic the Continue rail already used.
+    if (
+      field === 'current_episode' && amount > 0 &&
+      WATCHABLE_TYPES.includes(item.type) &&
+      (item.current_season ?? 0) >= 1 && (item.current_episode ?? 0) === 0
+    ) {
+      const meta = metadataMap.get(item.id) ?? null;
+      const nextSeason = (item.current_season ?? 0) + 1;
+      const knownSeasons = meta?.seasons;
+      // Don't invent a season that doesn't exist (the rail had this same gap).
+      if (knownSeasons?.length && !knownSeasons.some((sn) => sn.season_number === nextSeason)) {
+        toast({ title: 'Caught up', description: `${item.title} has no season ${nextSeason} on record.` });
+        return;
+      }
+      await patchMedia(item, { current_season: nextSeason, current_episode: 1 });
+      return;
+    }
+
     const currentVal = item[field];
     if (currentVal == null && amount < 0) return;
     const newValue = Math.max((currentVal || 0) + amount, 1);
@@ -1314,6 +1403,12 @@ const MediaTracker = () => {
     patch: { status?: MediaItem['status']; rating?: number | null; current_season?: number; current_episode?: number; current_chapter?: number },
   ) => {
     setUpdatingIds((prev) => new Set(prev).add(item.id));
+    // Snapshot the pre-patch values so a failed write can roll the open drawer
+    // back — it used to keep showing the optimistic value until you reopened it.
+    const rollback: Partial<MediaItem> = {};
+    (Object.keys(patch) as Array<keyof typeof patch>).forEach((k) => {
+      (rollback as Record<string, unknown>)[k] = (item as unknown as Record<string, unknown>)[k];
+    });
     setEditingItem((prev) => (prev && prev.id === item.id ? ({ ...prev, ...patch } as MediaItem) : prev));
     queryClient.setQueryData<{ pages: Array<{ items: MediaItem[]; count: number; page: number }> }>(
       ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
@@ -1337,6 +1432,8 @@ const MediaTracker = () => {
     } catch (e: unknown) {
       queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
       queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
+      // Roll the open drawer back to the stored values too, not just the caches.
+      setEditingItem((prev) => (prev && prev.id === item.id ? ({ ...prev, ...rollback } as MediaItem) : prev));
       toast({ title: 'Update failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
     } finally {
       setUpdatingIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
@@ -1365,6 +1462,9 @@ const MediaTracker = () => {
     // 1 to the episode here would have dropped you back into episode 1 of a
     // season you had already finished.
     if (season >= 1 && curEp === 0) {
+      // Only roll forward into a season that actually exists.
+      const knownSeasons = meta?.seasons;
+      if (knownSeasons?.length && !knownSeasons.some((sn) => sn.season_number === season + 1)) return;
       patchMedia(item as MediaItem, { current_season: season + 1, current_episode: 1 });
       return;
     }
@@ -1395,12 +1495,14 @@ const MediaTracker = () => {
       const user = session?.user;
       if (!user) throw new Error('Not authenticated');
       // Pull every tracker column + tag names so a backup restores fully.
-      const { data, error } = await supabase
-        .from('media_tracker')
-        .select('*, media_tags(tags(name))')
-        .eq('user_id', user.id);
-      if (error) throw error;
-      const items = ((data || []) as Array<Record<string, unknown>>).map((row) => {
+      const allRows = await fetchAllPaged<Record<string, unknown>>((from, to) =>
+        supabase
+          .from('media_tracker')
+          .select('*, media_tags(tags(name))')
+          .eq('user_id', user.id)
+          .order('id', { ascending: true })
+          .range(from, to));
+      const items = allRows.map((row) => {
         const mediaTags = row.media_tags as Array<{ tags: { name: string } | null }> | undefined;
         const tags = Array.isArray(mediaTags)
           ? mediaTags.map((mt) => mt.tags?.name).filter((n): n is string => Boolean(n))
@@ -1450,15 +1552,16 @@ const MediaTracker = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) throw new Error('Not authenticated');
-      const { data, error } = await supabase
-        .from('media_tracker')
-        .select('title, type, status, rating, current_season, current_episode, last_known_total_episodes, current_chapter, created_at, updated_at, media_tags(tags(name))')
-        .eq('user_id', user.id)
-        .order('type', { ascending: true })
-        .order('title', { ascending: true });
-      if (error) throw error;
+      const allRows = await fetchAllPaged<Record<string, unknown>>((from, to) =>
+        supabase
+          .from('media_tracker')
+          .select('title, type, status, rating, current_season, current_episode, last_known_total_episodes, current_chapter, created_at, updated_at, media_tags(tags(name))')
+          .eq('user_id', user.id)
+          .order('type', { ascending: true })
+          .order('title', { ascending: true })
+          .range(from, to));
       const header = ['Title', 'Type', 'Status', 'My Rating', 'Season', 'Episode', 'Total Episodes', 'Chapter', 'Tags', 'Added', 'Updated'];
-      const rows = ((data || []) as Array<Record<string, unknown>>).map((row) => {
+      const rows = allRows.map((row) => {
         const mediaTags = row.media_tags as Array<{ tags: { name: string } | null }> | undefined;
         const tags = Array.isArray(mediaTags)
           ? mediaTags.map((mt) => mt.tags?.name).filter(Boolean)
@@ -1485,17 +1588,15 @@ const MediaTracker = () => {
       const user = session?.user;
       if (!user) throw new Error('Not authenticated');
 
-      let query = supabase.from('media_tracker').select('*').eq('user_id', user.id).order('title', { ascending: true });
-
-      // Apply type filter if types are selected
-      if (txtExportSelectedTypes.length > 0) {
-        query = query.in('type', txtExportSelectedTypes);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      const items = (data || []) as MediaItem[];
+      const items = await fetchAllPaged<MediaItem>((from, to) => {
+        let query = supabase.from('media_tracker').select('*').eq('user_id', user.id)
+          .order('title', { ascending: true }).range(from, to);
+        // Apply type filter if types are selected
+        if (txtExportSelectedTypes.length > 0) {
+          query = query.in('type', txtExportSelectedTypes);
+        }
+        return query;
+      });
 
       // Readable layout: grouped by type, then by status category, one line per title.
       const progressLine = (item: MediaItem): string => {
@@ -1550,10 +1651,13 @@ const MediaTracker = () => {
     }
   };
 
-  const handleQuickAdd = async () => {
+  // Returns whether the item was actually added. Callers used to close the
+  // dialog unconditionally and without awaiting, so a validation error or a
+  // failed insert threw away everything you had typed with no way to retry.
+  const handleQuickAdd = async (): Promise<boolean> => {
     if (!quickAddTitle.trim() || !quickAddType) {
       toast({ title: 'Missing fields', description: 'Please enter a title and select a type', variant: 'destructive' });
-      return;
+      return false;
     }
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -1599,9 +1703,11 @@ const MediaTracker = () => {
       setQuickAddStatus('');
       refetch();
       toast({ title: 'Added!', description: `${quickAddTitle} has been added to your tracker` });
+      return true;
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Error';
       toast({ title: 'Failed to add', description: message, variant: 'destructive' });
+      return false;
     }
   };
 
@@ -1842,6 +1948,10 @@ const MediaTracker = () => {
           })),
         } : old
       );
+      // The Continue rail reads its own query, so without this the NEW badge
+      // stayed on the shelf (and kept sorting the item first) all session.
+      queryClient.setQueryData<MediaItem[]>(['mediaRails'], (old) =>
+        old?.map((i) => (i.id === item.id ? { ...i, has_new_content: false } : i)));
     }
     setDetailsOpen(true);
   }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder]);
@@ -2048,7 +2158,9 @@ const MediaTracker = () => {
         data = arr;
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : 'Invalid JSON';
+        // `error` is state nothing renders, so this path was completely silent.
         setError(message);
+        toast({ title: 'Import failed', description: message, variant: 'destructive' });
         setIsImporting(false);
         return;
       }
@@ -2167,24 +2279,42 @@ const MediaTracker = () => {
     }
   };
 
-  // When URL has ?media=ID, try to scroll/highlight the item after data renders
+  // ?media=ID opens that title's detail drawer. This previously looked for a
+  // DOM node with id="media-<id>" — nothing ever rendered one, so every deep
+  // link from the Dashboard, the calendar and tag views landed on an unfiltered
+  // library and did nothing. Scrolling could not have worked anyway: the target
+  // is usually outside the loaded pages. Fetch the row by id instead.
+  const consumedMediaParamRef = useRef<string | null>(null);
   useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const mediaId = params.get('media');
-    if (!mediaId) return;
+    const mediaId = new URLSearchParams(location.search).get('media');
+    if (!mediaId || consumedMediaParamRef.current === mediaId) return;
     const idNum = Number(mediaId);
     if (!Number.isFinite(idNum)) return;
-    // slight delay after render to ensure DOM elements exist
-    const t = setTimeout(() => {
-      const el = document.querySelector(`#media-${idNum}`) as HTMLElement | null;
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('ring-2','ring-primary');
-        setTimeout(() => el.classList.remove('ring-2','ring-primary'), 1500);
+    consumedMediaParamRef.current = mediaId;
+
+    let cancelled = false;
+    (async () => {
+      const loaded = itemsByIdRef.current.get(idNum);
+      if (loaded) {
+        openDetails(loaded, 'view');
+      } else {
+        const { data, error } = await supabase
+          .from('media_tracker')
+          .select('*')
+          .eq('id', idNum)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error || !data) {
+          toast({ title: 'Not found', description: "That title isn't in your library any more.", variant: 'destructive' });
+        } else {
+          openDetails(normalizeMediaItem(data as unknown as MediaItem), 'view');
+        }
       }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [location.search, mediaItems, viewMode]);
+      if (!cancelled) navigate(location.pathname, { replace: true });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   return (
     <div className="min-h-screen">
@@ -2747,7 +2877,7 @@ const MediaTracker = () => {
             >
               <Menu className="h-5 w-5" />
             </Button>
-            <h1 className="font-heading font-bold text-base sm:text-lg truncate">Media Tracker</h1>
+            <h1 className="font-heading font-bold text-base sm:text-lg truncate">Media</h1>
             <div className="flex items-center gap-1">
               <Button size="sm" variant="default" onClick={() => setQuickAddOpen(true)} className="h-10 w-10 p-0 touch-manipulation" aria-label="Add media" title="Add">
                 <Plus className="h-4 w-4" />
@@ -2936,8 +3066,7 @@ const MediaTracker = () => {
                       onChange={(e) => setQuickAddTitle(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                          handleQuickAdd();
-                          setQuickAddOpen(false);
+                          void handleQuickAdd().then((ok) => { if (ok) setQuickAddOpen(false); });
                         }
                       }}
                       autoFocus
@@ -2976,8 +3105,7 @@ const MediaTracker = () => {
                         onChange={(e) => setQuickAddProgress(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            handleQuickAdd();
-                            setQuickAddOpen(false);
+                            void handleQuickAdd().then((ok) => { if (ok) setQuickAddOpen(false); });
                           }
                         }}
                       />
@@ -3034,10 +3162,7 @@ const MediaTracker = () => {
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setQuickAddOpen(false)}>Cancel</Button>
                     <Button
-                      onClick={() => {
-                        handleQuickAdd();
-                        setQuickAddOpen(false);
-                      }}
+                      onClick={() => { void handleQuickAdd().then((ok) => { if (ok) setQuickAddOpen(false); }); }}
                       disabled={!quickAddTitle.trim() || !quickAddType}
                     >
                       Add
@@ -3244,7 +3369,7 @@ const MediaTracker = () => {
 
             {/* Control rail — status segment (doubles as the status filter) + inline sort */}
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="-mx-1 max-w-full overflow-x-auto scrollbar-hide px-1">
+              <div className="-mx-1 max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-1">
                 <div className="inline-flex items-center gap-0.5 rounded-full border border-border/60 bg-background/40 backdrop-blur-md p-0.5">
                   {([
                     { label: 'All', value: currentStats.all, status: 'All', dot: 'bg-foreground/40' },
@@ -3385,7 +3510,7 @@ const MediaTracker = () => {
               <div className="pointer-events-none fixed inset-x-0 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 animate-fade-in-scale">
                 <div className="glass pointer-events-auto flex flex-wrap items-center gap-2 px-3 py-2">
                   <span className="px-2 text-sm font-bold tabular-nums text-foreground">
-                    {selectedIds.size} <span className="font-normal text-muted-foreground">selected</span>
+                    {selectedItems.length} <span className="font-normal text-muted-foreground">selected</span>
                   </span>
                   <Button size="sm" variant="ghost" onClick={selectAllVisible}>
                     Select all ({finalItems.length})
@@ -3396,11 +3521,9 @@ const MediaTracker = () => {
                       <SelectValue placeholder="Set status…" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Watching">Watching</SelectItem>
-                      <SelectItem value="Reading">Reading</SelectItem>
-                      <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
-                      <SelectItem value="Plan to Read">Plan to Read</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
+                      {bulkStatusOptions.map((st) => (
+                        <SelectItem key={st} value={st}>{st}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Button size="sm" variant="ghost" onClick={refreshSelectedCovers} disabled={isRefreshingCovers}>
@@ -3508,20 +3631,43 @@ const MediaTracker = () => {
               </div>
             ) : finalItems.length === 0 ? (
               <div className="zen-card p-4 sm:p-8 text-center">
-                <p className="text-muted-foreground mb-4">
-                  {hasActiveFilters
-                    ? 'No media found for the selected filters.'
-                    : "You haven't added any media yet. Add your first title to start tracking!"}
-                </p>
-                {hasActiveFilters ? (
-                  <Button variant="outline" onClick={resetAllFilters}>
-                    Clear filters
-                  </Button>
+                {/* A load failure used to render as an empty library, which sent
+                    you looking for missing data instead of retrying. */}
+                {error ? (
+                  <>
+                    <p className="text-foreground font-medium mb-1">Couldn't load your library</p>
+                    <p className="text-muted-foreground text-sm mb-4">{error}</p>
+                    <Button variant="outline" onClick={() => refetch()}>Try again</Button>
+                  </>
                 ) : (
-                  <Button onClick={openCreate}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Media
-                  </Button>
+                  <>
+                    <p className="text-muted-foreground mb-4">
+                      {hasActiveFilters
+                        ? 'No media found for the selected filters.'
+                        : "You haven't added any media yet. Add your first title to start tracking!"}
+                    </p>
+                    {hasActiveFilters ? (
+                      <Button variant="outline" onClick={resetAllFilters}>
+                        Clear filters
+                      </Button>
+                    ) : (
+                      <Button onClick={openCreate}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Media
+                      </Button>
+                    )}
+                    {/* B4: client-side filters (genre, needs-cover, progress) run
+                        after pagination, so an empty loaded page used to strand
+                        you here with no sentinel to load the next one. */}
+                    {hasActiveFilters && hasNextPage && (
+                      <div className="mt-4">
+                        <div ref={loadMoreRef} />
+                        <Button variant="ghost" size="sm" disabled={isFetchingNextPage} onClick={() => fetchNextPage()}>
+                          {isFetchingNextPage ? 'Searching more of your library…' : 'Search more of your library'}
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             ) : (
@@ -3603,7 +3749,7 @@ const MediaTracker = () => {
         open={bulkDeleteOpen}
         onOpenChange={setBulkDeleteOpen}
         onConfirm={bulkDelete}
-        title={`Delete ${selectedIds.size} item${selectedIds.size === 1 ? '' : 's'}`}
+        title={`Delete ${selectedItems.length} item${selectedItems.length === 1 ? '' : 's'}`}
         description="Are you sure you want to delete the selected media items? This action cannot be undone."
       />
     </div>

@@ -108,7 +108,7 @@ export function LibraryStatsDialog({
               icon={TrendingUp}
               label="In progress"
               value={String(stats.byStatus.inProgress)}
-              sub={`${stats.behindCount} with new content`}
+              sub={`${stats.behindCount} with more to watch or read`}
             />
           </div>
 

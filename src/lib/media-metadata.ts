@@ -11,6 +11,7 @@ import { devLog } from '@/lib/logger';
 import { mediaSearchGet } from '@/lib/edge-function';
 import type { MediaMeta, EpisodeDetail, SeasonInfo, CastMember } from '@/lib/media-progress';
 import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
+import { invalidateImageCache } from './image-cache';
 
 // Pure progress helpers + metadata shapes live in their own module so they can
 // be tested without the Supabase client. Re-exported here for existing callers.
@@ -134,17 +135,11 @@ export async function removeCoverImage(mediaId: number): Promise<boolean> {
       return false;
     }
 
-    // Drop the localStorage cache entries for this item (mirrors media-refresh.ts).
-    for (const key of ['media_images_v1', 'media_image_sources_v1']) {
-      try {
-        const cached = localStorage.getItem(key);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          delete parsed[mediaId];
-          localStorage.setItem(key, JSON.stringify(parsed));
-        }
-      } catch { /* ignore cache write errors */ }
-    }
+    // Drop the localStorage cache entry for this item. This used to poke at
+    // `media_images_v1` / `media_image_sources_v1`, which nothing has written
+    // since image-cache.ts moved to the _v2 keys — so a removed cover came
+    // straight back on the next load from the still-valid v2 entry.
+    invalidateImageCache(mediaId);
     return true;
   } catch (error) {
     console.error('removeCoverImage error:', error);

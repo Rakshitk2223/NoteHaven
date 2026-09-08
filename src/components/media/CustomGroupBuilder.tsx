@@ -7,7 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -138,7 +137,7 @@ export const CustomGroupBuilder = ({
     'bg-foreground/[0.04] text-muted-foreground border-transparent hover:bg-foreground/[0.08] hover:text-foreground';
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide items-center">
+    <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden items-center">
       {/* All */}
       <button
         onClick={() => onActiveCategoryChange('all')}
@@ -210,23 +209,25 @@ export const CustomGroupBuilder = ({
         );
       })}
 
-      {/* Add Group */}
+      {/* Add Group trigger — hidden at the cap, but the dialog below stays
+          mounted so the ⚙ edit affordance on each group pill still works.
+          Both used to live inside this gate, which made editing impossible
+          once you had 4 groups (delete-and-recreate was the only way). */}
       {canAddMore && (
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <button
-              onClick={handleAddGroup}
-              className={cn(
-                pillBase,
-                'bg-background text-muted-foreground border-dashed border-border hover:border-border-strong hover:text-foreground'
-              )}
-              aria-label="Add custom group"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Group</span>
-            </button>
-          </DialogTrigger>
+        <button
+          onClick={handleAddGroup}
+          className={cn(
+            pillBase,
+            'bg-background text-muted-foreground border-dashed border-border hover:border-border-strong hover:text-foreground'
+          )}
+          aria-label="Add custom group"
+        >
+          <Plus className="h-4 w-4" />
+          <span>Group</span>
+        </button>
+      )}
 
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>{editingGroup ? 'Edit Group' : 'Create New Group'}</DialogTitle>
@@ -282,8 +283,7 @@ export const CustomGroupBuilder = ({
               </div>
             </div>
           </DialogContent>
-        </Dialog>
-      )}
+      </Dialog>
 
       {/* Manage which type pills are visible */}
       <Button
