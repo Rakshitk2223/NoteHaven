@@ -1,7 +1,7 @@
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { LedgerCategory } from '@/lib/ledger';
+import { currencySymbol, type LedgerCategory } from '@/lib/ledger';
 import type { LedgerAccount } from '@/lib/accounts';
 
 const TYPES: Array<{ value: LedgerEntryFormData['type']; label: string }> = [
@@ -27,13 +27,27 @@ interface LedgerEntryFormProps {
   accounts?: LedgerAccount[];
   /** Shows a "Create categories" affordance when none exist (used by the Add dialog). */
   onCreateCategories?: () => void;
+  /** Called on Enter from any text field, so the dialog can be saved from the
+   *  keyboard — this form is a plain div, so there was no implicit submit. */
+  onSubmitShortcut?: () => void;
+  /** Focus the amount field on mount (the Add dialog's first action). */
+  autoFocusAmount?: boolean;
 }
 
 const NONE = '__none__'; // Radix Select can't use an empty-string item value.
 
 /** Shared fields for creating/editing a ledger entry (account-aware, single note). */
-export function LedgerEntryForm({ value, onChange, categories, accounts = [], onCreateCategories }: LedgerEntryFormProps) {
+export function LedgerEntryForm({
+  value, onChange, categories, accounts = [], onCreateCategories, onSubmitShortcut, autoFocusAmount,
+}: LedgerEntryFormProps) {
   const set = (patch: Partial<LedgerEntryFormData>) => onChange({ ...value, ...patch });
+
+  const setType = (next: LedgerEntryFormData['type']) => {
+    // The category list is filtered by type, but the selected id survived a type
+    // switch — so an income category could be saved onto an expense.
+    const stillValid = categories.some((c) => c.id.toString() === value.category_id && c.type === next);
+    onChange({ ...value, type: next, category_id: stillValid ? value.category_id : '' });
+  };
   const noCategories = categories.length === 0;
   const isTransfer = value.type === 'transfer';
   const accountLabel = value.type === 'income' ? 'Into account' : 'From account';
@@ -50,8 +64,16 @@ export function LedgerEntryForm({ value, onChange, categories, accounts = [], on
     </Select>
   );
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter' || !onSubmitShortcut) return;
+    const el = e.target as HTMLElement;
+    if (el.tagName !== 'INPUT') return;
+    e.preventDefault();
+    onSubmitShortcut();
+  };
+
   return (
-    <div className="grid gap-4 py-4">
+    <div className="grid gap-4 py-4" onKeyDown={onKeyDown}>
       <div className="grid gap-2">
         <label className="text-sm font-medium">Type</label>
         <div className="grid grid-cols-3 gap-1 rounded-lg bg-secondary/50 p-1">
@@ -59,7 +81,7 @@ export function LedgerEntryForm({ value, onChange, categories, accounts = [], on
             <button
               key={t.value}
               type="button"
-              onClick={() => set({ type: t.value })}
+              onClick={() => setType(t.value)}
               className={cn(
                 'rounded-md py-1.5 text-sm font-medium transition-colors',
                 value.type === t.value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
@@ -74,8 +96,12 @@ export function LedgerEntryForm({ value, onChange, categories, accounts = [], on
       <div className="grid gap-2">
         <label className="text-sm font-medium">Amount</label>
         <div className="relative">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">₹</span>
-          <Input type="number" step="0.01" placeholder="0.00" value={value.amount} onChange={(e) => set({ amount: e.target.value })} className="pl-7 text-lg font-semibold tabular-nums" />
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">{currencySymbol()}</span>
+          <Input
+            type="number" step="0.01" placeholder="0.00" autoFocus={autoFocusAmount}
+            value={value.amount} onChange={(e) => set({ amount: e.target.value })}
+            className="pl-7 text-lg font-semibold tabular-nums"
+          />
         </div>
       </div>
 

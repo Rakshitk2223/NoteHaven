@@ -88,6 +88,27 @@ export async function deleteLedgerEntry(id: number): Promise<void> {
 // SUMMARY & ANALYTICS
 // ============================================
 
+/**
+ * Total of derived subscription charges falling inside one month, for the same
+ * subscription set the Money Ledger page injects into its table.
+ */
+async function monthlySubscriptionExpense(userId: string, year: number, month: number): Promise<number> {
+  try {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('id, name, amount, billing_cycle, start_date, end_date, status, ledger_category_id')
+      .eq('user_id', userId);
+    if (error || !data) return 0;
+    const charges = deriveSubscriptionCharges(data as unknown as SubscriptionLike[]);
+    const prefix = `${year}-${String(month).padStart(2, '0')}`;
+    return charges
+      .filter((c) => c.date.startsWith(prefix))
+      .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function getLedgerSummary(
   year: number,
   month: number
@@ -107,13 +128,20 @@ export async function getLedgerSummary(
     if (error) throw error;
     
     if (!data || data.length === 0) {
-      return { totalIncome: 0, totalExpense: 0, netBalance: 0 };
+      const subOnly = await monthlySubscriptionExpense(user.id, year, month);
+      return { totalIncome: 0, totalExpense: subOnly, netBalance: -subOnly };
     }
     
+    // The RPC reads `ledger_entries` only, but the Money Ledger page also
+    // subtracts derived subscription charges from the same month — so the
+    // dashboard widget and the page reported different expense totals for the
+    // same month. Add the derived charges here so both agree.
+    const subExpense = await monthlySubscriptionExpense(user.id, year, month);
+
     return {
       totalIncome: data[0].total_income || 0,
-      totalExpense: data[0].total_expense || 0,
-      netBalance: data[0].net_balance || 0
+      totalExpense: (data[0].total_expense || 0) + subExpense,
+      netBalance: (data[0].net_balance || 0) - subExpense
     };
   } catch (error) {
     console.error('Error fetching ledger summary:', error);
@@ -189,6 +217,23 @@ export function formatCurrency(amount: number): string {
   } catch {
     // Bad locale/currency code — fall back to the original default.
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
+  }
+}
+
+/**
+ * Just the currency symbol for the user's configured currency, for input
+ * prefixes and field labels. Those were hard-coded to "₹" while the totals
+ * beside them already respected the Region setting.
+ */
+export function currencySymbol(): string {
+  const { locale, currency } = getCachedPrefs();
+  try {
+    const parts = new Intl.NumberFormat(locale || 'en-IN', {
+      style: 'currency', currency: currency || 'INR',
+    }).formatToParts(0);
+    return parts.find((pt) => pt.type === 'currency')?.value ?? '₹';
+  } catch {
+    return '₹';
   }
 }
 

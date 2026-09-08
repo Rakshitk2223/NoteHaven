@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import {
   createAccount, updateAccount, deleteAccount,
   ACCOUNT_KINDS, ACCOUNT_KIND_ORDER,
@@ -19,6 +20,9 @@ function AccountRow({ account, onChanged }: { account: LedgerAccount; onChanged:
   const [kind, setKind] = useState<AccountKind>((account.kind as AccountKind) || 'bank');
   const [opening, setOpening] = useState(String(account.opening_balance ?? 0));
   const [busy, setBusy] = useState(false);
+  // Removing an account unassigns its entries and visibly moves the
+  // "Money in hand" tiles, so it needs a confirm step like every other delete.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const dirty = name !== account.name || kind !== account.kind || String(account.opening_balance ?? 0) !== opening;
   const Icon = KIND_ICON[kind] || Landmark;
 
@@ -58,9 +62,17 @@ function AccountRow({ account, onChanged }: { account: LedgerAccount; onChanged:
         className="h-8 w-28 flex-shrink-0 text-right tabular-nums" placeholder="Opening" title="Opening balance"
       />
       {dirty && <Button size="sm" className="h-8 flex-shrink-0" disabled={busy} onClick={save}>Save</Button>}
-      <Button size="icon-sm" variant="ghost" className="h-8 w-8 flex-shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={remove} aria-label="Remove account">
+      <Button size="icon-sm" variant="ghost" className="h-8 w-8 flex-shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={() => setConfirmOpen(true)} aria-label="Remove account">
         <Trash2 className="h-4 w-4" />
       </Button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        onConfirm={() => { setConfirmOpen(false); void remove(); }}
+        title="Remove this account?"
+        description={`"${account.name}" will be removed. Its transactions are kept but become unassigned, which changes your Money in hand totals.`}
+        confirmText="Remove"
+      />
     </div>
   );
 }

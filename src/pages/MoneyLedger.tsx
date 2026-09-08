@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Plus, Download, TrendingUp, TrendingDown, Wallet, Calendar, Filter, Trash2, Edit2,
-  ArrowLeftRight, ChevronDown, Landmark, Banknote, CreditCard, Settings2, Repeat,
+  ArrowLeftRight, ChevronDown, Landmark, Banknote, CreditCard, Settings2, Repeat, Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -35,9 +36,22 @@ import { AccountsManager } from '@/components/ledger/AccountsManager';
 
 const KIND_ICON: Record<AccountKind, typeof Landmark> = { bank: Landmark, cash: Banknote, card: CreditCard };
 
+// Most entries come out of the same account, but the form reset it every time.
+const LAST_ACCOUNT_KEY = 'ledgerLastAccountId';
+const MONTH_KEY = 'ledgerSelectedMonth';
+const YEAR_KEY = 'ledgerSelectedYear';
+
+const readStored = (key: string): string => {
+  try { return localStorage.getItem(key) ?? ''; } catch { return ''; }
+};
+const writeStored = (key: string, val: string) => {
+  try { localStorage.setItem(key, val); } catch { /* private mode */ }
+};
+
 const emptyForm = (): LedgerEntryFormData => ({
   type: 'expense', amount: '', category_id: '', description: '',
-  transaction_date: dateToYMD(new Date()), account_id: '', to_account_id: '',
+  transaction_date: dateToYMD(new Date()),
+  account_id: readStored(LAST_ACCOUNT_KEY), to_account_id: '',
 });
 
 const MoneyLedger = () => {
@@ -49,9 +63,21 @@ const MoneyLedger = () => {
   const [accounts, setAccounts] = useState<LedgerAccount[]>([]);
   const [subs, setSubs] = useState<SubscriptionLike[]>([]);
 
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  // The month/year snapped back to today on every visit, so reviewing an earlier
+  // month meant re-picking two dropdowns each time you navigated away and back.
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const stored = Number(readStored(MONTH_KEY));
+    return stored >= 1 && stored <= 12 ? stored : new Date().getMonth() + 1;
+  });
+  const [selectedYear, setSelectedYear] = useState(() => {
+    const stored = Number(readStored(YEAR_KEY));
+    return stored >= 1970 && stored <= 2200 ? stored : new Date().getFullYear();
+  });
+  // Free-text search over the note/description of the month's entries.
+  const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+  useEffect(() => { writeStored(MONTH_KEY, String(selectedMonth)); }, [selectedMonth]);
+  useEffect(() => { writeStored(YEAR_KEY, String(selectedYear)); }, [selectedYear]);
   // Lets you find the entries that sit in the "Unassigned + subs" tile instead
   // of any account — otherwise they are invisible in the transaction list.
   const [unassignedOnly, setUnassignedOnly] = useState(false);
@@ -122,15 +148,21 @@ const MoneyLedger = () => {
   // Transaction rows for the month = real entries + derived subscription charges.
   type Row = { kind: 'entry'; date: string; entry: LedgerEntry } | { kind: 'sub'; date: string; charge: typeof subCharges[number] };
   const rows = useMemo<Row[]>(() => {
+    const q = searchTerm.trim().toLowerCase();
     const entryRows: Row[] = monthEntries
       .filter((e) => filterType === 'all' || e.type === filterType)
       .filter((e) => !unassignedOnly || (e.account_id == null && e.to_account_id == null))
+      .filter((e) => !q || (e.description || '').toLowerCase().includes(q))
       .map((e) => ({ kind: 'entry', date: e.transaction_date, entry: e }));
     // Subscription charges are derived, not rows — they belong to no account by
     // definition, so they stay visible while filtering for unassigned.
-    const subRows: Row[] = filterType === 'income' ? [] : monthSubs.map((c) => ({ kind: 'sub', date: c.date, charge: c }));
+    const subRows: Row[] = filterType === 'income'
+      ? []
+      : monthSubs
+          .filter((c) => !q || c.name.toLowerCase().includes(q))
+          .map((c) => ({ kind: 'sub', date: c.date, charge: c }));
     return [...entryRows, ...subRows].sort((a, b) => b.date.localeCompare(a.date));
-  }, [monthEntries, monthSubs, filterType, unassignedOnly]);
+  }, [monthEntries, monthSubs, filterType, unassignedOnly, searchTerm]);
 
   // ---- mutations ----
   const buildPayload = (f: LedgerEntryFormData) => {
@@ -181,6 +213,7 @@ const MoneyLedger = () => {
     try {
       await createLedgerEntry(buildPayload(newEntry));
       toast({ title: 'Entry added' });
+      if (newEntry.account_id) writeStored(LAST_ACCOUNT_KEY, newEntry.account_id);
       setIsAddOpen(false);
       setNewEntry(emptyForm());
       loadData();
@@ -287,7 +320,7 @@ const MoneyLedger = () => {
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader><DialogTitle>Add Entry</DialogTitle></DialogHeader>
-          <LedgerEntryForm value={newEntry} onChange={setNewEntry} categories={categories} accounts={accounts} onCreateCategories={refreshCategories} />
+          <LedgerEntryForm value={newEntry} onChange={setNewEntry} categories={categories} accounts={accounts} onCreateCategories={refreshCategories} onSubmitShortcut={handleAdd} autoFocusAmount />
           <Button onClick={handleAdd} className="w-full">Add Entry</Button>
         </DialogContent>
       </Dialog>
@@ -295,7 +328,7 @@ const MoneyLedger = () => {
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader><DialogTitle>Edit Entry</DialogTitle></DialogHeader>
-          <LedgerEntryForm value={editForm} onChange={setEditForm} categories={categories} accounts={accounts} />
+          <LedgerEntryForm value={editForm} onChange={setEditForm} categories={categories} accounts={accounts} onSubmitShortcut={handleUpdate} autoFocusAmount />
           <Button onClick={handleUpdate} className="w-full">Update Entry</Button>
         </DialogContent>
       </Dialog>
@@ -306,7 +339,7 @@ const MoneyLedger = () => {
       <Card className="aurora-card mb-4">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">Money in hand</CardTitle>
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/12 text-primary"><Wallet className="h-4 w-4" /></div>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary"><Wallet className="h-4 w-4" /></div>
         </CardHeader>
         <CardContent>
           {loading ? <Skeleton className="h-10 w-48" /> : (
@@ -409,6 +442,17 @@ const MoneyLedger = () => {
             </SelectContent>
           </Select>
         </div>
+        {/* "Where did that 4,000 go" was unanswerable: the month/type selects
+            were the only way to narrow the table. */}
+        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search notes…"
+            className="pl-9"
+          />
+        </div>
       </div>
 
       {/* Transactions */}
@@ -425,7 +469,7 @@ const MoneyLedger = () => {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[44rem]">
                 <thead><tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="py-2 px-3 font-medium">Date</th>
                   <th className="py-2 px-3 font-medium">Category</th>
@@ -459,7 +503,7 @@ const MoneyLedger = () => {
                           {e.type === 'transfer' ? (
                             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><ArrowLeftRight className="h-3 w-3" /> Transfer</span>
                           ) : e.category ? (
-                            <TagBadge tag={{ id: e.category.id, user_id: e.category.user_id, name: e.category.name, color: e.category.color, usage_count: 0, created_at: e.category.created_at }} size="sm" />
+                            <TagBadge tag={{ id: e.category.id, user_id: e.category.user_id, name: e.category.name, color: e.category.color, usage_count: 0, created_at: e.category.created_at }} size="sm" clickable={false} />
                           ) : null}
                         </td>
                         <td className="py-3 px-3">{e.description || '-'}</td>
