@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { PageTransition } from "@/components/ui/motion";
 import { cn } from "@/lib/utils";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 interface PageShellProps {
   /** Page title — rendered as a gradient heading in the header. */
@@ -25,6 +26,9 @@ interface PageShellProps {
   noPadding?: boolean;
   /** Constrain content width and center it (nice for forms/reading). */
   maxWidth?: "none" | "5xl" | "6xl" | "7xl";
+  /** Browser-tab title, when the visible heading isn't a good tab name (the
+   *  Dashboard's heading is a greeting, which made a useless history entry). */
+  documentTitle?: string;
 }
 
 const maxWidthMap: Record<NonNullable<PageShellProps["maxWidth"]>, string> = {
@@ -50,8 +54,10 @@ export function PageShell({
   fullHeight,
   noPadding,
   maxWidth = "none",
+  documentTitle,
 }: PageShellProps) {
   const { toggle } = useSidebar();
+  useDocumentTitle(documentTitle ?? title);
 
   return (
     <div className={cn("relative flex", fullHeight ? "h-dvh overflow-hidden" : "min-h-dvh")}>

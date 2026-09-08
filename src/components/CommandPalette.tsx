@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Calendar, Library, Monitor, CheckSquare, FileText,
   Cake, Wallet, CreditCard, Settings as SettingsIcon, Plus, Sparkles,
   SunMedium, Moon, FolderLock, Compass, ChefHat, Gift, Briefcase,
+  Code2, TerminalSquare, Tag as TagIcon,
 } from "lucide-react";
 import {
   CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup,
@@ -62,8 +63,10 @@ export function CommandPalette() {
     { icon: LayoutDashboard, label: "Dashboard", perform: () => go("/dashboard") },
     { icon: Calendar, label: "Calendar", perform: () => go("/calendar") },
     { icon: Briefcase, label: "Work", perform: () => go("/work"), keywords: "office projects helped colleagues appraisal" },
-    { icon: Library, label: "Library", perform: () => go("/library"), keywords: "prompts snippets code" },
-    { icon: Monitor, label: "Media Tracker", perform: () => go("/media"), keywords: "anime manga movies series" },
+    { icon: Library, label: "Prompts", perform: () => go("/library?tab=prompts"), keywords: "library ai prompt templates" },
+    { icon: Code2, label: "Code Snippets", perform: () => go("/library?tab=snippets"), keywords: "library code snippet" },
+    { icon: TerminalSquare, label: "Commands", perform: () => go("/library?tab=commands"), keywords: "library shell cli terminal" },
+    { icon: Monitor, label: "Media", perform: () => go("/media"), keywords: "media tracker anime manga movies series" },
     { icon: CheckSquare, label: "Tasks", perform: () => go("/tasks"), keywords: "todo" },
     { icon: FileText, label: "Notes", perform: () => go("/notes") },
     { icon: FolderLock, label: "Vault", perform: () => go("/vault"), keywords: "files documents storage drive aadhaar passport" },
@@ -73,6 +76,7 @@ export function CommandPalette() {
     { icon: ChefHat, label: "Recipes", perform: () => go("/recipes"), keywords: "cooking food meals cookbook" },
     { icon: Wallet, label: "Money Ledger", perform: () => go("/ledger"), keywords: "budget expenses income" },
     { icon: CreditCard, label: "Subscriptions", perform: () => go("/subscriptions") },
+    { icon: TagIcon, label: "Tags", perform: () => go("/tags"), keywords: "labels browse tagged everything" },
     { icon: SettingsIcon, label: "Settings", perform: () => go("/settings"), keywords: "theme preferences" },
   ];
 

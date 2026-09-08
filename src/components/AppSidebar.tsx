@@ -37,18 +37,18 @@ interface NavItem {
 const defaultMainNavigation: NavItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Calendar", href: "/calendar", icon: Calendar },
-  { name: "Work", href: "/work", icon: Briefcase },
-  { name: "Library", href: "/library", icon: Library },
-  { name: "Media", href: "/media", icon: Monitor },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
   { name: "Notes", href: "/notes", icon: FileText },
-  { name: "Vault", href: "/vault", icon: FolderLock },
-  { name: "Birthdays", href: "/birthdays", icon: Cake },
-  { name: "Bucket List", href: "/bucket-list", icon: Compass },
-  { name: "Wishlist", href: "/wishlist", icon: Gift },
-  { name: "Recipes", href: "/recipes", icon: ChefHat },
+  { name: "Library", href: "/library", icon: Library },
+  { name: "Media", href: "/media", icon: Monitor },
+  { name: "Work", href: "/work", icon: Briefcase },
   { name: "Money Ledger", href: "/ledger", icon: Wallet },
   { name: "Subscriptions", href: "/subscriptions", icon: CreditCard },
+  { name: "Wishlist", href: "/wishlist", icon: Gift },
+  { name: "Vault", href: "/vault", icon: FolderLock },
+  { name: "Recipes", href: "/recipes", icon: ChefHat },
+  { name: "Birthdays", href: "/birthdays", icon: Cake },
+  { name: "Bucket List", href: "/bucket-list", icon: Compass },
 ];
 
 const STORAGE_KEY = 'sidebar-order';
@@ -70,7 +70,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
   const baseClasses = cn(
     "flex items-center gap-3 rounded-lg font-body font-medium transition-all duration-fast relative group",
     isActive
-      ? "bg-primary/12 text-foreground font-semibold"
+      ? "bg-primary/15 text-foreground font-semibold"
       : "text-muted-foreground hover:text-foreground hover:bg-secondary/70",
     isCollapsed
       ? "lg:justify-center lg:w-10 lg:h-10 lg:p-0 lg:mx-auto"

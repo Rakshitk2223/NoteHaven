@@ -15,6 +15,10 @@ const LANDING_PAGES = [
   { value: '/subscriptions', label: 'Subscriptions' },
   { value: '/birthdays', label: 'Birthdays' },
   { value: '/vault', label: 'Vault' },
+  { value: '/work', label: 'Work' },
+  { value: '/wishlist', label: 'Wishlist' },
+  { value: '/recipes', label: 'Recipes' },
+  { value: '/bucket-list', label: 'Bucket List' },
 ];
 
 const MEDIA_SORTS = [
@@ -51,8 +55,9 @@ export function BehaviorSection() {
     'mediaTrackerSortBy', 'updated_at', (v): v is string => MEDIA_SORTS.some((s) => s.value === v));
   const [vaultView, setVaultView] = useLocalPref<'grid' | 'list'>(
     'vault-view', 'grid', (v): v is 'grid' | 'list' => v === 'grid' || v === 'list');
-  const [libraryTab, setLibraryTab] = useLocalPref<'prompts' | 'snippets'>(
-    'library-active-tab', 'prompts', (v): v is 'prompts' | 'snippets' => v === 'prompts' || v === 'snippets');
+  const [libraryTab, setLibraryTab] = useLocalPref<'prompts' | 'snippets' | 'commands'>(
+    'library-active-tab', 'prompts',
+    (v): v is 'prompts' | 'snippets' | 'commands' => v === 'prompts' || v === 'snippets' || v === 'commands');
 
   return (
     <SettingsSection
@@ -90,7 +95,11 @@ export function BehaviorSection() {
 
       <SettingRow label="Library — default tab">
         <Segmented value={libraryTab} onChange={setLibraryTab}
-          options={[{ value: 'prompts', label: 'Prompts' }, { value: 'snippets', label: 'Snippets' }]} />
+          options={[
+            { value: 'prompts', label: 'Prompts' },
+            { value: 'snippets', label: 'Snippets' },
+            { value: 'commands', label: 'Commands' },
+          ]} />
       </SettingRow>
     </SettingsSection>
   );

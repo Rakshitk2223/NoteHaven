@@ -15,18 +15,18 @@ interface SidebarItem { name: string; href: string; }
 const DEFAULT_ORDER: SidebarItem[] = [
   { name: 'Dashboard', href: '/dashboard' },
   { name: 'Calendar', href: '/calendar' },
-  { name: 'Work', href: '/work' },
-  { name: 'Library', href: '/library' },
-  { name: 'Media', href: '/media' },
   { name: 'Tasks', href: '/tasks' },
   { name: 'Notes', href: '/notes' },
-  { name: 'Vault', href: '/vault' },
-  { name: 'Birthdays', href: '/birthdays' },
-  { name: 'Bucket List', href: '/bucket-list' },
-  { name: 'Wishlist', href: '/wishlist' },
-  { name: 'Recipes', href: '/recipes' },
+  { name: 'Library', href: '/library' },
+  { name: 'Media', href: '/media' },
+  { name: 'Work', href: '/work' },
   { name: 'Money Ledger', href: '/ledger' },
   { name: 'Subscriptions', href: '/subscriptions' },
+  { name: 'Wishlist', href: '/wishlist' },
+  { name: 'Vault', href: '/vault' },
+  { name: 'Recipes', href: '/recipes' },
+  { name: 'Birthdays', href: '/birthdays' },
+  { name: 'Bucket List', href: '/bucket-list' },
 ];
 
 const STORAGE_KEY = 'sidebar-order';

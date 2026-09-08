@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Trash2, Pin, Pencil, ListTodo } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,7 @@ function dueDateLabel(due: string): string {
 
 const Tasks = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -122,6 +123,23 @@ const Tasks = () => {
   // Scroll to and flash the task named by ?task=ID, once per link. The timers
   // used to be left dangling on unmount, and the highlight re-fired on every
   // subsequent state change because `tasks` is in the dependency list.
+  // ?new=1 (command palette "New Task") focuses the inline add field — Tasks
+  // creates from that form, not a dialog, so focusing it IS the new-task action.
+  const newTaskInputRef = useRef<HTMLInputElement>(null);
+  const consumedNewParamRef = useRef(false);
+  useEffect(() => {
+    // Deferred until the fetch settles: the field is disabled while loading and
+    // a disabled input silently refuses focus.
+    if (loading) return;
+    if (new URLSearchParams(location.search).get('new') !== '1') return;
+    if (consumedNewParamRef.current) return;
+    consumedNewParamRef.current = true;
+    navigate(location.pathname, { replace: true });
+    newTaskInputRef.current?.focus();
+    newTaskInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, loading]);
+
   const highlightedTaskRef = useRef<string | null>(null);
   useEffect(() => {
     const taskIdParam = new URLSearchParams(location.search).get('task');
@@ -359,6 +377,7 @@ const Tasks = () => {
               <form onSubmit={handleAddTask} className="space-y-3">
                 <div className="flex flex-col sm:flex-row gap-3">
                   <Input
+                    ref={newTaskInputRef}
                     value={newTaskText}
                     onChange={(e) => setNewTaskText(e.target.value)}
                     placeholder="Add a new task..."

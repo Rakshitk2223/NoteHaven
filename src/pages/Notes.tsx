@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from "react";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Trash2, Menu, Pin, Bold, Italic, Underline as UnderlineIcon, Palette, Lightbulb, List, Share2, Check, ListOrdered, Search, X, Undo, Redo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -49,6 +50,8 @@ type NoteUpdate = Partial<Pick<Note, 'title' | 'content' | 'is_pinned' | 'backgr
 
 const Notes = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  useDocumentTitle("Notes");
   const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
   const [notes, setNotes] = useState<Note[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -287,6 +290,21 @@ const Notes = () => {
   // and every autosave replaces that array, so this used to re-select the
   // deep-linked note on each save: with ?note= in the URL you could click a
   // different note and get yanked straight back to the original.
+  // ?new=1 (command palette "New Note") creates a note straight away. Guarded by
+  // a ref and the param is stripped, so autosave re-renders can't spawn extras.
+  const consumedNewParamRef = useRef(false);
+  useEffect(() => {
+    // Deferred until the list has loaded: creating first would race the fetch,
+    // which then replaces `notes` and hides the new note until a reload.
+    if (loading) return;
+    if (new URLSearchParams(location.search).get('new') !== '1') return;
+    if (consumedNewParamRef.current) return;
+    consumedNewParamRef.current = true;
+    navigate(location.pathname, { replace: true });
+    void createNote();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, loading]);
+
   const consumedNoteParamRef = useRef<string | null>(null);
   useEffect(() => {
     const noteIdParam = new URLSearchParams(location.search).get('note');
