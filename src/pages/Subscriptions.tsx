@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { PageShell } from '@/components/PageShell';
 import { Stagger, StaggerItem } from '@/components/ui/motion';
 import {
@@ -37,6 +38,9 @@ const Subscriptions = () => {
   const [categories, setCategories] = useState<SubscriptionCategory[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
+  // Deleting a subscription was a single unguarded click — the only list in the
+  // app without a confirm step.
+  const [pendingDelete, setPendingDelete] = useState<Subscription | null>(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -509,7 +513,8 @@ const Subscriptions = () => {
                                     usage_count: 0,
                                     created_at: sub.category.created_at
                                   }} 
-                                  size="sm" 
+                                  size="sm"
+                                  clickable={false}
                                 />
                               )}
                             </div>
@@ -552,7 +557,7 @@ const Subscriptions = () => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(sub.id)}
+                            onClick={() => setPendingDelete(sub)}
                             className="text-destructive hover:text-destructive"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -566,7 +571,15 @@ const Subscriptions = () => {
             </CardContent>
           </Card>
       </div>
-    </PageShell>
+          <ConfirmDialog
+        open={!!pendingDelete}
+        onOpenChange={(o) => { if (!o) setPendingDelete(null); }}
+        onConfirm={() => { if (pendingDelete) handleDelete(pendingDelete.id); setPendingDelete(null); }}
+        title="Delete this subscription?"
+        description={pendingDelete ? `"${pendingDelete.name}" will be removed permanently, along with its derived charges in the ledger.` : ''}
+      />
+
+</PageShell>
   );
 };
 
