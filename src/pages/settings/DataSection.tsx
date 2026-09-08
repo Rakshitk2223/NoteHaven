@@ -22,6 +22,7 @@ const EXPORT_TABLES = [
   'birthdays', 'countdowns', 'code_snippets', 'snippet_folders', 'tags',
   'recipes', 'recipe_folders', 'bucket_list',
   'vault_folders', 'vault_files',
+  'work_projects', 'wishlist_items', 'commands',
   'user_preferences',
 ] as const;
 
@@ -30,11 +31,46 @@ const EXPORT_TABLES = [
 // back untagged. They have no user_id column — RLS scopes them via their parent.
 const EXPORT_JUNCTIONS = [
   'note_tags', 'task_tags', 'media_tags', 'prompt_tags', 'code_snippet_tags',
+  'work_project_tags',
 ] as const;
 
-// Restore only self-contained tables (no cross-table FKs) and insert as NEW
-// rows (ids stripped) so we never corrupt id sequences or break references.
-const IMPORT_TABLES = ['notes', 'tasks', 'prompts', 'birthdays', 'countdowns'] as const;
+// Restore inserts NEW rows (ids stripped) so it can never corrupt id sequences,
+// then rewrites every foreign key through an old-id -> new-id map. That keeps
+// folder trees, ledger references and tag links intact, which a flat insert of
+// self-contained tables could not (audit DATA-03).
+//
+// Parents first — these reference nothing else the restore creates.
+const IMPORT_PARENTS = [
+  'tags', 'ledger_categories', 'ledger_accounts', 'subscription_categories',
+  'snippet_folders', 'recipe_folders',
+  'notes', 'tasks', 'prompts', 'birthdays', 'countdowns',
+  'media_tracker', 'bucket_list', 'wishlist_items', 'work_projects',
+] as const;
+
+// Then children, with each FK column mapped to the parent table it points at.
+const IMPORT_CHILDREN: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> = [
+  ['ledger_entries', { account_id: 'ledger_accounts', category_id: 'ledger_categories' }],
+  ['code_snippets', { folder_id: 'snippet_folders' }],
+  ['commands', { folder_id: 'snippet_folders' }],
+  ['recipes', { folder_id: 'recipe_folders' }],
+  ['subscriptions', { ledger_category_id: 'ledger_categories' }],
+] as const;
+
+// Finally tag links: [junction table, parent column, parent table]. Both ends
+// are remapped ids. Note work_project_tags keys on project_id, not work_project_id.
+const IMPORT_JUNCTIONS: ReadonlyArray<readonly [string, string, string]> = [
+  ['note_tags', 'note_id', 'notes'],
+  ['task_tags', 'task_id', 'tasks'],
+  ['media_tags', 'media_id', 'media_tracker'],
+  ['prompt_tags', 'prompt_id', 'prompts'],
+  ['code_snippet_tags', 'snippet_id', 'code_snippets'],
+  ['work_project_tags', 'project_id', 'work_projects'],
+] as const;
+
+// Deliberately NOT restored: vault_folders / vault_files (the rows would point
+// at Storage objects this backup does not contain, so a "restored" vault would
+// be a tree of dead links) and user_preferences (device-local layout).
+
 
 // localStorage cache key prefixes wiped by "Clear cache" (image/metadata caches
 // only — never UI preferences like mediaTrackerViewMode). The image-cache keys
@@ -167,26 +203,82 @@ export function DataSection() {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) throw new Error('Not authenticated');
+
       let inserted = 0;
       const failed: string[] = [];
-      for (const table of IMPORT_TABLES) {
-        const rows = Array.isArray(pendingImport[table]) ? pendingImport[table] as Record<string, unknown>[] : [];
-        if (!rows.length) continue;
-        // Strip identity columns so the DB assigns fresh ids, and set ourselves as owner.
-        const clean = rows.map((row) => {
-          const r: Record<string, unknown> = { ...row };
-          delete r.id; delete r.created_at; delete r.updated_at;
-          r.user_id = user.id;
-          return r;
-        });
-        const { error } = await supabase.from(table).insert(clean as never);
+      // old id -> new id, per table, so children and tag links can be rewritten.
+      const idMap: Record<string, Map<string | number, string | number>> = {};
+
+      const rowsFor = (table: string) =>
+        Array.isArray(pendingImport[table]) ? (pendingImport[table] as Record<string, unknown>[]) : [];
+
+      const strip = (row: Record<string, unknown>) => {
+        const r: Record<string, unknown> = { ...row };
+        delete r.id; delete r.created_at; delete r.updated_at;
+        r.user_id = user.id;
+        return r;
+      };
+
+      // Insert, then remember how each old id maps onto its new one. PostgREST
+      // returns inserted rows in request order, so index alignment holds.
+      const insertMapped = async (table: string, rows: Record<string, unknown>[]) => {
+        if (!rows.length) return;
+        const { data, error } = await supabase
+          .from(table as never)
+          .insert(rows.map(strip) as never)
+          .select('id');
         if (error) {
-          // Previously a failed table was silently skipped and the toast still
-          // said "Import complete" (audit DATA-02).
+          // A failed table must never be reported as a clean import (audit DATA-02).
           console.error(`Import failed for ${table}:`, error);
           failed.push(`${table} (${error.message})`);
-        } else {
-          inserted += clean.length;
+          return;
+        }
+        const newRows = (data ?? []) as unknown as { id: string | number }[];
+        const m = new Map<string | number, string | number>();
+        rows.forEach((row, i) => {
+          const oldId = row.id as string | number | undefined;
+          const newId = newRows[i]?.id;
+          if (oldId !== undefined && newId !== undefined) m.set(oldId, newId);
+        });
+        idMap[table] = m;
+        inserted += newRows.length;
+      };
+
+      // 1. Parents.
+      for (const table of IMPORT_PARENTS) {
+        await insertMapped(table, rowsFor(table));
+      }
+
+      // 2. Children — repoint each FK at the newly created parent. If the parent
+      //    is missing from the backup, drop the reference, not the row.
+      for (const [table, fks] of IMPORT_CHILDREN) {
+        const rows = rowsFor(table).map((row) => {
+          const r: Record<string, unknown> = { ...row };
+          for (const [col, parent] of Object.entries(fks)) {
+            const old = r[col];
+            r[col] = old == null ? null : (idMap[parent]?.get(old as string | number) ?? null);
+          }
+          // Retired column — migration 15 dropped the trigger and nulled every value.
+          if (table === 'subscriptions') r.ledger_entry_id = null;
+          return r;
+        });
+        await insertMapped(table, rows);
+      }
+
+      // 3. Tag links. These carry no user_id (RLS scopes them via their parent),
+      //    so they bypass strip(); a link with either end missing is skipped.
+      for (const [table, col, parent] of IMPORT_JUNCTIONS) {
+        const links = rowsFor(table).flatMap((row) => {
+          const parentId = idMap[parent]?.get(row[col] as string | number);
+          const tagId = idMap.tags?.get(row.tag_id as string | number);
+          if (parentId === undefined || tagId === undefined) return [];
+          return [{ [col]: parentId, tag_id: tagId }];
+        });
+        if (!links.length) continue;
+        const { error } = await supabase.from(table as never).insert(links as never);
+        if (error) {
+          console.error(`Import failed for ${table}:`, error);
+          failed.push(`${table} (${error.message})`);
         }
       }
 
@@ -228,7 +320,7 @@ export function DataSection() {
 
       <SettingRow
         label="Import from backup"
-        description="Adds notes, tasks, prompts, birthdays & countdowns from an export as new items (won't overwrite or de-duplicate)."
+        description="Restores every section except the Vault and dashboard layout, reconnecting folders, ledger references and tags. Adds items as new (won't overwrite or de-duplicate)."
       >
         <Button variant="secondary" onClick={() => importRef.current?.click()} disabled={importing}>
           <Upload className="h-4 w-4 mr-2" /> {importing ? 'Importing…' : 'Import'}
@@ -257,8 +349,11 @@ export function DataSection() {
           <AlertDialogHeader>
             <AlertDialogTitle>Import this backup?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will add notes, tasks, prompts, birthdays and countdowns from the file as new items.
-              Existing items are kept; duplicates are possible. This can't be undone automatically.
+              This adds every section in the file as new items — notes, tasks, prompts, media, ledger,
+              subscriptions, snippets, commands, recipes, work, wishlist, bucket list, birthdays and
+              countdowns — with folders, ledger references and tag links reconnected. Vault files and
+              dashboard layout are not restored. Existing items are kept; duplicates are possible.
+              This can't be undone automatically.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
