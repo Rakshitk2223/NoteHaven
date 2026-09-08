@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSearchParams } from 'react-router-dom';
 import AppSidebar from '@/components/AppSidebar';
 import { MonthView } from '@/components/calendar/MonthView';
@@ -39,6 +40,7 @@ const Calendar = () => {
   // Open the day detail for a ?date= link once its events have loaded, then
   // drop the param so paging around doesn't keep snapping back to it.
   const consumedDateParam = useRef(false);
+  useDocumentTitle("Calendar");
   useEffect(() => {
     if (consumedDateParam.current || loading) return;
     const target = readDateParam(searchParams.get('date'));
@@ -54,11 +56,13 @@ const Calendar = () => {
     setSelectedDate(date);
   };
 
+  const openQuickAddFor = (date: Date) => {
+    setQuickAddDate(date);
+    setIsQuickAddOpen(true);
+  };
+
   const handleOpenQuickAdd = () => {
-    if (selectedDate) {
-      setQuickAddDate(selectedDate);
-      setIsQuickAddOpen(true);
-    }
+    if (selectedDate) openQuickAddFor(selectedDate);
   };
 
   const handleQuickAddSuccess = () => {
@@ -94,6 +98,7 @@ const Calendar = () => {
             onNavigate={setCurrentDate}
             filters={filters}
             onFilterChange={setFilters}
+            onAddEvent={() => openQuickAddFor(selectedDate ?? new Date())}
           />
 
           <div className="mt-4">
@@ -118,15 +123,15 @@ const Calendar = () => {
                 <p className="text-lg font-medium">No event types selected</p>
                 <p className="text-sm">Check at least one filter above to see events</p>
               </div>
-            ) : !hasMatchingEvents ? (
-              <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground">
-                <CalendarX className="h-16 w-16 mb-4 opacity-50" />
-                <p className="text-lg font-medium">No events match your filters</p>
-                <p className="text-sm">Try selecting different event types or add new events</p>
-                <p className="text-sm mt-2">Click any date to view details and add events</p>
-              </div>
             ) : (
               <>
+                {!hasMatchingEvents && (
+                  <div className="mb-3 flex flex-wrap items-center justify-center gap-2 rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+                    <CalendarX className="h-4 w-4 opacity-70" />
+                    <span>Nothing on the calendar for this period.</span>
+                    <span className="hidden sm:inline">Click a date, or use Add above.</span>
+                  </div>
+                )}
                 {view === 'month' ? (
                   <MonthView
                     currentDate={currentDate}

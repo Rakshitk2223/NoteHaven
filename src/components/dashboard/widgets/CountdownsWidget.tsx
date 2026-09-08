@@ -65,18 +65,13 @@ export function CountdownsWidget({
       <Clock className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
       <p className="text-muted-foreground">No countdowns yet</p>
       <p className="text-xs text-muted-foreground mt-1">
-        Track important upcoming events
+        Use Add above to track an upcoming event
       </p>
     </div>
   );
 
   return (
-    <WidgetWrapper
-      widget={widget}
-      isLoading={isLoading}
-      isEmpty={countdowns.length === 0}
-      emptyState={emptyState}
-    >
+    <WidgetWrapper widget={widget} isLoading={isLoading}>
       <div className="flex items-center justify-end mb-5">
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
           <DialogTrigger asChild>
@@ -122,6 +117,7 @@ export function CountdownsWidget({
         </Dialog>
       </div>
 
+      {countdowns.length === 0 ? emptyState : (
       <div className="space-y-4">
         {countdowns.slice(0, 5).map((countdown) => {
           const days = calculateDays(countdown.event_date);
@@ -155,6 +151,7 @@ export function CountdownsWidget({
           );
         })}
       </div>
+      )}
     </WidgetWrapper>
   );
 }

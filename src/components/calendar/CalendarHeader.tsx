@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,9 @@ interface CalendarHeaderProps {
   onNavigate: (date: Date) => void;
   filters: CalendarFilters;
   onFilterChange: (filters: CalendarFilters) => void;
+  /** Opens Quick Add for the selected day (or today). The page previously had
+   *  no add affordance at all — you had to click an existing day cell. */
+  onAddEvent?: () => void;
 }
 
 const filterOrder: CalendarEventType[] = [
@@ -32,6 +35,7 @@ export const CalendarHeader = ({
   onNavigate,
   filters,
   onFilterChange,
+  onAddEvent,
 }: CalendarHeaderProps) => {
   const handlePrev = () => {
     if (view === 'month') {
@@ -109,6 +113,13 @@ export const CalendarHeader = ({
             Today
           </Button>
         </div>
+
+        {onAddEvent && (
+          <Button variant="gradient" size="sm" onClick={onAddEvent} className="flex-shrink-0">
+            <Plus className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Add</span>
+          </Button>
+        )}
 
         <div className="flex items-center gap-1 bg-muted rounded-lg p-1 flex-shrink-0">
           <Button

@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { dateToYMD } from "@/lib/date-utils";
-import { CheckSquare, Cake, Loader2 } from "lucide-react";
+import { CheckSquare, Cake, Clock, Loader2 } from "lucide-react";
 
 interface QuickAddDialogProps {
   date: Date | null;
@@ -26,6 +26,7 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
   const [taskText, setTaskText] = useState('');
   const [birthdayName, setBirthdayName] = useState('');
   const [birthdayYear, setBirthdayYear] = useState('');
+  const [countdownName, setCountdownName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('task');
 
@@ -59,6 +60,37 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
       toast({
         title: 'Error',
         description: error instanceof Error ? error.message : 'Failed to add task',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddCountdown = async () => {
+    if (!countdownName.trim() || !date) return;
+
+    setIsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error('Not authenticated');
+
+      const { error } = await supabase.from('countdowns').insert([{
+        user_id: user.id,
+        event_name: countdownName.trim(),
+        event_date: dateToYMD(date),
+      }]);
+      if (error) throw error;
+
+      toast({ title: 'Countdown added', description: `Counting down to ${date.toLocaleDateString()}` });
+      setCountdownName('');
+      onOpenChange(false);
+      onSuccess();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to add countdown',
         variant: 'destructive',
       });
     } finally {
@@ -145,6 +177,7 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
       setTaskText('');
       setBirthdayName('');
       setBirthdayYear('');
+      setCountdownName('');
     }
     onOpenChange(next);
   };
@@ -157,7 +190,7 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="task" className="flex items-center gap-2">
               <CheckSquare className="h-4 w-4" />
               Task
@@ -166,7 +199,43 @@ export const QuickAddDialog = ({ date, open, onOpenChange, onSuccess }: QuickAdd
               <Cake className="h-4 w-4" />
               Birthday
             </TabsTrigger>
+            <TabsTrigger value="countdown" className="flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              Countdown
+            </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="countdown" className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="countdown-name">Event Name</Label>
+              <Input
+                id="countdown-name"
+                placeholder="e.g., Launch Day"
+                value={countdownName}
+                maxLength={100}
+                onChange={(e) => setCountdownName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isLoading && countdownName.trim()) {
+                    handleAddCountdown();
+                  }
+                }}
+              />
+            </div>
+            <Button
+              onClick={handleAddCountdown}
+              disabled={!countdownName.trim() || isLoading}
+              className="w-full"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                'Add Countdown'
+              )}
+            </Button>
+          </TabsContent>
 
           <TabsContent value="task" className="space-y-4">
             <div className="space-y-2">
