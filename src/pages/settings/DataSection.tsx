@@ -77,6 +77,29 @@ const IMPORT_JUNCTIONS: ReadonlyArray<readonly [string, string, string]> = [
 // come from lib/image-cache.ts so the two can't drift apart.
 const CACHE_PREFIXES = [...IMAGE_CACHE_PREFIXES, 'media_metadata'];
 
+/**
+ * PostgREST caps a plain `.select()` at 1000 rows, so a library or vault larger
+ * than that was silently truncated in a file the UI calls a full backup. Page
+ * until the table is exhausted.
+ */
+async function fetchAllRows(
+  table: string,
+  scopeToUser: string | null,
+): Promise<Record<string, unknown>[]> {
+  const CHUNK = 1000;
+  const out: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += CHUNK) {
+    let q = supabase.from(table as never).select('*').range(from, from + CHUNK - 1);
+    if (scopeToUser) q = q.eq('user_id', scopeToUser) as typeof q;
+    const { data, error } = await q;
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    out.push(...rows);
+    if (rows.length < CHUNK) break;
+  }
+  return out;
+}
+
 function formatBytes(n: number): string {
   if (!n) return '0 B';
   const u = ['B', 'KB', 'MB', 'GB'];
@@ -114,18 +137,12 @@ export function DataSection() {
       if (!user) throw new Error('Not authenticated');
 
       const results = await Promise.allSettled(
-        EXPORT_TABLES.map((t) => supabase.from(t).select('*').eq('user_id', user.id).then((r) => {
-          if (r.error) throw r.error;
-          return r.data || [];
-        })),
+        EXPORT_TABLES.map((t) => fetchAllRows(t, user.id)),
       );
       // Junction tables have no user_id — RLS already limits them to rows whose
       // parent belongs to the caller.
       const junctionResults = await Promise.allSettled(
-        EXPORT_JUNCTIONS.map((t) => supabase.from(t).select('*').then((r) => {
-          if (r.error) throw r.error;
-          return r.data || [];
-        })),
+        EXPORT_JUNCTIONS.map((t) => fetchAllRows(t, null)),
       );
 
       const out: Record<string, unknown> = {
