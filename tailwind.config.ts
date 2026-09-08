@@ -30,7 +30,10 @@ export default {
 				background: 'hsl(var(--background))',
 				foreground: 'hsl(var(--foreground))',
 				faint: 'hsl(var(--text-3))',
-				success: 'hsl(var(--success))',
+				success: {
+					DEFAULT: 'hsl(var(--success))',
+					foreground: 'hsl(var(--success-foreground))'
+				},
 				warning: 'hsl(var(--warning))',
 				'accent-2': {
 					DEFAULT: 'hsl(var(--accent-2))',

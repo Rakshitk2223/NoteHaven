@@ -16,7 +16,7 @@ interface StatsWidgetProps extends WidgetProps {
 }
 
 const TONES = {
-  indigo: 'bg-primary/12 text-primary ring-1 ring-primary/20',
+  indigo: 'bg-primary/15 text-primary ring-1 ring-primary/20',
   cyan: 'bg-accent-2/15 text-accent-2 ring-1 ring-accent-2/25',
   amber: 'bg-warning/15 text-warning ring-1 ring-warning/25',
   emerald: 'bg-success/15 text-success ring-1 ring-success/25',

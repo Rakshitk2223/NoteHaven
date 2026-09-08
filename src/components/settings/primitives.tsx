@@ -22,7 +22,7 @@ export function SettingsSection({ title, description, icon: Icon, action, childr
         <div className="flex items-start gap-3 min-w-0">
           {Icon && (
             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-brand-soft text-primary ring-1 ring-primary/15">
-              <Icon className="h-4.5 w-4.5" />
+              <Icon className="h-[18px] w-[18px]" />
             </div>
           )}
           <div className="min-w-0">

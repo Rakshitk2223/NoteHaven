@@ -126,8 +126,8 @@ export function LedgerCharts({ entries, year, month }: LedgerChartsProps) {
                   formatter={(value: number) => formatCurrency(value)}
                 />
                 <Legend wrapperStyle={{ fontSize: '0.75rem' }} />
-                <Bar dataKey="income" name="Income" fill="#22c55e" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="expense" name="Expense" fill="#ef4444" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="income" name="Income" fill="hsl(var(--success))" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="expense" name="Expense" fill="hsl(var(--destructive))" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (

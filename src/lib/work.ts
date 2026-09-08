@@ -17,9 +17,9 @@ export type WorkProject = Database['public']['Tables']['work_projects']['Row'];
 type WorkProjectUpdate = Database['public']['Tables']['work_projects']['Update'];
 
 export const STATUS_META: Record<WorkStatus, { label: string; cls: string; dot: string }> = {
-  active:    { label: 'Active',    cls: 'text-success border-success/28 bg-success/13',       dot: 'bg-success' },
-  delivered: { label: 'Delivered', cls: 'text-accent-2 border-accent-2/26 bg-accent-2/12',   dot: 'bg-accent-2' },
-  on_hold:   { label: 'On hold',   cls: 'text-warning border-warning/28 bg-warning/12',      dot: 'bg-warning' },
+  active:    { label: 'Active',    cls: 'text-success border-success/30 bg-success/15',       dot: 'bg-success' },
+  delivered: { label: 'Delivered', cls: 'text-accent-2 border-accent-2/30 bg-accent-2/15',   dot: 'bg-accent-2' },
+  on_hold:   { label: 'On hold',   cls: 'text-warning border-warning/30 bg-warning/15',      dot: 'bg-warning' },
 };
 
 export const STATUS_ORDER: WorkStatus[] = ['active', 'delivered', 'on_hold'];

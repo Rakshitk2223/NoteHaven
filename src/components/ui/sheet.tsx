@@ -116,11 +116,12 @@ const SheetDescription = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Description>,
   React.ComponentPropsWithoutRef<typeof SheetPrimitive.Description>
 >(({ className, ...props }, ref) => (
-  <SheetPrimitive.Description
-    ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
-    {...props}
-  />
+  // Rendered as a div, not Radix's default <p>: callers put Badges (divs) in
+  // here, and a div inside a p is invalid HTML the browser silently reparents
+  // (React logs a validateDOMNesting error for it).
+  <SheetPrimitive.Description asChild>
+    <div ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />
+  </SheetPrimitive.Description>
 ))
 SheetDescription.displayName = SheetPrimitive.Description.displayName
 
