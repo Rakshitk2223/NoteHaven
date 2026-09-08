@@ -609,7 +609,7 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
       </div>
 
       {/* Category filter tabs — dynamic, stable, switch instantly (client-side) */}
-      <div className="mb-4 -mx-1 overflow-x-auto scrollbar-hide px-1">
+      <div className="mb-4 -mx-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-1">
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => setActiveFilter('All')} className={filterPill(activeFilter === 'All')}>
             <span>All</span>
