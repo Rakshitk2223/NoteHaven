@@ -518,7 +518,15 @@ const Work = () => {
                   </Button>
                 </div>
               ) : filtered.length === 0 ? (
-                <p className="py-16 text-center text-sm text-muted-foreground">No projects match these filters.</p>
+                <div className="py-16 text-center">
+                  <p className="mb-4 text-sm text-muted-foreground">No projects match these filters.</p>
+                  <Button
+                    variant="outline"
+                    onClick={() => { setSearch(''); setStatus('all'); setMonth('all'); }}
+                  >
+                    Clear filters
+                  </Button>
+                </div>
               ) : view === 'list' ? (
                 <ProjectTable projects={filtered} onEdit={openEdit} onDelete={setDeleteId} />
               ) : (

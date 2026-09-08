@@ -32,6 +32,7 @@ import {
 import { matchPantry, comparePantryMatches, type PantryMatch } from '@/lib/pantry-match';
 import { PantryPanel } from '@/components/recipes/PantryPanel';
 import { DictateParse } from '@/components/recipes/DictateParse';
+import { filterPill } from '@/components/ui/filter-pill';
 import type { ParsedRecipe } from '@/lib/recipe-parse';
 
 type FolderFilter = 'all' | 'favorites' | 'uncategorized' | number;
@@ -340,9 +341,7 @@ const Recipes = () => {
     } catch { toast({ title: 'Could not remove folder', variant: 'destructive' }); }
   };
 
-  const pill = (active: boolean) =>
-    cn('rounded-full border px-3 py-1.5 text-sm font-medium transition-all whitespace-nowrap',
-      active ? 'border-primary/50 bg-primary/15 text-foreground shadow-glow' : 'border-border bg-secondary/40 text-muted-foreground hover:border-primary/30 hover:text-foreground');
+  const pill = filterPill;
 
   return (
     <PageShell
@@ -432,11 +431,23 @@ const Recipes = () => {
             </div>
           </div>
         ) : filtered.length === 0 ? (
-          <p className="py-16 text-center text-sm text-muted-foreground">
-            {pantryActive
-              ? 'No recipes use any of those ingredients — try adding a few more, or clear the chips.'
-              : 'No recipes match these filters.'}
-          </p>
+          <div className="py-16 text-center">
+            <p className="mb-4 text-sm text-muted-foreground">
+              {pantryActive
+                ? 'No recipes use any of those ingredients — try adding a few more, or clear the chips.'
+                : 'No recipes match these filters.'}
+            </p>
+            {pantryActive ? (
+              <Button variant="outline" onClick={() => setPantry([])}>Clear ingredients</Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => { setSearch(''); setFolderFilter('all'); setCatFilter('all'); }}
+              >
+                Clear filters
+              </Button>
+            )}
+          </div>
         ) : (
           <Stagger className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {filtered.map((r) => (

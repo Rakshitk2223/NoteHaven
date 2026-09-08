@@ -10,6 +10,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Stagger, StaggerItem } from '@/components/ui/motion';
+import { filterPill } from '@/components/ui/filter-pill';
 import { cn } from '@/lib/utils';
 import {
   Gift, Plus, Pencil, Trash2, Check, RotateCcw, ExternalLink, IndianRupee,
@@ -372,13 +373,7 @@ const Wishlist = () => {
     }
   };
 
-  const pill = (active: boolean) =>
-    cn(
-      'rounded-full border px-3 py-1.5 text-sm font-medium transition-all whitespace-nowrap',
-      active
-        ? 'border-primary/50 bg-primary/15 text-foreground shadow-glow'
-        : 'border-border bg-secondary/40 text-muted-foreground hover:text-foreground hover:border-primary/30',
-    );
+  const pill = filterPill;
 
   const filters: { key: Filter; label: string }[] = [
     { key: 'all', label: 'All' },

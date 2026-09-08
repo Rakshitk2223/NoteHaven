@@ -13,6 +13,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Stagger, StaggerItem } from '@/components/ui/motion';
+import { filterPill } from '@/components/ui/filter-pill';
 import { cn } from '@/lib/utils';
 import { formatDateForDisplay } from '@/lib/date-utils';
 import {
@@ -276,13 +277,7 @@ const BucketList = () => {
     }
   };
 
-  const pill = (active: boolean) =>
-    cn(
-      'rounded-full border px-3 py-1.5 text-sm font-medium transition-all whitespace-nowrap',
-      active
-        ? 'border-primary/50 bg-primary/15 text-foreground shadow-glow'
-        : 'border-border bg-secondary/40 text-muted-foreground hover:text-foreground hover:border-primary/30',
-    );
+  const pill = filterPill;
 
   return (
     <PageShell
@@ -361,7 +356,15 @@ const BucketList = () => {
             <Button variant="gradient" className="mt-5" onClick={openAdd}><Sparkles className="mr-2 h-4 w-4" />Add your first dream</Button>
           </div>
         ) : filtered.length === 0 ? (
-          <p className="py-16 text-center text-sm text-muted-foreground">No dreams match these filters.</p>
+          <div className="py-16 text-center">
+            <p className="mb-4 text-sm text-muted-foreground">No dreams match these filters.</p>
+            <Button
+              variant="outline"
+              onClick={() => { setSearch(''); setFilterCat('all'); setFilterStatus('all'); }}
+            >
+              Clear filters
+            </Button>
+          </div>
         ) : (
           <Stagger className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
             {filtered.map((item) => (
