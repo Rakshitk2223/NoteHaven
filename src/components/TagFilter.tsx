@@ -95,6 +95,7 @@ export function TagFilter({
                         key={tag.id}
                         tag={tag}
                         size="sm"
+                        clickable={false}
                         onRemove={() => toggleTag(tagName)}
                       />
                     );
@@ -115,10 +116,11 @@ export function TagFilter({
                       onClick={() => toggleTag(tag.name)}
                       className="text-left"
                     >
+                      {/* the wrapping <button> owns the click */}
                       <TagBadge
                         tag={tag}
                         size="sm"
-                        clickable
+                        clickable={false}
                       />
                     </button>
                   ))}
@@ -139,6 +141,7 @@ export function TagFilter({
                 key={tag.id}
                 tag={tag}
                 size="sm"
+                clickable={false}
                 onRemove={() => toggleTag(tagName)}
               />
             );

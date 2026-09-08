@@ -61,6 +61,7 @@ export function TagCloud({
                 tag={tag}
                 onRemove={() => onTagClick?.(tag)}
                 size="sm"
+                clickable={false}
               />
             );
           })}
@@ -86,10 +87,11 @@ export function TagCloud({
                 isSelected && 'ring-2 ring-primary ring-offset-2'
               )}
             >
+              {/* the wrapping <button> owns the click */}
               <TagBadge
                 tag={tag}
                 size="md"
-                clickable
+                clickable={false}
               />
               {showCount && (
                 <span className="ml-1 text-xs text-muted-foreground">

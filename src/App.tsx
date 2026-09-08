@@ -34,6 +34,7 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Birthdays = lazy(() => import("./pages/Birthdays"));
 const SharedNote = lazy(() => import("./pages/SharedNote"));
 const TagView = lazy(() => import("./pages/TagView"));
+const TagsIndex = lazy(() => import("./pages/TagsIndex"));
 const MoneyLedger = lazy(() => import("./pages/MoneyLedger"));
 const Subscriptions = lazy(() => import("./pages/Subscriptions"));
 const Calendar = lazy(() => import("./pages/Calendar"));
@@ -91,6 +92,7 @@ const AppInner = () => {
           <Route path="/notes" element={<ProtectedRoute><Notes /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/birthdays" element={<ProtectedRoute><Birthdays /></ProtectedRoute>} />
+          <Route path="/tags" element={<ProtectedRoute><TagsIndex /></ProtectedRoute>} />
           <Route path="/tags/:tagName" element={<ProtectedRoute><TagView /></ProtectedRoute>} />
           <Route path="/ledger" element={<ProtectedRoute><MoneyLedger /></ProtectedRoute>} />
           <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />

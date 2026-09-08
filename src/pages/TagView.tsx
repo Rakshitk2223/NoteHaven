@@ -101,7 +101,7 @@ export default function TagView() {
               </div>
             ) : tag ? (
               <div className="flex items-center gap-3">
-                <TagBadge tag={tag} size="md" />
+                <TagBadge tag={tag} size="md" clickable={false} />
                 <span className="text-muted-foreground">
                   {totalItems} item{totalItems !== 1 ? 's' : ''}
                 </span>

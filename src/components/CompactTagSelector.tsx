@@ -149,6 +149,7 @@ export function CompactTagSelector({
             tag={tag}
             onRemove={() => handleRemoveTag(tag.id)}
             size="sm"
+            clickable={false}
           />
         ))}
         
