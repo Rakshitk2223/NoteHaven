@@ -67,7 +67,17 @@ is about 30 per 154. Movies can't link locally because there's no TMDB key; prod
   and settings pinned; Movies get a Watched toggle with Undo; no Quick Add trace left. Media chunk 47.15
   KiB gz.
 
+**A2 + A3 browser pass (final UX run of the night; 0 [audit] rows left):**
+- **PASS:** Mac pane 420px at 1280/1440 (grid stays, ‹ › and ←/→, Esc, ring); iPad 576px side sheet;
+  phone full-screen sheet; novel decoy dimmed; Add without linking; Fix match → AniList; History row
+  written; ⋮ menu at 390/1440; chips fit at 1180; scroll kept; discard prompt at 820/390; clean initials.
+- **FAIL (fix first):** (1) the phone sheet X sits at top-4, not below the safe-area inset, so it collides
+  with the notch; (2) a linked add saves the SOURCE title instead of the name the user typed (the plan says
+  the typed title stays the display name); (3) no discard prompt at 1440 (Mac pane path).
+- **Not tested:** Pin cover (needs a title with a cover); the Movies Watched toggle.
+
 ## First fixes when resuming
+0. Fix the three FAILs above, then re-test those plus the two untested items.
 1. Browser-verify A2 + A3 (the UX pass may be partial; see below): the discard prompt in all 3 layouts, ⋮
    at 390 / 1440, chips at 1180, the Movies toggle, the Mac two-pane, the iPad and phone sheets, Browse,
    Fix match, pin, History.
