@@ -6,7 +6,7 @@ import type { MediaMeta } from '@/lib/media-metadata';
 import { type MediaItem, getStatusCategory, initialsOf, progressFieldOf } from './types';
 import { LogNumberButton, type LogTarget } from './LogSheet';
 import { behindCount } from './progress-view';
-import { GRID_COLS, type GridSize } from './grid-size';
+import { GRID_COLS, GRID_COLS_PANE, type GridSize } from './grid-size';
 
 const LONG_PRESS_MS = 450;
 
@@ -15,6 +15,8 @@ interface CardProps {
   cover?: string | null;
   meta?: MediaMeta | null;
   selected: boolean;
+  /** Open in the Mac detail pane. */
+  active?: boolean;
   selectMode: boolean;
   onOpen: (id: number) => void;
   onToggleSelect: (id: number) => void;
@@ -29,7 +31,7 @@ interface CardProps {
  * latest chapter/episode is actually known.
  */
 const LibraryCard = memo(function LibraryCard({
-  item, cover, meta, selected, selectMode, onOpen, onToggleSelect, onLongPress, onVisibleChange, log,
+  item, cover, meta, selected, active, selectMode, onOpen, onToggleSelect, onLongPress, onVisibleChange, log,
 }: CardProps) {
   const { ref, inView } = useInView({ rootMargin: '250px' });
   useEffect(() => { onVisibleChange(item.id, inView); }, [item.id, inView, onVisibleChange]);
@@ -53,9 +55,10 @@ const LibraryCard = memo(function LibraryCard({
   const showCover = !!cover && !imgFailed;
 
   return (
-    <div ref={ref} className="flex min-w-0 flex-col">
+    <div ref={ref} data-media-id={item.id} className="flex min-w-0 flex-col">
       <button
         type="button"
+        aria-current={active ? 'true' : undefined}
         aria-label={`${item.title}${behind ? `, ${behind} behind` : ''}${selectMode ? (selected ? ', selected' : ', not selected') : ''}`}
         aria-pressed={selectMode ? selected : undefined}
         onPointerDown={(e) => {
@@ -84,6 +87,7 @@ const LibraryCard = memo(function LibraryCard({
         className={cn(
           'relative aspect-[2/3] w-full select-none overflow-hidden rounded-lg bg-muted ring-1 ring-border',
           'transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          active && !selected && 'ring-2 ring-accent-2',
           selected && 'ring-2 ring-primary',
         )}
       >
@@ -147,17 +151,20 @@ const LibraryCard = memo(function LibraryCard({
   );
 });
 
-interface LibraryGridProps extends Omit<CardProps, 'item' | 'cover' | 'meta' | 'selected'> {
+interface LibraryGridProps extends Omit<CardProps, 'item' | 'cover' | 'meta' | 'selected' | 'active'> {
   items: MediaItem[];
   size: GridSize;
+  /** The Mac detail pane is open beside the grid. */
+  paneOpen?: boolean;
+  activeId?: number | null;
   covers: Map<number, string | null>;
   metas: Map<number, MediaMeta>;
   selectedIds: Set<number>;
 }
 
-export function LibraryGrid({ items, size, covers, metas, selectedIds, ...rest }: LibraryGridProps) {
+export function LibraryGrid({ items, size, covers, metas, selectedIds, paneOpen, activeId, ...rest }: LibraryGridProps) {
   return (
-    <div className={cn('grid gap-x-3 gap-y-2 sm:gap-x-4', GRID_COLS[size])}>
+    <div className={cn('grid gap-x-3 gap-y-2 sm:gap-x-4', paneOpen ? GRID_COLS_PANE[size] : GRID_COLS[size])}>
       {items.map((item) => (
         <LibraryCard
           key={item.id}
@@ -165,6 +172,7 @@ export function LibraryGrid({ items, size, covers, metas, selectedIds, ...rest }
           cover={covers.get(item.id)}
           meta={metas.get(item.id) ?? null}
           selected={selectedIds.has(item.id)}
+          active={activeId === item.id}
           {...rest}
         />
       ))}

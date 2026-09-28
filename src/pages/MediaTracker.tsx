@@ -75,6 +75,7 @@ import { quoted, quotedList } from '@/components/confirm-copy';
 import { useProgressMutation, type ProgressResult } from '@/hooks/media/useProgressMutation';
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { MediaDetailView } from '@/components/media/MediaDetailView';
+import { MediaDetailPanel, type DetailLayout } from '@/components/media/MediaDetailPanel';
 import { MediaEditForm } from '@/components/media/MediaEditForm';
 import { LogSheet, type LogTarget } from '@/components/media/LogSheet';
 import { boundsFor } from '@/components/media/progress-view';
@@ -88,7 +89,7 @@ import { PickPreview, type PickChoice } from '@/components/media/PickPreview';
 import { HistoryView } from '@/components/media/HistoryView';
 import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type TrackerType } from '@/lib/media-sources';
 import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned } from '@/lib/media-link';
-import { detailToMeta } from '@/components/media/source-meta';
+import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
 import { progressFieldOf, type MediaFormData } from '@/components/media/types';
 import {
@@ -489,6 +490,8 @@ const MediaTracker = () => {
     [v2Schema.progressLog],
   );
   const pickerWide = useMediaQuery('(min-width: 1280px)');
+  const tabletUp = useMediaQuery('(min-width: 768px)');
+  const detailLayout: DetailLayout = pickerWide ? 'pane' : tabletUp ? 'tablet' : 'phone';
   const navTop = useMediaQuery('(min-width: 1280px), (min-width: 768px) and (orientation: landscape)');
   // Explicit select mode (long-press or More → Select); also on while anything is selected.
   const [selectMode, setSelectMode] = useState(false);
@@ -2016,6 +2019,31 @@ const MediaTracker = () => {
         ?? (await fetchSourceDetail(detailSrc.source, detailSrc.id, detailSrc.type));
     },
   });
+  const detailMeta = useMemo(() => {
+    if (!editingItem) return null;
+    const base = metadataMap.get(editingItem.id) ?? null;
+    return sourceDetail ? mergeMeta(base, detailToMeta(sourceDetail)) : base;
+  }, [editingItem, metadataMap, sourceDetail]);
+
+  // Mac pane: ← / → walk the titles in on-screen order (not across pages you haven't loaded).
+  const paneOpen = detailLayout === 'pane' && detailsOpen && !!editingItem;
+  const stepIdx = useMemo(
+    () => (editingItem ? finalItems.findIndex((i) => i.id === editingItem.id) : -1),
+    [editingItem, finalItems],
+  );
+  const stepState = useMemo(
+    () => ({ prev: stepIdx > 0, next: stepIdx >= 0 && stepIdx < finalItems.length - 1 }),
+    [stepIdx, finalItems.length],
+  );
+  const stepDetail = useCallback((dir: -1 | 1) => {
+    const next = stepIdx >= 0 ? finalItems[stepIdx + dir] : undefined;
+    if (!next) return;
+    openDetails(next, 'view');
+    if (stepIdx + dir >= finalItems.length - 3 && hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-media-id="${next.id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }, [stepIdx, finalItems, openDetails, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // ── Stable, identity-frozen callbacks for memoized MediaCards ──────────────
   // Cards are React.memo'd. To keep them from re-rendering when unrelated state
@@ -2304,98 +2332,6 @@ const MediaTracker = () => {
               )}
             </DialogContent>
           </Dialog>
-          <Sheet open={detailsOpen} onOpenChange={setDetailsOpen}>
-            <SheetContent side="right" className="w-full sm:max-w-xl p-0 flex flex-col">
-              <SheetHeader className="p-6 border-b border-border">
-                <SheetTitle className="flex items-center justify-between gap-3">
-                  <span className="truncate">
-                    {detailsMode === 'edit'
-                      ? (editingItem ? 'Edit Media' : 'Add Media')
-                      : (editingItem?.title || 'Media')}
-                  </span>
-                  {editingItem && detailsMode === 'view' && (
-                    <Button size="sm" variant="outline" onClick={() => openDetails(editingItem, 'edit')}>
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit
-                    </Button>
-                  )}
-                </SheetTitle>
-                <SheetDescription className="flex items-center gap-2">
-                  {editingItem ? (
-                    <>
-                      <Badge className={cn('border-0', typeBadgeSoft(editingItem.type))}>{editingItem.type}</Badge>
-                      <Badge className={getStatusColor(editingItem.status)}>{editingItem.status}</Badge>
-                    </>
-                  ) : (
-                    <span>Manage your media item</span>
-                  )}
-                </SheetDescription>
-              </SheetHeader>
-
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {detailsMode === 'view' && editingItem && (
-                  <MediaDetailView
-                    item={editingItem}
-                    meta={metadataMap.get(editingItem.id) ?? null}
-                    cover={imageUrls.get(editingItem.id)}
-                    tags={editingItemTags}
-                    busy={updatingIds.has(editingItem.id)}
-                    onPatch={patchMedia}
-                    onBump={bumpField}
-                    onSetPosition={setPosition}
-                    onRefreshCover={handleRefreshCover}
-                    onRemoveCover={handleRemoveCover}
-                    detail={sourceDetail ?? null}
-                    onFixMatch={v2Schema.sourceLinks ? (i) => setFixFor(i) : undefined}
-                    onTogglePin={v2Schema.sourceLinks ? togglePin : undefined}
-                    log={logProps}
-                  />
-                )}
-
-                {detailsMode === 'edit' && (
-                  <MediaEditForm
-                    formData={formData}
-                    setFormData={setFormData}
-                    onSubmit={handleSubmit}
-                    tags={editingItem ? editingItemTags : formTags}
-                    availableTags={availableTags}
-                    onTagsChange={editingItem ? setEditingItemTags : setFormTags}
-                  />
-                )}
-              </div>
-
-              <SheetFooter className="p-6 border-t border-border">
-                <div className="flex w-full justify-end gap-2">
-                  {editingItem && detailsMode === 'view' && (
-                    // The Mihon grid card has no menu, so Delete lives here.
-                    <Button
-                      variant="ghost"
-                      type="button"
-                      className="mr-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => setDeleteConfirm({ open: true, id: editingItem.id })}
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" /> Delete
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    type="button"
-                    onClick={() => {
-                      setDetailsOpen(false);
-                      setDetailsMode('view');
-                    }}
-                  >
-                    Close
-                  </Button>
-                  {detailsMode === 'edit' && (
-                    <Button type="submit" form="media-details-form">
-                      {editingItem ? 'Update' : 'Create'}
-                    </Button>
-                  )}
-                </div>
-              </SheetFooter>
-            </SheetContent>
-          </Sheet>
           {/* Mobile Header */}
           <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-2 p-3 pt-[calc(0.75rem+env(safe-area-inset-top))] border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <Button
@@ -2413,17 +2349,22 @@ const MediaTracker = () => {
               <Button size="sm" variant="default" onClick={() => setSection('browse')} className="h-10 w-10 p-0 touch-manipulation" aria-label="Add a title" title="Add">
                 <Plus className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant={hasActiveFilters ? 'default' : 'outline'} onClick={() => setFiltersOpen(true)} className="relative h-10 w-10 p-0 touch-manipulation" aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'} title="Filters">
-                <Filter className="h-4 w-4" />
-                {activeFilterCount > 0 && (
-                  <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-              <Button size="sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-10 w-10 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
-                {viewMode === 'grid' ? <ListIcon className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
-              </Button>
+              {/* Filter and view act on the Library only. */}
+              {section === 'library' && (
+                <>
+                  <Button size="sm" variant={hasActiveFilters ? 'default' : 'outline'} onClick={() => setFiltersOpen(true)} className="relative h-10 w-10 p-0 touch-manipulation" aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'} title="Filters">
+                    <Filter className="h-4 w-4" />
+                    {activeFilterCount > 0 && (
+                      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
+                        {activeFilterCount}
+                      </span>
+                    )}
+                  </Button>
+                  <Button size="sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-10 w-10 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
+                    {viewMode === 'grid' ? <ListIcon className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
@@ -2445,50 +2386,54 @@ const MediaTracker = () => {
 
               {/* Controls: search · view · filter · add · more */}
               <div className="flex items-center gap-2">
-                <div className="relative w-56 xl:w-72">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    placeholder="Search titles…"
-                    value={typedSearchTerm}
-                    onChange={handleSearchChange}
-                    className="h-9 rounded-full border-border/60 bg-background/50 pl-9 pr-8"
-                    aria-label="Search media titles"
-                  />
-                  {typedSearchTerm && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTypedSearchTerm('');
-                        setSearchTerm('');
-                        if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
-                      }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      aria-label="Clear search"
-                      title="Clear search"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
+                {section === 'library' && (
+                  <>
+                  <div className="relative w-56 xl:w-72">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Search titles…"
+                      value={typedSearchTerm}
+                      onChange={handleSearchChange}
+                      className="h-9 rounded-full border-border/60 bg-background/50 pl-9 pr-8"
+                      aria-label="Search media titles"
+                    />
+                    {typedSearchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTypedSearchTerm('');
+                          setSearchTerm('');
+                          if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
+                        }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                        title="Clear search"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
 
-                <div className="flex items-center gap-0.5 rounded-full border border-border/60 bg-background/40 backdrop-blur-md p-0.5">
-                  <Button size="icon-sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 rounded-full" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
-                    <LayoutGrid className="h-4 w-4" />
-                  </Button>
-                  <Button size="icon-sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 rounded-full" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
-                    <ListIcon className="h-4 w-4" />
-                  </Button>
-                </div>
+                  <div className="flex items-center gap-0.5 rounded-full border border-border/60 bg-background/40 backdrop-blur-md p-0.5">
+                    <Button size="icon-sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 rounded-full" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon-sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 rounded-full" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
+                      <ListIcon className="h-4 w-4" />
+                    </Button>
+                  </div>
 
-                <Button variant="outline" size="sm" className="h-9 rounded-full" onClick={() => setFiltersOpen(true)} aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'}>
-                  <Filter className="h-4 w-4 mr-2" />
-                  Filter
-                  {activeFilterCount > 0 && (
-                    <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold tabular-nums">
-                      {activeFilterCount}
-                    </span>
-                  )}
-                </Button>
+                  <Button variant="outline" size="sm" className="h-9 rounded-full" onClick={() => setFiltersOpen(true)} aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'}>
+                    <Filter className="h-4 w-4 mr-2" />
+                    Filter
+                    {activeFilterCount > 0 && (
+                      <span className="ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold tabular-nums">
+                        {activeFilterCount}
+                      </span>
+                    )}
+                  </Button>
+                  </>
+                )}
 
                 <Button variant="gradient" size="sm" className="h-9 rounded-full" onClick={() => setSection('browse')}>
                   <Plus className="h-4 w-4 mr-1.5" />
@@ -3052,6 +2997,8 @@ const MediaTracker = () => {
                   <LibraryGrid
                     items={finalItems}
                     size={gridSize}
+                    paneOpen={paneOpen}
+                    activeId={paneOpen ? editingItem?.id : null}
                     covers={imageUrls}
                     metas={metadataMap}
                     selectedIds={selectedIds}
@@ -3091,6 +3038,72 @@ const MediaTracker = () => {
           </div>
           {!navTop && <MediaSectionNav<MediaSectionId> sections={mediaSections} active={section} onChange={setSection} placement="bottom" />}
         </div>
+        {/* Detail: phone full screen, iPad side sheet, Mac a pane beside the grid (← / → step). */}
+        <MediaDetailPanel
+          open={detailsOpen && !!editingItem}
+          onOpenChange={(o) => { setDetailsOpen(o); if (!o) setDetailsMode('view'); }}
+          layout={detailLayout}
+          title={editingItem ? (detailsMode === 'edit' ? `Edit ${editingItem.title}` : editingItem.title) : 'Media'}
+          subtitle={editingItem && (
+            <>
+              <Badge className={cn('border-0', typeBadgeSoft(editingItem.type))}>{editingItem.type}</Badge>
+              <Badge className={getStatusColor(editingItem.status)}>{editingItem.status}</Badge>
+            </>
+          )}
+          actions={editingItem && detailsMode === 'view' && (
+            <Button size="sm" variant="outline" className="h-10" onClick={() => openDetails(editingItem, 'edit')}>
+              <Edit className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          )}
+          onStep={detailsMode === 'view' ? stepDetail : null}
+          canStep={stepState}
+          footer={editingItem && (detailsMode === 'view' ? (
+            // The Mihon grid card has no menu, so Delete lives here.
+            <Button
+              variant="ghost"
+              type="button"
+              className="h-10 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setDeleteConfirm({ open: true, id: editingItem.id })}
+            >
+              <Trash2 className="h-4 w-4 mr-2" /> Delete
+            </Button>
+          ) : (
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" type="button" className="h-10" onClick={() => setDetailsMode('view')}>Cancel</Button>
+              <Button type="submit" form="media-details-form" className="h-10">Update</Button>
+            </div>
+          ))}
+        >
+          {detailsMode === 'view' && editingItem && (
+            <MediaDetailView
+              item={editingItem}
+              meta={detailMeta}
+              cover={imageUrls.get(editingItem.id)}
+              tags={editingItemTags}
+              busy={updatingIds.has(editingItem.id)}
+              onPatch={patchMedia}
+              onBump={bumpField}
+              onSetPosition={setPosition}
+              onRefreshCover={handleRefreshCover}
+              onRemoveCover={handleRemoveCover}
+              detail={sourceDetail ?? null}
+              onFixMatch={v2Schema.sourceLinks ? (i) => setFixFor(i) : undefined}
+              onTogglePin={v2Schema.sourceLinks ? togglePin : undefined}
+              log={logProps}
+            />
+          )}
+          {detailsMode === 'edit' && editingItem && (
+            <MediaEditForm
+              formData={formData}
+              setFormData={setFormData}
+              onSubmit={handleSubmit}
+              tags={editingItemTags}
+              availableTags={availableTags}
+              onTagsChange={setEditingItemTags}
+            />
+          )}
+        </MediaDetailPanel>
       </div>
       
       <ConfirmDialog

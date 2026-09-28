@@ -19,3 +19,18 @@ export function detailToMeta(d: SourceDetail): MediaMeta {
     runtime: d.runtime,
   };
 }
+
+/**
+ * A linked title's meta: the source's fields win where it has them; anything
+ * it leaves empty (e.g. a manhwa source with no cast) keeps the older
+ * title-matched metadata, so linking never blanks a section.
+ */
+export function mergeMeta(base: MediaMeta | null, over: MediaMeta): MediaMeta {
+  if (!base) return over;
+  const out = { ...base } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(over)) {
+    if (v == null || (Array.isArray(v) && v.length === 0) || v === '') continue;
+    out[k] = v;
+  }
+  return out as unknown as MediaMeta;
+}

@@ -9,6 +9,13 @@ export const GRID_COLS: Record<GridSize, string> = {
   S: 'grid-cols-3 md:grid-cols-5 xl:grid-cols-8',
 };
 
+/** With the Mac detail pane open the grid loses ~420 px, so it drops a column or two. */
+export const GRID_COLS_PANE: Record<GridSize, string> = {
+  L: 'grid-cols-4 2xl:grid-cols-5',
+  M: 'grid-cols-5 2xl:grid-cols-6',
+  S: 'grid-cols-6 2xl:grid-cols-7',
+};
+
 export function readGridSize(): GridSize {
   try {
     const v = localStorage.getItem(GRID_SIZE_KEY);
