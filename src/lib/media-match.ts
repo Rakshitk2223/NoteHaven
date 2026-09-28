@@ -84,10 +84,12 @@ const singular = (norm: string) =>
   norm.split(' ').map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)).join(' ');
 
 // Each variant carries a weight: the full title (and its plural/season-stripped
-// forms) count 1; the main part of "Main: Subtitle" counts 0.92 — enough to
-// auto-link "Frieren" → "Frieren: Beyond Journey's End", but a plain "Naruto"
-// still beats "Naruto: Shippuuden" by a clear margin.
-const MAIN_PART_WEIGHT = 0.92;
+// forms) count 1; the main part of "Main: Subtitle" counts 0.85 — a strong
+// REVIEW, never an auto-link on its own. The dry run over the real library
+// showed why: "Money Heist" would otherwise auto-link to "Money Heist: Korea -
+// Joint Economic Area" (a spin-off), just as "Naruto" to "Naruto: Shippuuden".
+// "Frieren" → "Frieren: Beyond Journey's End" lands in review (one tap) instead.
+const MAIN_PART_WEIGHT = 0.85;
 
 function variants(raw: string): Array<{ v: string; w: number }> {
   const base = normalizeTitle(raw);

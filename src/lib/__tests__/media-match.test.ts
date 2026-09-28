@@ -51,9 +51,12 @@ describe('media-match: the known traps', () => {
     expect(titleScore('solo leveling', ['Solo Leveling'])).toBe(1);
   });
 
-  it('"Main: Subtitle" matches its main part', () => {
+  it('"Main: Subtitle" matching only its main part is a strong review, never auto', () => {
     const frieren: MatchCandidate = { title: 'Frieren: Beyond Journey’s End', alt_titles: ['Sousou no Frieren'], medium: 'anime', format: 'TV', country: 'JP', chapters: null, latest_chapter: null, year: 2023 };
-    expect(scoreCandidate({ title: 'Frieren', type: 'Anime' }, frieren)).toBeGreaterThanOrEqual(0.9);
+    expect(matchBand(scoreCandidate({ title: 'Frieren', type: 'Anime' }, frieren))).toBe('review');
+    // The dry-run trap: a spin-off whose main part equals the query.
+    const korea: MatchCandidate = { title: 'Money Heist: Korea - Joint Economic Area', alt_titles: [], medium: 'screen', format: 'TV', country: 'KR', chapters: null, latest_chapter: null, year: 2022 };
+    expect(matchBand(scoreCandidate({ title: 'Money Heist', type: 'Series' }, korea))).not.toBe('auto');
   });
 
   it('season suffixes: the right season wins', () => {
