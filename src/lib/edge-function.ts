@@ -9,7 +9,16 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-const BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
+const PROD_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/media-search`;
+
+// Dev-only: `npm run edge:dev` serves the function locally (scripts/edge-dev/serve.ts).
+// Set VITE_MEDIA_SEARCH_URL=http://127.0.0.1:8787 in .env.local to use it.
+// import.meta.env.DEV is a build-time constant, so a production build folds
+// this to PROD_BASE and the override (and its URL) never ship.
+const BASE: string =
+  import.meta.env.DEV && import.meta.env.VITE_MEDIA_SEARCH_URL
+    ? String(import.meta.env.VITE_MEDIA_SEARCH_URL)
+    : PROD_BASE;
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 /** Builds the media-search URL with the given query params. */
@@ -51,6 +60,31 @@ export async function mediaSearchGet(
     const headers = await authHeaders();
     if (!headers) return null;
     const res = await fetch(mediaSearchUrl(params), { headers, signal });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * POST a JSON body to the media-search function with the session token attached
+ * (used by action=resolve). Same failure contract as mediaSearchGet: null on any
+ * non-2xx, missing session, or network failure.
+ */
+export async function mediaSearchPost(
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<unknown | null> {
+  try {
+    const headers = await authHeaders();
+    if (!headers) return null;
+    const res = await fetch(BASE, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {

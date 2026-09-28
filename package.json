@@ -23,7 +23,8 @@
     "test:insights": "tsx scripts/__tests__/media-insights.test.ts",
     "audit:coverage": "tsx scripts/audit-metadata-coverage.ts",
     "smoke:apis": "tsx scripts/smoke-media-apis.ts",
-    "audit:covers": "tsx scripts/audit-cover-medium.ts"
+    "audit:covers": "tsx scripts/audit-cover-medium.ts",
+    "edge:dev": "npx --yes deno@2.9.6 run --env-file=.env --allow-env --allow-net --allow-read=supabase,scripts scripts/edge-dev/serve.ts"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",
