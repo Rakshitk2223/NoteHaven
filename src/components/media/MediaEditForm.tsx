@@ -1,4 +1,4 @@
-import type { Dispatch, FormEvent, SetStateAction } from 'react';
+import { useEffect, useRef, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -19,6 +19,14 @@ interface MediaEditFormProps {
 export function MediaEditForm({ formData, setFormData, onSubmit, tags, availableTags, onTagsChange }: MediaEditFormProps) {
   const showSeasonEpisode = WATCHABLE_TYPES.includes(formData.type);
   const showChapter = READABLE_TYPES.includes(formData.type);
+  // UX-18: Edit is mostly for fixing where you are, so land in the progress field
+  // with its value selected. Focusing before the sheet's FocusScope mounts also
+  // stops it auto-selecting the Title (type "100" and you'd rename the series).
+  const progressRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = progressRef.current;
+    if (el) { el.focus(); el.select(); }
+  }, []);
   return (
     <form id="media-details-form" onSubmit={onSubmit} className="space-y-4">
       <div className="space-y-2">
@@ -123,6 +131,7 @@ export function MediaEditForm({ formData, setFormData, onSubmit, tags, available
             <Label htmlFor="current_episode">Current Episode</Label>
             <Input
               id="current_episode"
+              ref={showChapter ? undefined : progressRef}
               type="number"
               min="1"
               value={formData.current_episode}
@@ -137,6 +146,7 @@ export function MediaEditForm({ formData, setFormData, onSubmit, tags, available
           <Label htmlFor="current_chapter">Current Chapter</Label>
           <Input
             id="current_chapter"
+            ref={progressRef}
             type="number"
             min="1"
             value={formData.current_chapter}

@@ -101,7 +101,7 @@ export function ContinueShelf({ entries, covers, onAdvance, onOpen, busyIds }: C
 
                   {/* Progress sits on the poster so the whole rail scans at a glance. */}
                   {pct > 0 && (
-                    <div className="absolute inset-x-0 bottom-0 h-1 bg-black/40">
+                    <div className="absolute inset-x-0 bottom-0 h-1 bg-background/60">
                       <div
                         className="h-full bg-gradient-to-r from-primary to-accent-2"
                         style={{ width: `${pct}%` }}

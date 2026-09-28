@@ -7,6 +7,7 @@ import { type MediaItem, getStatusCategory, initialsOf, progressFieldOf } from '
 import { LogNumberButton, type LogTarget } from './LogSheet';
 import { behindCount } from './progress-view';
 import { GRID_COLS, GRID_COLS_PANE, type GridSize } from './grid-size';
+import { WatchedToggle } from './WatchedToggle';
 
 const LONG_PRESS_MS = 450;
 
@@ -22,6 +23,8 @@ interface CardProps {
   onToggleSelect: (id: number) => void;
   onLongPress: (id: number) => void;
   onVisibleChange: (id: number, visible: boolean) => void;
+  /** Movies: one-tap watched toggle in place of the counter. */
+  onToggleWatched?: (item: MediaItem) => void;
   log: { popover: boolean; onOpenSheet: (t: LogTarget) => void; onCommit: (item: MediaItem, value: number) => Promise<boolean> };
 }
 
@@ -31,7 +34,7 @@ interface CardProps {
  * latest chapter/episode is actually known.
  */
 const LibraryCard = memo(function LibraryCard({
-  item, cover, meta, selected, active, selectMode, onOpen, onToggleSelect, onLongPress, onVisibleChange, log,
+  item, cover, meta, selected, active, selectMode, onOpen, onToggleSelect, onLongPress, onVisibleChange, onToggleWatched, log,
 }: CardProps) {
   const { ref, inView } = useInView({ rootMargin: '250px' });
   useEffect(() => { onVisibleChange(item.id, inView); }, [item.id, inView, onVisibleChange]);
@@ -144,6 +147,8 @@ const LibraryCard = memo(function LibraryCard({
           onCommit={log.onCommit}
           className="-ml-2 self-start text-muted-foreground hover:text-foreground"
         />
+      ) : onToggleWatched ? (
+        <WatchedToggle item={item} onToggle={onToggleWatched} />
       ) : (
         <span className="flex min-h-11 items-center text-xs text-muted-foreground">{item.status}</span>
       )}

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { ExternalLink, Globe, ImageOff, Pin, Plus, RefreshCw, Replace, Sparkles, Star } from 'lucide-react';
+import { ExternalLink, Globe, Pin, Plus, Replace, Sparkles, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { TagBadge } from '@/components/TagBadge';
+import { WatchedToggle } from './WatchedToggle';
 import { cn } from '@/lib/utils';
 import { computeProgress, type MediaMeta } from '@/lib/media-metadata';
 import type { Tag } from '@/lib/tags';
@@ -24,8 +25,8 @@ interface MediaDetailViewProps {
   onPatch: (item: MediaItem, patch: MediaPatch) => void;
   onBump: (item: MediaItem, field: ProgressField, amount: number) => void;
   onSetPosition: (item: MediaItem, patch: { current_season?: number; current_episode?: number }) => void;
-  onRefreshCover: (item: MediaItem) => void;
-  onRemoveCover: (item: MediaItem) => void;
+  /** Movies: the one-tap watched toggle replaces the status chips. */
+  onToggleWatched?: (item: MediaItem) => void;
   log: {
     popover: boolean;
     onOpenSheet: (t: LogTarget) => void;
@@ -35,12 +36,11 @@ interface MediaDetailViewProps {
   detail?: SourceDetail | null;
   /** Present once migration 28 is live: Fix match / Link source, Pin cover. */
   onFixMatch?: (item: MediaItem) => void;
-  onTogglePin?: (item: MediaItem) => void;
 }
 
 /** The detail drawer's view mode (moved out of MediaTracker.tsx, behaviour unchanged
  *  except the 44px progress control + Log, and no season/episode for movies). */
-export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onSetPosition, onRefreshCover, onRemoveCover, log, detail, onFixMatch, onTogglePin }: MediaDetailViewProps) {
+export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onSetPosition, onToggleWatched, log, detail, onFixMatch }: MediaDetailViewProps) {
   const [synOpen, setSynOpen] = useState(false);
   const prog = computeProgress(item, meta);
   const airing = meta?.status ? AIRING_LABEL[meta.status] : null;
@@ -97,7 +97,6 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
           {altTitle && <p className="text-sm text-muted-foreground">{altTitle}</p>}
           {byline && <p className="text-sm text-muted-foreground">{byline}</p>}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <Badge className="border-0 bg-secondary text-foreground">{item.status}</Badge>
             {airing && <Badge className={cn('border-0', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>}
             {totalsLine && <span className="font-medium text-foreground/80">{totalsLine}</span>}
             {yearRange && <span className="tabular-nums">{yearRange}</span>}
@@ -143,21 +142,6 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
         {onFixMatch && (
           <button type="button" className={actionBtn} onClick={() => onFixMatch(item)}>
             <Replace className="h-4 w-4" aria-hidden="true" /> {linked ? 'Fix match' : 'Link source'}
-          </button>
-        )}
-        {onTogglePin && (
-          <button type="button" className={actionBtn} aria-pressed={!!item.cover_pinned} onClick={() => onTogglePin(item)}>
-            <Pin className="h-4 w-4" aria-hidden="true" /> {item.cover_pinned ? 'Cover pinned' : 'Pin cover'}
-          </button>
-        )}
-        {!linked && (
-          <button type="button" className={actionBtn} onClick={() => onRefreshCover(item)}>
-            <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh cover
-          </button>
-        )}
-        {coverUrl && !item.cover_pinned && (
-          <button type="button" className={actionBtn} onClick={() => onRemoveCover(item)}>
-            <ImageOff className="h-4 w-4" aria-hidden="true" /> Remove cover
           </button>
         )}
       </div>
@@ -212,8 +196,10 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
               />
             </div>
           </div>
+        ) : onToggleWatched ? (
+          <WatchedToggle item={item} busy={busy} onToggle={onToggleWatched} size="block" />
         ) : null}
-        <div className="space-y-1.5">
+        {(progressFieldOf(item) || !onToggleWatched) && <div className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">Status</span>
           <div className="flex flex-wrap gap-1.5">
             {(isReadableItem ? ['Reading', 'Plan to Read', 'Completed'] : ['Watching', 'Plan to Watch', 'Completed']).map((s) => (
@@ -232,7 +218,7 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
               </button>
             ))}
           </div>
-        </div>
+        </div>}
         <div className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">Your rating</span>
           <div className="flex items-center gap-0.5 flex-wrap">

@@ -76,6 +76,8 @@ import { useProgressMutation, type ProgressResult } from '@/hooks/media/useProgr
 import { useMediaQuery } from '@/hooks/use-media-query';
 import { MediaDetailView } from '@/components/media/MediaDetailView';
 import { MediaDetailPanel, type DetailLayout } from '@/components/media/MediaDetailPanel';
+import { MediaActionsMenu } from '@/components/media/MediaActionsMenu';
+import { WatchedToggle } from '@/components/media/WatchedToggle';
 import { MediaEditForm } from '@/components/media/MediaEditForm';
 import { LogSheet, type LogTarget } from '@/components/media/LogSheet';
 import { boundsFor } from '@/components/media/progress-view';
@@ -91,7 +93,7 @@ import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type
 import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned } from '@/lib/media-link';
 import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
-import { progressFieldOf, type MediaFormData } from '@/components/media/types';
+import { initialsOf, progressFieldOf, type MediaFormData } from '@/components/media/types';
 import {
   type MediaItem, type MediaPages, type MediaSortBy, READABLE_TYPES, WATCHABLE_TYPES, getStatusCategory,
   VALID_TYPES, VALID_STATUSES, normalizeMediaItem,
@@ -207,6 +209,7 @@ interface MediaListRowProps {
   onOpenDetails: (item: MediaItem, mode: 'view' | 'edit') => void;
   onQuickUpdate: (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => void;
   onRequestDelete: (id: number) => void;
+  onToggleWatched: (item: MediaItem) => void;
   log: { popover: boolean; onOpenSheet: (t: LogTarget) => void; onCommit: (item: MediaItem, value: number) => Promise<boolean> };
 }
 
@@ -222,6 +225,7 @@ const MediaListRow = ({
   onOpenDetails,
   onQuickUpdate,
   onRequestDelete,
+  onToggleWatched,
   log,
 }: MediaListRowProps) => {
   const { ref, inView } = useInView({ rootMargin: '300px' });
@@ -280,12 +284,11 @@ const MediaListRow = ({
         className="relative h-[68px] w-[46px] flex-shrink-0 overflow-hidden rounded-md bg-muted shadow-sm ring-1 ring-border/50"
         aria-label={`Open ${item.title}`}
       >
-        {cover ? (
-          <img src={cover} alt={item.title} loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-        ) : (
-          <span className="flex h-full w-full items-center justify-center text-lg font-bold text-muted-foreground">
-            {item.title.charAt(0).toUpperCase()}
-          </span>
+        <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center text-lg font-bold text-muted-foreground">
+          {initialsOf(item.title, 1)}
+        </span>
+        {cover && (
+          <img key={cover} src={cover} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.hidden = true; }} className="relative h-full w-full object-cover" />
         )}
         {item.has_new_content && (
           <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[hsl(var(--success))] ring-2 ring-background" aria-hidden="true" />
@@ -361,11 +364,13 @@ const MediaListRow = ({
             onCommit={log.onCommit}
           />
         )}
+        {!progressField && <WatchedToggle item={item} busy={isUpdating} onToggle={onToggleWatched} />}
       </div>
 
       {/* Status */}
       <div className="hidden w-[104px] flex-shrink-0 justify-center md:flex">
-        <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
+        {/* Movies show it as Watched in the progress column. */}
+        {progressField && <Badge className={getStatusColor(item.status)}>{item.status}</Badge>}
       </div>
 
       {/* Mobile progress stepper — the desktop progress column is hidden < sm,
@@ -384,16 +389,14 @@ const MediaListRow = ({
           onCommit={log.onCommit}
         />
       )}
+      {!progressField && <WatchedToggle item={item} busy={isUpdating} onToggle={onToggleWatched} className="flex-shrink-0 sm:hidden" />}
 
-      {/* Actions */}
-      <div className="flex flex-shrink-0 items-center gap-1 transition-opacity sm:opacity-60 sm:group-hover:opacity-100">
-        <Button size="icon-sm" variant="ghost" className="h-8 w-8" onClick={() => onOpenDetails(item, 'edit')} aria-label={`Edit ${item.title}`} title="Edit">
-          <Edit className="h-4 w-4" />
-        </Button>
-        <Button size="icon-sm" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => onRequestDelete(item.id)} aria-label={`Delete ${item.title}`} title="Delete">
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
+      {/* Actions: one ⋮ menu (Edit, Delete) instead of two 32 px ghosts */}
+      <MediaActionsMenu
+        item={item}
+        onEdit={(i) => onOpenDetails(i, 'edit')}
+        onDelete={(i) => onRequestDelete(i.id)}
+      />
     </div>
   );
 };
@@ -502,8 +505,8 @@ const MediaTracker = () => {
   const setGridSize = useCallback((size: GridSize) => { setGridSizeState(size); writeGridSize(size); }, []);
   const [tabsManageOpen, setTabsManageOpen] = useState(false);
 
-  // ?new=1 (command palette "Add Media") opens Quick Add. The param is consumed
-  // once and stripped, so a re-render can't reopen the dialog after you close it.
+  // ?new=1 (command palette "Add Media") opens Browse. The param is consumed
+  // once and stripped, so a re-render can't reopen it after you leave.
   const consumedNewParamRef = useRef(false);
   useEffect(() => {
     if (new URLSearchParams(location.search).get('new') !== '1') return;
@@ -554,7 +557,6 @@ const MediaTracker = () => {
 
   // Tags state
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
-  const [formTags, setFormTags] = useState<Tag[]>([]);
   const [editingItemTags, setEditingItemTags] = useState<Tag[]>([]);
   // What the edit form opened with (form fields; tags once loaded) — for the discard prompt.
   const editSnapshotRef = useRef<string | null>(null);
@@ -1338,16 +1340,34 @@ const MediaTracker = () => {
         .eq('id', item.id)
         .eq('user_id', item.user_id);
       if (error) throw error;
+      return true;
     } catch (e: unknown) {
       queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
       queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
       // Roll the open drawer back to the stored values too, not just the caches.
       setEditingItem((prev) => (prev && prev.id === item.id ? ({ ...prev, ...rollback } as MediaItem) : prev));
       toast({ title: 'Update failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
+      return false;
     } finally {
       setUpdatingIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
     }
   }, [queryClient, toast]);
+
+  // Movies: one tap marks watched (Completed) or back to Plan to Watch, with Undo.
+  const toggleWatched = useCallback(async (item: MediaItem) => {
+    const was = item.status;
+    const next = (getStatusCategory(was) === 'Completed' ? 'Plan to Watch' : 'Completed') as MediaItem['status'];
+    if (!(await patchMedia(item, { status: next }))) return;
+    toast({
+      title: next === 'Completed' ? 'Marked watched' : 'Marked not watched',
+      description: item.title,
+      action: (
+        <ToastAction altText="Undo" onClick={() => { void patchMedia({ ...item, status: next }, { status: was }); }}>
+          Undo
+        </ToastAction>
+      ),
+    });
+  }, [patchMedia, toast]);
 
   /**
    * "Watched next" from the Continue rail: advance one episode/chapter without
@@ -3044,6 +3064,7 @@ const MediaTracker = () => {
                     onToggleSelect={cardOnToggle}
                     onLongPress={cardOnLongPress}
                     onVisibleChange={cardOnVisible}
+                    onToggleWatched={toggleWatched}
                     log={logProps}
                   />
                 ) : (
@@ -3059,6 +3080,7 @@ const MediaTracker = () => {
                         onOpenDetails={openDetails}
                         onQuickUpdate={handleQuickUpdate}
                         onRequestDelete={(id) => setDeleteConfirm({ open: true, id })}
+                        onToggleWatched={toggleWatched}
                         log={logProps}
                       />
                     ))}
@@ -3082,35 +3104,32 @@ const MediaTracker = () => {
           layout={detailLayout}
           title={editingItem ? (detailsMode === 'edit' ? `Edit ${editingItem.title}` : editingItem.title) : 'Media'}
           subtitle={editingItem && (
-            <>
-              <Badge className={cn('border-0', typeBadgeSoft(editingItem.type))}>{editingItem.type}</Badge>
-              <Badge className={getStatusColor(editingItem.status)}>{editingItem.status}</Badge>
-            </>
+            <Badge className={cn('border-0', typeBadgeSoft(editingItem.type))}>{editingItem.type}</Badge>
           )}
           actions={editingItem && detailsMode === 'view' && (
-            <Button size="sm" variant="outline" className="h-10" onClick={() => openDetails(editingItem, 'edit')}>
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
-            </Button>
+            <>
+              <Button size="sm" variant="outline" className="h-10" onClick={() => openDetails(editingItem, 'edit')}>
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+              <MediaActionsMenu
+                item={editingItem}
+                hasCover={!!(imageUrls.get(editingItem.id) ?? editingItem.cover_image)}
+                onTogglePin={v2Schema.sourceLinks ? togglePin : undefined}
+                onRefreshCover={handleRefreshCover}
+                onRemoveCover={handleRemoveCover}
+                onDelete={(i) => setDeleteConfirm({ open: true, id: i.id })}
+              />
+            </>
           )}
           onStep={detailsMode === 'view' ? stepDetail : null}
           canStep={stepState}
-          footer={editingItem && (detailsMode === 'view' ? (
-            // The Mihon grid card has no menu, so Delete lives here.
-            <Button
-              variant="ghost"
-              type="button"
-              className="h-10 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setDeleteConfirm({ open: true, id: editingItem.id })}
-            >
-              <Trash2 className="h-4 w-4 mr-2" /> Delete
-            </Button>
-          ) : (
+          footer={editingItem && detailsMode === 'edit' && (
             <div className="flex justify-end gap-2">
               <Button variant="outline" type="button" className="h-10" onClick={() => setDetailsMode('view')}>Cancel</Button>
               <Button type="submit" form="media-details-form" className="h-10">Update</Button>
             </div>
-          ))}
+          )}
         >
           {detailsMode === 'view' && editingItem && (
             <MediaDetailView
@@ -3122,11 +3141,9 @@ const MediaTracker = () => {
               onPatch={patchMedia}
               onBump={bumpField}
               onSetPosition={setPosition}
-              onRefreshCover={handleRefreshCover}
-              onRemoveCover={handleRemoveCover}
+              onToggleWatched={toggleWatched}
               detail={sourceDetail ?? null}
               onFixMatch={v2Schema.sourceLinks ? (i) => setFixFor(i) : undefined}
-              onTogglePin={v2Schema.sourceLinks ? togglePin : undefined}
               log={logProps}
             />
           )}

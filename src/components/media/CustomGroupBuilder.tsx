@@ -137,7 +137,11 @@ export const CustomGroupBuilder = ({
     'bg-foreground/[0.04] text-muted-foreground border-transparent hover:bg-foreground/[0.08] hover:text-foreground';
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden items-center">
+    <div className="flex items-center gap-2">
+      {/* Only the pills scroll; + Group and ⚙ stay pinned at the end (they used to
+          scroll off the right edge at iPad-landscape widths and read as cut off).
+          pt-2 leaves room for the group pills' corner edit/delete buttons. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]">
       {/* All */}
       <button
         onClick={() => onActiveCategoryChange('all')}
@@ -209,6 +213,8 @@ export const CustomGroupBuilder = ({
         );
       })}
 
+      </div>
+
       {/* Add Group trigger — hidden at the cap, but the dialog below stays
           mounted so the ⚙ edit affordance on each group pill still works.
           Both used to live inside this gate, which made editing impossible
@@ -218,7 +224,7 @@ export const CustomGroupBuilder = ({
           onClick={handleAddGroup}
           className={cn(
             pillBase,
-            'bg-background text-muted-foreground border-dashed border-border hover:border-border-strong hover:text-foreground'
+            'flex-shrink-0 bg-background text-muted-foreground border-dashed border-border hover:border-border-strong hover:text-foreground'
           )}
           aria-label="Add custom group"
         >
