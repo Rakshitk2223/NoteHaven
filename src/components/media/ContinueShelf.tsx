@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Play, Sparkles, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { QueueEntry } from '@/lib/media-insights';
+import { isReadable } from './types';
 
 interface ContinueShelfProps {
   entries: QueueEntry[];
@@ -128,10 +129,10 @@ export function ContinueShelf({ entries, covers, onAdvance, onOpen, busyIds }: C
                   variant="gradient"
                   disabled={busy}
                   onClick={() => onAdvance(entry)}
-                  className="h-7 w-full gap-1 text-[11px]"
+                  className="h-11 w-full gap-1.5 text-xs"
                 >
-                  <Play className="h-3 w-3" />
-                  {busy ? 'Saving…' : 'Watched next'}
+                  <Play className="h-3.5 w-3.5" />
+                  {busy ? 'Saving…' : isReadable(entry.item) ? 'Read next' : 'Watched next'}
                 </Button>
               </div>
             </article>
