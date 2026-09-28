@@ -398,6 +398,8 @@ const MediaListRow = ({
   );
 };
 
+const tagKey = (tags: Tag[]) => tags.map((t) => t.name.toLowerCase()).sort().join('\u0000');
+
 const MediaTracker = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -554,6 +556,13 @@ const MediaTracker = () => {
   const [availableTags, setAvailableTags] = useState<Tag[]>([]);
   const [formTags, setFormTags] = useState<Tag[]>([]);
   const [editingItemTags, setEditingItemTags] = useState<Tag[]>([]);
+  // What the edit form opened with (form fields; tags once loaded) — for the discard prompt.
+  const editSnapshotRef = useRef<string | null>(null);
+  const editTagsSnapshotRef = useRef<string | null>(null);
+  // Read by the (stable) openers without re-creating them — grid cards are memoised on onOpen.
+  const openIdRef = useRef<number | undefined>(undefined);
+  const openTagsRef = useRef<Tag[]>([]);
+  openTagsRef.current = editingItemTags;
   
   // Custom groups state (persisted to localStorage)
   const [customGroups, setCustomGroups] = useState<CustomGroup[]>(() => {
@@ -906,20 +915,24 @@ const MediaTracker = () => {
     fetchTags();
   }, []);
 
-  // Load tags when editing an item
+  // Load tags per opened title. Keyed on the id, not the object: a cache patch to
+  // the open item (a log, a cover fill) must not reload them over unsaved edits.
+  const editingItemId = editingItem?.id;
+  openIdRef.current = editingItemId;
   useEffect(() => {
     const loadEditingItemTags = async () => {
-      if (editingItem?.id) {
+      if (editingItemId) {
         try {
-          const tags = await fetchMediaTags(editingItem.id);
+          const tags = await fetchMediaTags(editingItemId);
           setEditingItemTags(tags);
+          editTagsSnapshotRef.current = tagKey(tags);
         } catch (err) {
           console.error('Failed to load media tags:', err);
         }
       }
     };
     loadEditingItemTags();
-  }, [editingItem]);
+  }, [editingItemId]);
 
   // Tag filtering was removed with the tag filter UI — media_tags has never held
   // a row, and genres cover the same axis without manual upkeep.
@@ -1679,10 +1692,11 @@ const MediaTracker = () => {
   };
 
 
-  const openDetails = useCallback((item: MediaItem, mode: 'view' | 'edit' = 'view') => {
+  const openDetailsNow = useCallback((item: MediaItem, mode: 'view' | 'edit' = 'view') => {
     setEditingItem(item);
     setDetailsMode(mode);
     if (mode === 'edit') {
+      editTagsSnapshotRef.current = item.id === openIdRef.current ? tagKey(openTagsRef.current) : null;
       // What the form OPENED with: Update only writes progress the user changed.
       formOpenedWithRef.current = {
         type: item.type,
@@ -1690,7 +1704,7 @@ const MediaTracker = () => {
         current_episode: item.current_episode?.toString() || "",
         current_chapter: item.current_chapter?.toString() || "",
       };
-      setFormData({
+      const opened: MediaFormData = {
         title: item.title,
         type: item.type,
         status: item.status,
@@ -1698,7 +1712,9 @@ const MediaTracker = () => {
         current_season: item.current_season?.toString() || "",
         current_episode: item.current_episode?.toString() || "",
         current_chapter: item.current_chapter?.toString() || "",
-      });
+      };
+      setFormData(opened);
+      editSnapshotRef.current = JSON.stringify(opened);
     }
     // Opening the item counts as "seeing" any new-season alert — clear the flag.
     if (item.has_new_content) {
@@ -1720,6 +1736,27 @@ const MediaTracker = () => {
     }
     setDetailsOpen(true);
   }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder]);
+
+  // Unsaved edits are never dropped silently: switching title (grid click, ← / →,
+  // History, Stats) or closing the panel while the form differs from what it
+  // opened with asks first. Cancel in the edit footer is the explicit discard.
+  const editDirty = detailsMode === 'edit' && editSnapshotRef.current != null && (
+    JSON.stringify(formData) !== editSnapshotRef.current
+    || (editTagsSnapshotRef.current != null && tagKey(editingItemTags) !== editTagsSnapshotRef.current)
+  );
+  const editDirtyRef = useRef(false);
+  editDirtyRef.current = editDirty;
+  const [discardPrompt, setDiscardPrompt] = useState<{ run: () => void } | null>(null);
+  const guardEdits = useCallback((run: () => void) => {
+    if (editDirtyRef.current) setDiscardPrompt({ run });
+    else run();
+  }, []);
+  const openDetails = useCallback((item: MediaItem, mode: 'view' | 'edit' = 'view') => {
+    guardEdits(() => openDetailsNow(item, mode));
+  }, [guardEdits, openDetailsNow]);
+  const closeDetails = useCallback(() => {
+    guardEdits(() => { setDetailsOpen(false); setDetailsMode('view'); });
+  }, [guardEdits]);
 
   // Resolve the FULL set of items for a Refresh Library sweep by querying the DB
   // with the active type/status/search filters (paginated past the 1000-row cap)
@@ -3041,7 +3078,7 @@ const MediaTracker = () => {
         {/* Detail: phone full screen, iPad side sheet, Mac a pane beside the grid (← / → step). */}
         <MediaDetailPanel
           open={detailsOpen && !!editingItem}
-          onOpenChange={(o) => { setDetailsOpen(o); if (!o) setDetailsMode('view'); }}
+          onOpenChange={(o) => { if (o) setDetailsOpen(true); else closeDetails(); }}
           layout={detailLayout}
           title={editingItem ? (detailsMode === 'edit' ? `Edit ${editingItem.title}` : editingItem.title) : 'Media'}
           subtitle={editingItem && (
@@ -3106,6 +3143,16 @@ const MediaTracker = () => {
         </MediaDetailPanel>
       </div>
       
+      <ConfirmDialog
+        open={!!discardPrompt}
+        onOpenChange={(o) => { if (!o) setDiscardPrompt(null); }}
+        onConfirm={() => { const run = discardPrompt?.run; setDiscardPrompt(null); editDirtyRef.current = false; run?.(); }}
+        title="Discard changes?"
+        description={`Your edits to ${quoted(editingItem?.title, 'this title')} haven’t been saved.`}
+        confirmText="Discard"
+        cancelText="Keep editing"
+      />
+
       <ConfirmDialog
         open={deleteConfirm.open}
         onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
