@@ -21,6 +21,15 @@ export interface MediaItem {
   has_new_content?: boolean;
   last_known_total_episodes?: number | null;
   last_known_total_seasons?: number | null;
+  // Migration 28 (Media v2 source links). Present on rows once it has run.
+  source?: string | null;
+  source_id?: string | null;
+  link_status?: string | null; // 'unlinked' | 'linked' | 'review'
+  cover_pinned?: boolean | null;
+  last_known_latest_chapter?: number | null;
+  latest_changed_at?: string | null;
+  platform?: string | null;
+  resume_url?: string | null;
 }
 
 /** Shape of every ['mediaItems', …] infinite-query cache entry. */

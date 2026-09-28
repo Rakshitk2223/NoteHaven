@@ -36,6 +36,9 @@ export function numLabel(item: MediaItem): string {
  *  - Watching: episodes of the CURRENT season whose air date has passed.
  */
 export function knownLatest(item: MediaItem, meta?: MediaMeta | null): number | null {
+  // A linked entry's latest released chapter (mirrored from its source) is the
+  // real answer for reading types, finished or not.
+  if (isReadable(item) && item.last_known_latest_chapter != null) return item.last_known_latest_chapter;
   if (!meta) return null;
   if (isReadable(item)) {
     return meta.status === 'completed' && meta.chapters ? meta.chapters : null;
@@ -62,4 +65,17 @@ export function behindCount(item: MediaItem, meta?: MediaMeta | null): number | 
   if (latest == null) return null;
   const b = latest - progressValue(item);
   return b >= 0 ? b : null; // progress past "latest" means the data is stale: say nothing
+}
+
+/**
+ * What nextProgress() may clamp against: per-season counts, totals, and the
+ * latest released chapter (linked entries). Only real, finished totals count.
+ */
+export function boundsFor(item: MediaItem, meta?: MediaMeta | null): import('@/lib/media-progress').ProgressBounds {
+  return {
+    seasons: meta?.seasons ?? null,
+    total_episodes: meta?.episodes ?? null,
+    total_chapters: meta?.status === 'completed' ? meta?.chapters ?? null : null,
+    latest_chapter: item.last_known_latest_chapter ?? null,
+  };
 }

@@ -1,4 +1,5 @@
-import { ImageOff, RefreshCw, Sparkles, Star } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, Globe, ImageOff, Pin, Plus, RefreshCw, Replace, Sparkles, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -9,7 +10,8 @@ import type { Tag } from '@/lib/tags';
 import { AIRING_LABEL, AIRING_STYLE } from './media-style';
 import { type MediaItem, type ProgressField, READABLE_TYPES, WATCHABLE_TYPES, progressFieldOf } from './types';
 import { ProgressControl } from './ProgressControl';
-import type { LogTarget } from './LogSheet';
+import { LogNumberButton, type LogTarget } from './LogSheet';
+import { SOURCE_LABEL, type MediaSource, type SourceDetail } from '@/lib/media-sources';
 
 type MediaPatch = { status?: MediaItem['status']; rating?: number | null; current_season?: number; current_episode?: number; current_chapter?: number };
 
@@ -21,6 +23,7 @@ interface MediaDetailViewProps {
   busy?: boolean;
   onPatch: (item: MediaItem, patch: MediaPatch) => void;
   onBump: (item: MediaItem, field: ProgressField, amount: number) => void;
+  onSetPosition: (item: MediaItem, patch: { current_season?: number; current_episode?: number }) => void;
   onRefreshCover: (item: MediaItem) => void;
   onRemoveCover: (item: MediaItem) => void;
   log: {
@@ -28,11 +31,17 @@ interface MediaDetailViewProps {
     onOpenSheet: (t: LogTarget) => void;
     onCommit: (item: MediaItem, value: number) => Promise<boolean>;
   };
+  /** Source detail for a linked entry (alt titles, authors, link). */
+  detail?: SourceDetail | null;
+  /** Present once migration 28 is live: Fix match / Link source, Pin cover. */
+  onFixMatch?: (item: MediaItem) => void;
+  onTogglePin?: (item: MediaItem) => void;
 }
 
 /** The detail drawer's view mode (moved out of MediaTracker.tsx, behaviour unchanged
  *  except the 44px progress control + Log, and no season/episode for movies). */
-export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onRefreshCover, onRemoveCover, log }: MediaDetailViewProps) {
+export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onSetPosition, onRefreshCover, onRemoveCover, log, detail, onFixMatch, onTogglePin }: MediaDetailViewProps) {
+  const [synOpen, setSynOpen] = useState(false);
   const prog = computeProgress(item, meta);
   const airing = meta?.status ? AIRING_LABEL[meta.status] : null;
   const seasons = meta?.seasons ?? null;
@@ -58,106 +67,113 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
         meta?.episodes ? `${meta.episodes} episodes` : null,
       ].filter(Boolean).join(' · ') || null)
     : null;
-  const myProgress = item.current_episode || item.current_season
+  // By type, not by which columns happen to be set.
+  const myProgress = isReadableItem
+    ? `Ch. ${item.current_chapter ?? 0}${meta?.chapters ? ` of ${meta.chapters}` : ''}`
+    : isWatchableItem
     ? `S${item.current_season || 1} · E${item.current_episode ?? 0}${meta?.episodes ? ` of ${meta.episodes}` : ''}`
-    : item.current_chapter
-    ? `Ch. ${item.current_chapter}${meta?.chapters ? ` of ${meta.chapters}` : ''}`
     : '—';
+  const linked = item.link_status === 'linked' && !!item.source;
+  const sourceLabel = item.source ? SOURCE_LABEL[item.source as MediaSource] ?? item.source : null;
+  const altTitle = detail?.alt_titles?.find((t) => t && t !== item.title) ?? null;
+  const byline = detail?.authors?.slice(0, 2).join(', ') || null;
+  const synopsis = meta?.description ?? detail?.description ?? null;
+  const longSyn = !!synopsis && synopsis.length > 180;
+  const actionBtn = 'inline-flex min-h-11 flex-shrink-0 items-center gap-2 rounded-xl border border-border bg-card px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   return (
     <div className="space-y-5">
-      {/* Cinematic banner */}
-      {bannerUrl && (
-        <div className="relative -mx-6 -mt-6 h-40 overflow-hidden">
-          <img src={bannerUrl} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
+      {/* Hero: what it is, and where it comes from */}
+      <div className="flex gap-4">
+        <div className="relative aspect-[2/3] w-28 flex-shrink-0 overflow-hidden rounded-lg bg-muted shadow-lg ring-1 ring-border sm:w-32">
+          <img src={coverUrl || '/placeholder-poster.svg'} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+          {item.cover_pinned && (
+            <span className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md bg-background/80 text-foreground shadow" title="Cover pinned">
+              <Pin className="h-3.5 w-3.5" aria-label="Cover pinned" />
+            </span>
+          )}
+        </div>
+        <div className="min-w-0 space-y-1.5">
+          <h3 className="text-lg font-bold leading-snug text-foreground">{item.title}</h3>
+          {altTitle && <p className="text-sm text-muted-foreground">{altTitle}</p>}
+          {byline && <p className="text-sm text-muted-foreground">{byline}</p>}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <Badge className="border-0 bg-secondary text-foreground">{item.status}</Badge>
+            {airing && <Badge className={cn('border-0', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>}
+            {totalsLine && <span className="font-medium text-foreground/80">{totalsLine}</span>}
+            {yearRange && <span className="tabular-nums">{yearRange}</span>}
+          </div>
           {item.has_new_content && (
-            <div className="absolute right-3 top-3 flex items-center gap-1 rounded-md bg-[hsl(var(--success)/0.15)] px-2 py-1 text-xs font-semibold text-[hsl(var(--success))] shadow-lg">
-              <Sparkles className="h-3.5 w-3.5" /> New content
-            </div>
+            <p className="inline-flex items-center gap-1 text-xs font-semibold text-success"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> New content</p>
+          )}
+          {linked ? (
+            detail?.url ? (
+              <a href={detail.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 text-sm font-medium text-primary hover:underline">
+                via {sourceLabel} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              </a>
+            ) : (
+              <p className="text-sm font-medium text-primary">via {sourceLabel}</p>
+            )
+          ) : onFixMatch ? (
+            <p className="text-sm text-muted-foreground">Not linked to a source</p>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Action row */}
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {progressFieldOf(item) && (
+          <LogNumberButton
+            item={item}
+            meta={meta}
+            cover={cover}
+            popover={log.popover}
+            onOpenSheet={log.onOpenSheet}
+            onCommit={log.onCommit}
+            className="flex-shrink-0 gap-2 rounded-xl border-transparent bg-gradient-brand px-4 text-primary-foreground shadow-glow hover:bg-gradient-brand hover:brightness-110"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" /> Log
+          </LogNumberButton>
+        )}
+        {item.resume_url && (
+          <a href={item.resume_url} target="_blank" rel="noopener noreferrer" className={actionBtn}>
+            <Globe className="h-4 w-4" aria-hidden="true" /> Open {item.platform ? `on ${item.platform}` : 'where I read'}
+            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          </a>
+        )}
+        {onFixMatch && (
+          <button type="button" className={actionBtn} onClick={() => onFixMatch(item)}>
+            <Replace className="h-4 w-4" aria-hidden="true" /> {linked ? 'Fix match' : 'Link source'}
+          </button>
+        )}
+        {onTogglePin && (
+          <button type="button" className={actionBtn} aria-pressed={!!item.cover_pinned} onClick={() => onTogglePin(item)}>
+            <Pin className="h-4 w-4" aria-hidden="true" /> {item.cover_pinned ? 'Cover pinned' : 'Pin cover'}
+          </button>
+        )}
+        {!linked && (
+          <button type="button" className={actionBtn} onClick={() => onRefreshCover(item)}>
+            <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh cover
+          </button>
+        )}
+        {coverUrl && !item.cover_pinned && (
+          <button type="button" className={actionBtn} onClick={() => onRemoveCover(item)}>
+            <ImageOff className="h-4 w-4" aria-hidden="true" /> Remove cover
+          </button>
+        )}
+      </div>
+
+      {/* Synopsis: three lines, then More */}
+      {synopsis && (
+        <div className="space-y-1">
+          <h4 className="text-sm font-semibold">Synopsis</h4>
+          <p id={`syn-${item.id}`} className={cn('text-sm leading-relaxed text-muted-foreground', !synOpen && longSyn && 'line-clamp-3')}>{synopsis}</p>
+          {longSyn && (
+            <button type="button" className="min-h-8 text-sm font-medium text-primary hover:underline" aria-expanded={synOpen} aria-controls={`syn-${item.id}`} onClick={() => setSynOpen((o) => !o)}>
+              {synOpen ? 'Less' : 'More'}
+            </button>
           )}
         </div>
       )}
-
-      <div className="grid grid-cols-[120px_1fr] gap-4 items-start">
-        <div className="relative aspect-[2/3] rounded-md overflow-hidden bg-muted shadow-lg">
-          <img
-            src={coverUrl || '/placeholder-poster.svg'}
-            alt={item.title}
-            referrerPolicy="no-referrer"
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <div className="space-y-3">
-          {/* Source meta line: airing · real size · year range */}
-          {(airing || totalsLine || yearRange) && (
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              {airing && (
-                <Badge className={cn('border-0', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>
-              )}
-              {totalsLine && <span className="font-medium text-foreground/80">{totalsLine}</span>}
-              {totalsLine && yearRange && <span aria-hidden="true">·</span>}
-              {yearRange && <span className="tabular-nums">{yearRange}</span>}
-            </div>
-          )}
-
-          {/* Ratings — source (community) vs yours, clearly separated */}
-          <div className="flex flex-wrap gap-2">
-            <div className="flex-1 min-w-[116px] rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Source rating</div>
-              {meta?.rating ? (
-                <div className="mt-0.5 flex items-baseline gap-1">
-                  <Star className="h-4 w-4 self-center fill-warning text-warning" />
-                  <span className="text-lg font-bold tabular-nums leading-none">{meta.rating.toFixed(1)}</span>
-                  <span className="text-xs text-muted-foreground">/ 10</span>
-                </div>
-              ) : (
-                <div className="mt-1 text-sm text-muted-foreground">Not rated</div>
-              )}
-            </div>
-            <div className="flex-1 min-w-[116px] rounded-lg border border-primary/30 bg-primary/[0.06] px-3 py-2">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">My rating</div>
-              {item.rating ? (
-                <div className="mt-0.5 flex items-baseline gap-1">
-                  <Star className="h-4 w-4 self-center fill-primary text-primary" />
-                  <span className="text-lg font-bold tabular-nums leading-none">{item.rating}</span>
-                  <span className="text-xs text-muted-foreground">/ 10</span>
-                </div>
-              ) : (
-                <div className="mt-1 text-sm text-muted-foreground">Rate it below ↓</div>
-              )}
-            </div>
-          </div>
-
-          {/* My status + progress vs the source's real total */}
-          <div className="grid grid-cols-2 gap-y-1.5 text-sm">
-            <div className="text-muted-foreground">Status</div>
-            <div className="font-medium">{item.status}</div>
-            <div className="text-muted-foreground">My progress</div>
-            <div className="font-medium tabular-nums">{myProgress}</div>
-          </div>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onRefreshCover(item)}
-            >
-              <RefreshCw className="h-4 w-4 mr-2" /> Refresh cover
-            </Button>
-            {coverUrl && (
-              <Button size="sm" variant="outline" onClick={() => onRemoveCover(item)}>
-                <ImageOff className="h-4 w-4 mr-2" /> Remove cover
-              </Button>
-            )}
-          </div>
-          {tags.length > 0 && (
-            <div className="pt-1 flex flex-wrap gap-1.5">
-              {tags.map((tag) => (
-                <TagBadge key={tag.id} tag={tag} size="sm" />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Your progress — always-visible quick controls (the daily core) */}
       <div className="aurora-card p-4 space-y-4">
@@ -249,14 +265,6 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
         </div>
       )}
 
-      {/* Synopsis */}
-      {meta?.description && (
-        <div className="space-y-1.5">
-          <h4 className="text-sm font-semibold">Synopsis</h4>
-          <p className="text-sm leading-relaxed text-muted-foreground">{meta.description}</p>
-        </div>
-      )}
-
       {/* Genres */}
       {meta?.genres && meta.genres.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -321,7 +329,7 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
                             <li key={e.number}>
                               <button
                                 type="button"
-                                onClick={() => onPatch(item, { current_season: s.season_number, current_episode: target })}
+                                onClick={() => onSetPosition(item, { current_season: s.season_number, current_episode: target })}
                                 title={`Set progress to S${s.season_number} · E${e.number}`}
                                 className="flex w-full items-start gap-3 rounded-md py-2 pr-1 text-left transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
                               >

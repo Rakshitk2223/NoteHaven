@@ -4,32 +4,53 @@
 // Why it exists (audit F-M01): progress used to be written as an ABSOLUTE value
 // computed from whichever cached copy of the list was on screen, so a +1 from a
 // stale copy silently rolled back progress logged elsewhere. Every write here is a
-// compare-and-swap against the server's value:
-//   UPDATE media_tracker SET <field> = <target> WHERE id = X AND <field> = <base>
-// and a history row is appended to media_progress_log AFTER the update confirms.
+// compare-and-swap against the server's values, matched on EVERY column it changes
+// (a season rollover changes season AND episode):
+//   UPDATE media_tracker SET season=…, episode=… WHERE id=X AND season=<s> AND episode=<e>
+// The target itself comes from nextProgress() (lib/media-progress.ts): rollover,
+// clamps and floors live there, not here. A history row per changed column is
+// appended to media_progress_log AFTER the update confirms.
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
+import {
+  nextProgress,
+  type ProgressBounds,
+  type ProgressChange,
+  type ProgressPosition,
+} from '@/lib/media-progress';
 import type { MediaItem, MediaPages, ProgressField } from '@/components/media/types';
 
-export type ProgressChange = { delta: number } | { set: number };
+export type { ProgressChange };
+
+const COLS = ['current_season', 'current_episode', 'current_chapter'] as const;
+type Col = typeof COLS[number];
 
 export interface ProgressResult {
   field: ProgressField;
   from: number | null;
   to: number;
+  /** Position before and after — every column the write changed. */
+  before: ProgressPosition;
+  after: ProgressPosition;
+  /** The request was cut to a bound (latest / total / last episode / floor). */
+  clamped: boolean;
+  rolledOver: boolean;
 }
 
-/** Thrown when a set-to-N finds the value was changed elsewhere since it was read. */
+/** Thrown when an explicit target finds the value changed elsewhere since it was read. */
 export class ProgressConflictError extends Error {
-  constructor(public readonly serverValue: number | null) {
+  constructor(public readonly server: ProgressPosition) {
     super('Changed on another device');
   }
 }
 
-// Season counts from 1; chapters/episodes may legitimately be 0 ("not started").
-const floorFor = (field: ProgressField) => (field === 'current_season' ? 1 : 0);
+const posOf = (item: Pick<MediaItem, Col>): ProgressPosition => ({
+  current_season: item.current_season ?? null,
+  current_episode: item.current_episode ?? null,
+  current_chapter: item.current_chapter ?? null,
+});
 
 // media_progress_log arrives with migration 28. Until it's run, skip the history
 // insert silently — once per session, not a failing request per tap.
@@ -37,25 +58,20 @@ let logTableMissing = false;
 const isMissingTable = (e: { code?: string } | null | undefined) =>
   e?.code === 'PGRST205' || e?.code === '42P01';
 
-async function appendLog(
-  item: MediaItem,
-  field: ProgressField,
-  from: number | null,
-  to: number,
-  kind: 'log' | 'undo',
-) {
+async function appendLog(item: MediaItem, before: ProgressPosition, after: ProgressPosition, kind: 'log' | 'undo') {
   if (logTableMissing) return;
+  const rows = COLS.filter((c) => before[c] !== after[c]).map((field) => ({
+    user_id: item.user_id,
+    media_id: item.id,
+    field,
+    from_value: before[field],
+    to_value: after[field],
+    season: field === 'current_episode' ? after.current_season ?? before.current_season ?? null : null,
+    kind,
+  }));
+  if (!rows.length) return;
   try {
-    // Not in the generated types until migration 28 lands; append-only by RLS.
-    const { error } = await supabase.from('media_progress_log' as never).insert({
-      user_id: item.user_id,
-      media_id: item.id,
-      field,
-      from_value: from,
-      to_value: to,
-      season: field === 'current_episode' ? item.current_season ?? null : null,
-      kind,
-    } as never);
+    const { error } = await supabase.from('media_progress_log' as never).insert(rows as never);
     if (error) {
       if (isMissingTable(error)) logTableMissing = true;
       else console.warn('media_progress_log insert failed (progress itself was saved):', error.message);
@@ -71,13 +87,14 @@ interface Options {
   setUpdatingIds: Dispatch<SetStateAction<Set<number>>>;
 }
 
+type Plan = (base: ProgressPosition) => { patch: Partial<ProgressPosition>; field: ProgressField; clamped: boolean; rolledOver: boolean };
+
 export function useProgressMutation({ setEditingItem, setUpdatingIds }: Options) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   // Patch one title in EVERY cached copy — each filter/search/sort variant of the
-  // grid, the rails and the open drawer. Patching only the on-screen key left the
-  // other copies stale for the 5-minute staleTime (audit F-M01).
+  // grid, the rails and the open drawer (audit F-M01).
   const patchCachedItem = useCallback((id: number, patch: Partial<MediaItem>) => {
     queryClient.setQueriesData<MediaPages>({ queryKey: ['mediaItems'] }, (old) => old ? {
       ...old,
@@ -89,64 +106,66 @@ export function useProgressMutation({ setEditingItem, setUpdatingIds }: Options)
     setEditingItem((prev) => (prev && prev.id === id ? ({ ...prev, ...patch } as MediaItem) : prev));
   }, [queryClient, setEditingItem]);
 
-  // Per-title write chain + the last value the server confirmed per `${id}:${field}`.
+  // Per-title write chain, the last position the server confirmed, pending counts.
   const chainRef = useRef(new Map<number, Promise<unknown>>());
-  const confirmedRef = useRef(new Map<string, number | null>());
-  const pendingRef = useRef(new Map<string, number>());
+  const confirmedRef = useRef(new Map<number, ProgressPosition>());
+  const pendingRef = useRef(new Map<number, number>());
 
   /**
-   * Apply a progress change against the SERVER's value. `{ delta }` re-applies on
-   * top of whatever the server holds if another device moved it; `{ set }` is the
-   * user's explicit target, so if the value changed since it was read the write is
-   * refused (ProgressConflictError) instead of overwriting the other device.
-   * Resolves to what was saved, or null when nothing was written.
+   * The engine. `plan(base)` turns a position into the columns to write. `explicit`
+   * targets (set-to-N, undo, a chosen episode) refuse to overwrite a position they
+   * didn't see; relative ones (±N) re-plan on top of the server's position.
    */
-  const apply = useCallback((
+  const run = useCallback((
     item: MediaItem,
-    field: ProgressField,
-    change: ProgressChange,
-    opts: { kind?: 'log' | 'undo'; quiet?: boolean } = {},
+    plan: Plan,
+    opts: { explicit: boolean; kind?: 'log' | 'undo'; quiet?: boolean },
   ): Promise<ProgressResult | null> => {
-    const key = `${item.id}:${field}`;
-    const shown = item[field] ?? null;
-    const floor = floorFor(field);
-    const optimistic = 'delta' in change
-      ? (shown == null && change.delta < 0 ? null : Math.max((shown ?? 0) + change.delta, floor))
-      : Math.max(Math.round(change.set), floor);
-    if (optimistic == null) return Promise.resolve(null);
+    const shown = posOf(item);
+
+    // A fetch already in flight read the row BEFORE this write; landing after our
+    // settle it would put the old number back into that copy (the card said 113,
+    // the drawer opened from the rail said 112). Cancel those first — only queries
+    // that already hold data: cancelling a first load would strand the placeholder.
+    const loaded = { predicate: (q: { state: { data: unknown } }) => q.state.data !== undefined };
+    void queryClient.cancelQueries({ queryKey: ['mediaItems'], ...loaded });
+    void queryClient.cancelQueries({ queryKey: ['mediaRails'], ...loaded });
 
     // Instant feedback everywhere; reconciled with the server's answer below.
-    patchCachedItem(item.id, { [field]: optimistic } as Partial<MediaItem>);
-    pendingRef.current.set(key, (pendingRef.current.get(key) ?? 0) + 1);
+    const optimistic = plan(shown);
+    if (Object.keys(optimistic.patch).length === 0) return Promise.resolve(null);
+    patchCachedItem(item.id, optimistic.patch as Partial<MediaItem>);
+    pendingRef.current.set(item.id, (pendingRef.current.get(item.id) ?? 0) + 1);
     setUpdatingIds((prev) => new Set(prev).add(item.id));
 
     const write = async (): Promise<ProgressResult | null> => {
-      let base: number | null = confirmedRef.current.has(key) ? confirmedRef.current.get(key) ?? null : shown;
+      let base: ProgressPosition = confirmedRef.current.get(item.id) ?? shown;
       for (let attempt = 0; attempt < 3; attempt++) {
-        let target: number;
-        if ('delta' in change) {
-          if (base == null && change.delta < 0) return null;
-          target = Math.max((base ?? 0) + change.delta, floor);
-        } else {
-          target = Math.max(Math.round(change.set), floor);
-        }
-        if (target === base) return { field, from: base, to: target };
-        // Explicit payloads — a computed key widens to Record<string, …>, which the
-        // generated Update type rejects.
-        const now = new Date().toISOString();
-        const patch = field === 'current_season'
-          ? { current_season: target, last_activity_at: now }
-          : field === 'current_episode'
-            ? { current_episode: target, last_activity_at: now }
-            : { current_chapter: target, last_activity_at: now };
-        let q = supabase.from('media_tracker').update(patch).eq('id', item.id);
-        q = base == null ? q.is(field, null) : q.eq(field, base);
+        const p = plan(base);
+        const cols = (Object.keys(p.patch) as Col[]).filter((c) => p.patch[c] !== base[c]);
+        const after: ProgressPosition = { ...base, ...p.patch };
+        const result = (): ProgressResult => ({
+          field: p.field, from: base[p.field], to: after[p.field] ?? 0, before: base, after, clamped: p.clamped, rolledOver: p.rolledOver,
+        });
+        if (cols.length === 0) return result(); // already there (or clamped to where it is)
+
+        const update: Record<string, unknown> = { last_activity_at: new Date().toISOString() };
+        for (const c of cols) update[c] = p.patch[c];
+        let q = supabase.from('media_tracker').update(update as never).eq('id', item.id);
+        // Match every changed column (and the season for episode moves) on the base.
+        const guard = new Set<Col>(cols);
+        if (cols.includes('current_episode')) guard.add('current_season');
+        for (const c of guard) q = base[c] == null ? q.is(c, null) : q.eq(c, base[c] as number);
         const { data, error } = await q.select('id');
         if (error) throw error;
         if (data && data.length > 0) {
-          confirmedRef.current.set(key, target);
-          void appendLog(item, field, base, target, opts.kind ?? 'log');
-          return { field, from: base, to: target };
+          confirmedRef.current.set(item.id, after);
+          void appendLog(item, base, after, opts.kind ?? 'log');
+          // Copies we didn't patch (not loaded yet) must re-read next time.
+          void queryClient.invalidateQueries({ queryKey: ['mediaRails'], refetchType: 'none' });
+          void queryClient.invalidateQueries({ queryKey: ['mediaItems'], refetchType: 'none' });
+          void queryClient.invalidateQueries({ queryKey: ['mediaHistory'] });
+          return result();
         }
         // Lost the race: read what the server holds now.
         const { data: row, error: readErr } = await supabase
@@ -156,25 +175,26 @@ export function useProgressMutation({ setEditingItem, setUpdatingIds }: Options)
           .maybeSingle();
         if (readErr) throw readErr;
         if (!row) throw new Error('This title no longer exists.');
-        const server = row[field] ?? null;
-        confirmedRef.current.set(key, server);
-        if ('set' in change) {
-          // An explicit target never overwrites a value it didn't see.
-          if (server === Math.max(Math.round(change.set), floor)) return { field, from: server, to: server };
+        const server = posOf(row as Pick<MediaItem, Col>);
+        confirmedRef.current.set(item.id, server);
+        if (opts.explicit) {
+          // An explicit target never overwrites a position it didn't see.
+          const target = plan(server);
+          const already = (Object.keys(target.patch) as Col[]).every((c) => target.patch[c] === server[c]);
+          if (already) return { field: target.field, from: server[target.field], to: server[target.field] ?? 0, before: server, after: server, clamped: false, rolledOver: false };
           throw new ProgressConflictError(server);
         }
-        base = server; // delta: re-apply on top of the server's value
+        base = server; // relative: re-plan on top of the server's position
       }
       throw new Error('Progress kept changing on another device. Try again.');
     };
 
-    const run = (chainRef.current.get(item.id) ?? Promise.resolve())
+    const out = (chainRef.current.get(item.id) ?? Promise.resolve())
       .catch(() => undefined)
       .then(write)
       .then(
         (saved) => {
-          // Nothing written: drop the optimistic value.
-          if (saved === null && !confirmedRef.current.has(key)) {
+          if (saved === null && !confirmedRef.current.has(item.id)) {
             queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
             queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
           }
@@ -182,12 +202,13 @@ export function useProgressMutation({ setEditingItem, setUpdatingIds }: Options)
         },
         (e: unknown) => {
           if (e instanceof ProgressConflictError) {
+            const f = optimistic.field;
             toast({
               title: 'Changed on another device',
-              description: `It's now at ${e.serverValue ?? 'nothing'}. Log again if you still want your number.`,
+              description: `It's now at ${e.server[f] ?? 'nothing'}${f === 'current_episode' && e.server.current_season ? ` (season ${e.server.current_season})` : ''}. Log again if you still want your number.`,
             });
           } else {
-            confirmedRef.current.delete(key);
+            confirmedRef.current.delete(item.id);
             queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
             queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
             if (!opts.quiet) toast({ title: 'Update failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
@@ -196,28 +217,46 @@ export function useProgressMutation({ setEditingItem, setUpdatingIds }: Options)
         },
       )
       .finally(() => {
-        const left = (pendingRef.current.get(key) ?? 1) - 1;
+        const left = (pendingRef.current.get(item.id) ?? 1) - 1;
         if (left > 0) {
-          pendingRef.current.set(key, left);
+          pendingRef.current.set(item.id, left);
         } else {
-          pendingRef.current.delete(key);
-          // Settle every copy on the value the server actually holds.
-          if (confirmedRef.current.has(key)) {
-            patchCachedItem(item.id, { [field]: confirmedRef.current.get(key) } as Partial<MediaItem>);
-          }
+          pendingRef.current.delete(item.id);
+          // Settle every copy on the position the server actually holds.
+          const confirmed = confirmedRef.current.get(item.id);
+          if (confirmed) patchCachedItem(item.id, confirmed as Partial<MediaItem>);
           setUpdatingIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
         }
       });
-    chainRef.current.set(item.id, run);
-    return run;
+    chainRef.current.set(item.id, out);
+    return out;
   }, [patchCachedItem, queryClient, setUpdatingIds, toast]);
 
-  /** Revert a saved change: a compare-and-swap back to `from`, logged as its own row. */
-  const undo = useCallback((item: MediaItem, result: ProgressResult) => {
-    // Base the swap on the value we just wrote, so an edit made elsewhere since wins.
-    const at = { ...item, [result.field]: result.to } as MediaItem;
-    return apply(at, result.field, { set: result.from ?? floorFor(result.field) }, { kind: 'undo' });
-  }, [apply]);
+  /** ±N or set-to-N on one counter, planned by nextProgress() within the source's bounds. */
+  const apply = useCallback((
+    item: MediaItem,
+    field: ProgressField,
+    change: ProgressChange,
+    opts: { bounds?: ProgressBounds; kind?: 'log' | 'undo'; quiet?: boolean } = {},
+  ) => run(item, (base) => {
+    const n = nextProgress(base, field, change, opts.bounds ?? {});
+    return { patch: n.patch, field, clamped: n.clamped, rolledOver: n.rolledOver };
+  }, { explicit: 'set' in change, kind: opts.kind, quiet: opts.quiet }), [run]);
 
-  return { apply, undo, patchCachedItem };
+  /** Move to an explicit position (e.g. "S2 · E1", or a tapped episode). Refuses unseen changes. */
+  const applyPatch = useCallback((
+    item: MediaItem,
+    patch: Partial<ProgressPosition>,
+    field: ProgressField = patch.current_episode !== undefined ? 'current_episode' : patch.current_chapter !== undefined ? 'current_chapter' : 'current_season',
+  ) => run(item, () => ({ patch, field, clamped: false, rolledOver: false }), { explicit: true }), [run]);
+
+  /** Revert a saved change: a compare-and-swap back to `before`, logged as undo rows. */
+  const undo = useCallback((item: MediaItem, r: ProgressResult) => {
+    const at = { ...item, ...r.after } as MediaItem; // base the swap on what we wrote
+    const back: Partial<ProgressPosition> = {};
+    for (const c of COLS) if (r.before[c] !== r.after[c]) back[c] = r.before[c];
+    return run(at, () => ({ patch: back, field: r.field, clamped: false, rolledOver: false }), { explicit: true, kind: 'undo' });
+  }, [run]);
+
+  return { apply, applyPatch, undo, patchCachedItem };
 }
