@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Copy, Edit, Trash2, Check, Star, Pin, Code, MessageSquare, Search, ChevronDown, ChevronRight, ChevronLeft, X, Folder, FolderPlus, Eye, EyeOff, MoreVertical, FolderInput, Pencil, Terminal, Library as LibraryIcon } from "lucide-react";
@@ -37,6 +37,7 @@ import {
 import { PageShell } from "@/components/PageShell";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useToast } from "@/components/ui/use-toast";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,7 @@ import {
   updateFolder,
   deleteFolder,
 } from "@/lib/codeSnippets";
+import { quoted } from '@/components/confirm-copy';
 
 interface Prompt {
   id: number;
@@ -177,31 +179,20 @@ const Library = () => {
 // category tabs stay stable (filtering used to re-query by category and then
 // derive the tab list from the filtered result — which made the other tabs vanish).
 async function loadPrompts(): Promise<Prompt[]> {
+  // Tags embedded in the same request — previously a second, sequential
+  // `prompt_tags … .in('prompt_id', <every id>)` round trip (audit P-01).
   const { data, error } = await supabase
     .from('prompts')
-    .select('*')
+    .select('*, prompt_tags(tags(*))')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  let loaded = (data || []) as Prompt[];
-
-  const promptIds = loaded.map(p => p.id);
-  if (promptIds.length > 0) {
-    const { data: promptTagsData } = await supabase
-      .from('prompt_tags')
-      .select('prompt_id, tags(*)')
-      .in('prompt_id', promptIds);
-
-    const tagsByPrompt: Record<number, Tag[]> = {};
-    (promptTagsData as { prompt_id: number; tags: Tag | null }[] | null)?.forEach((item) => {
-      if (!item.tags) return;
-      if (!tagsByPrompt[item.prompt_id]) tagsByPrompt[item.prompt_id] = [];
-      tagsByPrompt[item.prompt_id].push(item.tags);
-    });
-
-    loaded = loaded.map(prompt => ({ ...prompt, tags: tagsByPrompt[prompt.id] || [] }));
-  }
-  return loaded;
+  return (data || []).map(({ prompt_tags, ...prompt }) => ({
+    ...prompt,
+    tags: ((prompt_tags ?? []) as unknown as { tags: Tag | null }[])
+      .map((pt) => pt.tags)
+      .filter((t): t is Tag => !!t),
+  })) as Prompt[];
 }
 
 type PromptSort = 'newest' | 'oldest' | 'title';
@@ -794,7 +785,7 @@ const PromptsTab = ({ focusId }: { focusId: number | null }) => {
         onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
         onConfirm={handleDeletePrompt}
         title="Delete Prompt"
-        description="Are you sure you want to delete this prompt? This action cannot be undone."
+        description={`Delete the prompt ${quoted(prompts.find((p) => p.id === deleteConfirm.id)?.title, 'this prompt')}? This action cannot be undone.`}
       />
 
       <MoveToCommandsDialog
@@ -892,13 +883,26 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
 
   const [formTags, setFormTags] = useState<Tag[]>([]);
 
-  // Auto-select: the deep-link target if present, else the first snippet.
+  // Auto-select: the deep-link target (once per link), else — on md+ only, where
+  // the list sits beside the detail pane — the first snippet. On a phone the list
+  // IS the landing view: this effect re-runs whenever `selectedSnippet` goes null,
+  // so it used to re-select snippets[0] the instant "Back to files" cleared it, and
+  // the file list could never be reached (audit F-B01).
+  const isDesktopPane = useMediaQuery('(min-width: 768px)');
+  const focusHandledRef = useRef<number | null>(null);
   useEffect(() => {
     if (loading || selectedSnippet || isCreating || isEditing) return;
     if (snippets.length === 0) return;
-    const target = focusId ? snippets.find(s => s.id === focusId) : null;
-    setSelectedSnippet(target || snippets[0]);
-  }, [loading, snippets, focusId, selectedSnippet, isCreating, isEditing]);
+    const target = focusId && focusHandledRef.current !== focusId
+      ? snippets.find(s => s.id === focusId)
+      : null;
+    if (target) {
+      focusHandledRef.current = focusId;
+      setSelectedSnippet(target);
+    } else if (isDesktopPane) {
+      setSelectedSnippet(snippets[0]);
+    }
+  }, [loading, snippets, focusId, selectedSnippet, isCreating, isEditing, isDesktopPane]);
 
   // Reset the secret-reveal toggle whenever the viewed snippet changes.
   useEffect(() => {
@@ -1663,7 +1667,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
         onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
         onConfirm={handleDelete}
         title="Delete Snippet"
-        description="Are you sure you want to delete this code snippet? This action cannot be undone."
+        description={`Delete the snippet ${quoted(snippets.find((s) => s.id === deleteConfirm.id)?.title, 'this code snippet')}? This action cannot be undone.`}
       />
 
       <ConfirmDialog
@@ -1671,7 +1675,7 @@ const SnippetsTab = ({ focusId }: { focusId: number | null }) => {
         onOpenChange={(open) => setFolderDeleteConfirm({ open, id: null })}
         onConfirm={handleDeleteFolder}
         title="Delete Folder"
-        description="The folder will be deleted. Files inside it are kept and moved to Unfiled."
+        description={`Delete the folder ${quoted(folders.find((f) => f.id === folderDeleteConfirm.id)?.name, 'this folder')}? Its files and commands are kept and moved to Unfiled.`}
         confirmText="Delete folder"
       />
 

@@ -57,8 +57,19 @@ export function CountdownsWidget({
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const diff = target.getTime() - today.getTime();
-    return Math.max(0, Math.round(diff / (1000 * 60 * 60 * 24)));
+    // Signed: negative = already passed. Clamping to 0 made every past event read
+    // "Today!" forever (audit F-D02).
+    return Math.round(diff / (1000 * 60 * 60 * 24));
   };
+
+  // Upcoming first (soonest first), then passed ones (most recent first) so they
+  // stay visible for cleanup instead of crowding out the real upcoming events.
+  const ordered = countdowns
+    .map((c) => ({ ...c, days: calculateDays(c.event_date) }))
+    .sort((a, b) => {
+      if ((a.days < 0) !== (b.days < 0)) return a.days < 0 ? 1 : -1;
+      return a.days < 0 ? b.days - a.days : a.days - b.days;
+    });
 
   const emptyState = (
     <div className="text-center py-8">
@@ -119,8 +130,8 @@ export function CountdownsWidget({
 
       {countdowns.length === 0 ? emptyState : (
       <div className="space-y-4">
-        {countdowns.slice(0, 5).map((countdown) => {
-          const days = calculateDays(countdown.event_date);
+        {ordered.slice(0, 5).map((countdown) => {
+          const days = countdown.days;
           return (
             <div
               key={countdown.id}
@@ -131,7 +142,9 @@ export function CountdownsWidget({
                   {countdown.event_name}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {days === 0
+                  {days < 0
+                    ? `Passed ${days === -1 ? 'yesterday' : `${-days} days ago`}`
+                    : days === 0
                     ? 'Today!'
                     : days === 1
                     ? 'Tomorrow'

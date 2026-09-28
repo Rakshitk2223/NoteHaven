@@ -33,6 +33,7 @@ import { TagBadge } from '@/components/TagBadge';
 import { LedgerEntryForm, type LedgerEntryFormData } from '@/components/ledger/LedgerEntryForm';
 import { LedgerCharts } from '@/components/ledger/LedgerCharts';
 import { AccountsManager } from '@/components/ledger/AccountsManager';
+import { quoted } from '@/components/confirm-copy';
 
 const KIND_ICON: Record<AccountKind, typeof Landmark> = { bank: Landmark, cash: Banknote, card: CreditCard };
 
@@ -303,15 +304,32 @@ const MoneyLedger = () => {
     </>
   );
 
+  // Accounts and Export used to exist only in the desktop header (audit F-X08).
   const mobileActions = (
-    <Button
-      variant="gradient"
-      size="icon-sm"
-      onClick={() => { setNewEntry(emptyForm()); setIsAddOpen(true); }}
-      aria-label="Add entry"
-    >
-      <Plus className="h-4 w-4" />
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button variant="outline" size="icon-sm" onClick={() => setAccountsOpen(true)} aria-label="Accounts">
+        <Settings2 className="h-4 w-4" />
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="icon-sm" aria-label="Export">
+            <Download className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={handleExportCSV}>Export as CSV</DropdownMenuItem>
+          <DropdownMenuItem onClick={handleExportJSON}>Export as JSON</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button
+        variant="gradient"
+        size="icon-sm"
+        onClick={() => { setNewEntry(emptyForm()); setIsAddOpen(true); }}
+        aria-label="Add entry"
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </div>
   );
 
   return (
@@ -532,7 +550,11 @@ const MoneyLedger = () => {
         onOpenChange={(open) => setDeleteConfirm({ open, id: open ? deleteConfirm.id : null })}
         onConfirm={confirmDelete}
         title="Delete entry"
-        description="This permanently removes the transaction and adjusts your balance. This can't be undone."
+        description={(() => {
+          const e = entries.find((x) => x.id === deleteConfirm.id);
+          const what = e ? `${quoted(e.description || e.category?.name, 'this transaction')} (${formatCurrency(Number(e.amount))} on ${formatDateDDMMYYYY(e.transaction_date)})` : 'this transaction';
+          return `This permanently removes ${what} and adjusts your balance. This can't be undone.`;
+        })()}
       />
     </PageShell>
   );

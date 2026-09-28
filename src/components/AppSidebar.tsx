@@ -64,9 +64,10 @@ interface SidebarItemProps {
   isActive: boolean;
   isCollapsed: boolean;
   isExternal?: boolean;
+  onNavigate?: () => void;
 }
 
-const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal }: SidebarItemProps) => {
+const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal, onNavigate }: SidebarItemProps) => {
   const baseClasses = cn(
     "flex items-center gap-3 rounded-lg font-body font-medium transition-all duration-fast relative group",
     isActive
@@ -124,6 +125,7 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
       className={baseClasses}
       onMouseEnter={() => prefetchRoute(href)}
       onFocus={() => prefetchRoute(href)}
+      onClick={onNavigate}
     >
       {content}
     </NavLink>
@@ -133,7 +135,18 @@ const SidebarItem = ({ href, icon: Icon, name, isActive, isCollapsed, isExternal
 const AppSidebar = () => {
   const location = useLocation();
   const { signOut } = useAuth();
-  const { isCollapsed, toggle } = useSidebar();
+  const { isCollapsed, toggle, setCollapsed } = useSidebar();
+
+  // Below lg the rail is a slide-over menu. Landing on a page must close it — every
+  // mobile navigation used to land behind the still-open menu, and the open state
+  // was persisted, so the app could even reopen with the page covered (audit F-X09).
+  const isSlideOver = () => window.matchMedia?.('(max-width: 1023px)').matches ?? false;
+  const closeIfSlideOver = () => { if (isSlideOver()) setCollapsed(true); };
+  useEffect(() => {
+    closeIfSlideOver();
+    // setCollapsed is a fresh function each render; this is keyed on the route only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
   const [mainNavigation, setMainNavigation] = useState<NavItem[]>(() => {
     // Load synchronously during initialization to prevent flash
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -318,6 +331,7 @@ const AppSidebar = () => {
               name={item.name}
               isActive={location.pathname === item.href}
               isCollapsed={isCollapsed}
+              onNavigate={closeIfSlideOver}
             />
           ))}
         </nav>
@@ -337,6 +351,7 @@ const AppSidebar = () => {
               name={item.name}
               isActive={location.pathname === item.href}
               isCollapsed={isCollapsed}
+              onNavigate={closeIfSlideOver}
             />
           ))}
 

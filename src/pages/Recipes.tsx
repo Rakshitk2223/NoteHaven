@@ -34,6 +34,7 @@ import { PantryPanel } from '@/components/recipes/PantryPanel';
 import { DictateParse } from '@/components/recipes/DictateParse';
 import { filterPill } from '@/components/ui/filter-pill';
 import type { ParsedRecipe } from '@/lib/recipe-parse';
+import { quoted } from '@/components/confirm-copy';
 
 type FolderFilter = 'all' | 'favorites' | 'uncategorized' | number;
 
@@ -343,6 +344,16 @@ const Recipes = () => {
 
   const pill = filterPill;
 
+  const openImport = () => { setImportOpen(true); setImportQuery(''); setImportResults([]); setBrowsed(false); };
+
+  // Shown in the desktop header and, via mobileToolbar, on phones (audit F-X08).
+  const searchBox = (
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input placeholder="Search recipes…" aria-label="Search recipes" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+    </div>
+  );
+
   return (
     <PageShell
       title="Recipes"
@@ -350,10 +361,7 @@ const Recipes = () => {
       subtitle={recipes.length > 0 ? `${recipes.length} ${recipes.length === 1 ? 'recipe' : 'recipes'}` : undefined}
       actions={
         <>
-          <div className="relative w-52">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search recipes…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
-          </div>
+          <div className="w-52">{searchBox}</div>
           <Button
             variant={pantryOpen ? 'default' : 'outline'}
             onClick={() => setPantryOpen((o) => !o)}
@@ -361,7 +369,7 @@ const Recipes = () => {
           >
             <Sparkles className="mr-2 h-4 w-4" /> What can I make?
           </Button>
-          <Button variant="outline" onClick={() => { setImportOpen(true); setImportQuery(''); setImportResults([]); setBrowsed(false); }}>
+          <Button variant="outline" onClick={openImport}>
             <Download className="mr-2 h-4 w-4" /> Import
           </Button>
           <Button variant="gradient" onClick={openAdd}><Plus className="mr-2 h-4 w-4" /> Add Recipe</Button>
@@ -378,9 +386,12 @@ const Recipes = () => {
           >
             <Sparkles className="h-4 w-4" />
           </Button>
+          {/* Import used to exist only in the desktop header (audit F-X08). */}
+          <Button variant="outline" size="icon-sm" onClick={openImport} aria-label="Import recipes"><Download className="h-4 w-4" /></Button>
           <Button variant="gradient" size="icon-sm" onClick={openAdd} aria-label="Add recipe"><Plus className="h-4 w-4" /></Button>
         </div>
       }
+      mobileToolbar={searchBox}
     >
       <div className="space-y-5">
         {/* Cook with what I have */}
@@ -760,7 +771,7 @@ const Recipes = () => {
         open={deleteId !== null}
         onOpenChange={(o) => { if (!o) setDeleteId(null); }}
         title="Delete this recipe?"
-        description="This permanently removes the recipe."
+        description={`This permanently removes ${quoted(recipes.find((r) => r.id === deleteId)?.title, 'the recipe')}.`}
         confirmText="Delete"
         onConfirm={confirmDelete}
       />

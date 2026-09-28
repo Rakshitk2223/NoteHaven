@@ -48,7 +48,7 @@ import AppSidebar from "@/components/AppSidebar";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useInView } from "react-intersection-observer";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { CompactTagSelector } from "@/components/CompactTagSelector";
@@ -58,8 +58,7 @@ import { MediaCard } from "@/components/media/MediaCard";
 import { typeBadgeSoft, AIRING_STYLE, AIRING_LABEL, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/media-style";
 import { CustomGroupBuilder } from "@/components/media/CustomGroupBuilder";
 import { RefreshLibraryDialog } from "@/components/media/RefreshLibraryDialog";
-import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
-import { mediaSearchGet } from "@/lib/edge-function";
+import { fetchImagesFromSupabaseBatch, searchCover } from "@/lib/simple-image-fetcher";
 import { devLog } from "@/lib/logger";
 import { dateToYMD } from "@/lib/date-utils";
 import { refreshCoverImage } from "@/lib/media-refresh";
@@ -73,6 +72,7 @@ import {
   buildContinueQueue, buildAiringSoon, buildGenreCounts, itemHasGenre,
   timeToFinish, episodeDataFreshness, type QueueEntry,
 } from "@/lib/media-insights";
+import { quoted, quotedList } from '@/components/confirm-copy';
 
 interface MediaItem {
   id: number;
@@ -94,19 +94,25 @@ interface MediaItem {
   last_known_total_seasons?: number | null;
 }
 
+/** Shape of every ['mediaItems', …] infinite-query cache entry. */
+interface MediaPages {
+  pages: Array<{ items: MediaItem[]; count: number; page: number }>;
+  pageParams?: unknown[];
+}
+
 // Valid types and statuses for runtime validation
 const VALID_TYPES = ['Movie', 'Series', 'Anime', 'Manga', 'Manhwa', 'Manhua', 'KDrama', 'JDrama'] as const;
 const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 'Completed'] as const;
 
 const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
 
-// Must go through mediaSearchGet: the edge function verifies the JWT, so the
-// bare fetch this used to do now 401s and every new item was added coverless.
+// searchCover goes through mediaSearchGet, which attaches the JWT the edge
+// function verifies (a bare fetch 401'd and every new item was added coverless).
+// Same title-gated, medium- and adult-filtered search as every other cover path
+// (lib/simple-image-fetcher searchCover) — the add path used to take results[0]
+// unchecked, which is how reading types picked up live-action posters.
 async function fetchCoverImage(title: string, type: string): Promise<string | null> {
-  const data = await mediaSearchGet({ q: title, type: type.toLowerCase(), limit: 1 }) as
-    | { success?: boolean; results?: Array<{ cover_image?: string }> }
-    | null;
-  return data?.results?.[0]?.cover_image ?? null;
+  return (await searchCover(title, type))?.cover ?? null;
 }
 
 // Normalize media item to ensure valid types and statuses
@@ -643,6 +649,7 @@ const MediaTracker = () => {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isPlaceholderData,
     refetch,
   } = useInfiniteQuery<{ items: MediaItem[]; count: number; page: number }>({
     queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
@@ -703,6 +710,9 @@ const MediaTracker = () => {
       return undefined;
     },
     staleTime: 5 * 60 * 1000,
+    // Keep showing the current grid while a new search/sort/status loads, instead
+    // of blanking everything to skeletons on each change (audit F-M13).
+    placeholderData: keepPreviousData,
   });
 
   // Expose combined items
@@ -956,10 +966,12 @@ const MediaTracker = () => {
   // Intersection observer to load more
   const { ref: loadMoreRef, inView } = useInView({ rootMargin: '200px' });
   useEffect(() => {
-    if (inView && hasNextPage && !isFetchingNextPage) {
+    // Not while the previous filter's grid is standing in (placeholderData): its
+    // page params belong to the old query key.
+    if (inView && hasNextPage && !isFetchingNextPage && !isPlaceholderData) {
       fetchNextPage();
     }
-  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+  }, [inView, hasNextPage, isFetchingNextPage, isPlaceholderData, fetchNextPage]);
 
   // Keep legacy loading/error wiring for skeleton and banners
   useEffect(() => {
@@ -1269,29 +1281,6 @@ const MediaTracker = () => {
     return { all, inProgress, planned, completed };
   }, [groupCountsData, activeCategory, customGroups]);
 
-  // Scope (count + label) for the Refresh Library sweep, matching getSweepItems'
-  // DB filtering. Tag filters can't be counted server-side here, so fall back to
-  // the loaded count for those.
-  const sweepScope = useMemo(() => {
-    if (selectedGenres.length > 0) {
-      const n = finalItems.length;
-      return { count: n, label: `${n} filtered item${n === 1 ? '' : 's'}` };
-    }
-    const count =
-      filterStatus === 'Active' ? currentStats.inProgress :
-      filterStatus === 'Planned' ? currentStats.planned :
-      filterStatus === 'Completed' ? currentStats.completed :
-      currentStats.all;
-    const catLabel = activeCategory === 'all'
-      ? 'all'
-      : isTypeCategory(activeCategory)
-      ? typeOf(activeCategory)
-      : (customGroups.find((g) => g.id === activeCategory)?.name ?? 'all');
-    const scope = activeCategory === 'all' && filterStatus === 'All'
-      ? `all ${count}`
-      : `${count} ${catLabel}`;
-    return { count, label: `${scope} item${count === 1 ? '' : 's'}` };
-  }, [selectedGenres, finalItems, filterStatus, currentStats, activeCategory, customGroups]);
 
   const groupedByStatus = useMemo(() => {
     const groups: Record<string, MediaItem[]> = {};
@@ -1308,6 +1297,123 @@ const MediaTracker = () => {
     });
     return { keys, groups };
   }, [finalItems]);
+
+  // Patch one title in EVERY cached copy — each filter/search/sort variant of the
+  // grid, the rails and the open drawer. Patching only the on-screen key left the
+  // other copies stale for the 5-minute staleTime, and the next +1 from one of them
+  // wrote a stale base back over newer progress (audit F-M01).
+  const patchCachedItem = useCallback((id: number, patch: Partial<MediaItem>) => {
+    queryClient.setQueriesData<MediaPages>({ queryKey: ['mediaItems'] }, (old) => old ? {
+      ...old,
+      pages: old.pages.map((pg) => ({ ...pg, items: pg.items.map((i) => (i.id === id ? ({ ...i, ...patch } as MediaItem) : i)) })),
+    } : old);
+    queryClient.setQueryData<MediaItem[]>(['mediaRails'], (old) =>
+      old?.map((i) => (i.id === id ? ({ ...i, ...patch } as MediaItem) : i)),
+    );
+    setEditingItem((prev) => (prev && prev.id === id ? ({ ...prev, ...patch } as MediaItem) : prev));
+  }, [queryClient]);
+
+  // Per-title write chain + the last value the server confirmed per `${id}:${field}`.
+  const progressChainRef = useRef(new Map<number, Promise<unknown>>());
+  const confirmedProgressRef = useRef(new Map<string, number | null>());
+  const pendingProgressRef = useRef(new Map<string, number>());
+
+  /**
+   * Add `amount` to a progress counter against the SERVER's value, not the cached
+   * one (audit F-M01). Writes compare-and-swap — UPDATE … WHERE field = <base> —
+   * so if another device (or a stale cached copy) moved the value, nothing
+   * matches; we re-read the server value and re-apply the delta on top instead of
+   * overwriting it. Taps on the same title run one at a time, each based on the
+   * previous tap's confirmed value. Never deletes or touches other columns
+   * beyond the counter and last_activity_at. Resolves to the saved value, or null
+   * when nothing was written.
+   */
+  const applyProgressDelta = useCallback((
+    item: MediaItem,
+    field: 'current_season' | 'current_episode' | 'current_chapter',
+    amount: number,
+  ): Promise<number | null> => {
+    const key = `${item.id}:${field}`;
+    const shown = item[field];
+    if (shown == null && amount < 0) return Promise.resolve(null);
+
+    // Instant feedback everywhere; reconciled with the server's answer below.
+    patchCachedItem(item.id, { [field]: Math.max((shown || 0) + amount, 1) } as Partial<MediaItem>);
+    pendingProgressRef.current.set(key, (pendingProgressRef.current.get(key) ?? 0) + 1);
+    setUpdatingIds((prev) => new Set(prev).add(item.id));
+
+    const write = async (): Promise<number | null> => {
+      let base: number | null = confirmedProgressRef.current.has(key)
+        ? confirmedProgressRef.current.get(key) ?? null
+        : shown ?? null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (base == null && amount < 0) return null;
+        const target = Math.max((base ?? 0) + amount, 1);
+        // Explicit payloads — a computed key widens to Record<string, …>, which the
+        // generated Update type rejects.
+        const now = new Date().toISOString();
+        const patch = field === 'current_season'
+          ? { current_season: target, last_activity_at: now }
+          : field === 'current_episode'
+            ? { current_episode: target, last_activity_at: now }
+            : { current_chapter: target, last_activity_at: now };
+        let q = supabase.from('media_tracker').update(patch).eq('id', item.id);
+        q = base == null ? q.is(field, null) : q.eq(field, base);
+        const { data, error } = await q.select('id');
+        if (error) throw error;
+        if (data && data.length > 0) {
+          confirmedProgressRef.current.set(key, target);
+          return target;
+        }
+        // Lost the race: read what the server holds now and apply the delta to that.
+        const { data: row, error: readErr } = await supabase
+          .from('media_tracker')
+          .select('current_season, current_episode, current_chapter')
+          .eq('id', item.id)
+          .maybeSingle();
+        if (readErr) throw readErr;
+        if (!row) throw new Error('This title no longer exists.');
+        base = row[field] ?? null;
+      }
+      throw new Error('Progress kept changing on another device. Try again.');
+    };
+
+    const run = (progressChainRef.current.get(item.id) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(write)
+      .then(
+        (saved) => {
+          // Nothing written (server value moved to empty under us): drop the optimistic value.
+          if (saved === null && !confirmedProgressRef.current.has(key)) {
+            queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
+            queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
+          }
+          return saved;
+        },
+        (e: unknown) => {
+          confirmedProgressRef.current.delete(key);
+          queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
+          queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
+          toast({ title: 'Update failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
+          return null;
+        },
+      )
+      .finally(() => {
+        const left = (pendingProgressRef.current.get(key) ?? 1) - 1;
+        if (left > 0) {
+          pendingProgressRef.current.set(key, left);
+        } else {
+          pendingProgressRef.current.delete(key);
+          // Settle every copy on the value the server actually holds.
+          if (confirmedProgressRef.current.has(key)) {
+            patchCachedItem(item.id, { [field]: confirmedProgressRef.current.get(key) } as Partial<MediaItem>);
+          }
+          setUpdatingIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
+        }
+      });
+    progressChainRef.current.set(item.id, run);
+    return run;
+  }, [patchCachedItem, queryClient, toast]);
 
   const handleQuickUpdate = async (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => {
     // A row recorded as "season N, episode 0" means season N was finished, so the
@@ -1332,66 +1438,25 @@ const MediaTracker = () => {
       return;
     }
 
-    const currentVal = item[field];
-    if (currentVal == null && amount < 0) return;
-    const newValue = Math.max((currentVal || 0) + amount, 1);
-    setUpdatingIds(prev => new Set(prev).add(item.id));
-
-    // Optimistic update - update cache immediately
-    interface QueryPage {
-      items: MediaItem[];
-      count: number;
-      page: number;
-    }
-    interface QueryData {
-      pages: QueryPage[];
-    }
-    queryClient.setQueryData<QueryData>(['mediaItems', filterStatus, searchTerm, sortBy, sortOrder], (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          items: page.items.map((i) =>
-            i.id === item.id ? { ...i, [field]: newValue } : i
-          )
-        }))
-      };
-    });
-
-    try {
-      // Explicit payload — a computed key widens to Record<string, …>, which the
-      // generated Update type rejects.
-      const patch = field === 'current_episode'
-        ? { current_episode: newValue, last_activity_at: new Date().toISOString() }
-        : { current_chapter: newValue, last_activity_at: new Date().toISOString() };
-      const { error } = await supabase.from('media_tracker').update(patch).eq('id', item.id);
-      if (error) throw error;
-      toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${newValue}` });
-      // Auto-status: reaching the known final episode offers a one-tap Complete.
-      const knownTotal = item.last_known_total_episodes;
-      if (
-        field === 'current_episode' &&
-        knownTotal && newValue >= knownTotal &&
-        getStatusCategory(item.status) !== 'Completed'
-      ) {
-        toast({
-          title: 'All caught up! 🎉',
-          description: `${item.title} is at episode ${newValue} of ${knownTotal}.`,
-          action: (
-            <ToastAction altText="Mark Completed" onClick={() => patchMedia(item, { status: 'Completed' })}>
-              Mark Completed
-            </ToastAction>
-          ),
-        });
-      }
-    } catch (e: unknown) {
-      // Revert optimistic update on error
-      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
-      const message = e instanceof Error ? e.message : 'Error';
-      toast({ title: 'Update failed', description: message, variant: 'destructive' });
-    } finally {
-      setUpdatingIds(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+    const saved = await applyProgressDelta(item, field, amount);
+    if (saved == null) return;
+    toast({ title: 'Updated', description: `${field === 'current_episode' ? 'Episode' : 'Chapter'} set to ${saved}` });
+    // Auto-status: reaching the known final episode offers a one-tap Complete.
+    const knownTotal = item.last_known_total_episodes;
+    if (
+      field === 'current_episode' &&
+      knownTotal && saved >= knownTotal &&
+      getStatusCategory(item.status) !== 'Completed'
+    ) {
+      toast({
+        title: 'All caught up! 🎉',
+        description: `${item.title} is at episode ${saved} of ${knownTotal}.`,
+        action: (
+          <ToastAction altText="Mark Completed" onClick={() => patchMedia(item, { status: 'Completed' })}>
+            Mark Completed
+          </ToastAction>
+        ),
+      });
     }
   };
 
@@ -1410,8 +1475,9 @@ const MediaTracker = () => {
       (rollback as Record<string, unknown>)[k] = (item as unknown as Record<string, unknown>)[k];
     });
     setEditingItem((prev) => (prev && prev.id === item.id ? ({ ...prev, ...patch } as MediaItem) : prev));
-    queryClient.setQueryData<{ pages: Array<{ items: MediaItem[]; count: number; page: number }> }>(
-      ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
+    // Every filter/search/sort copy, not just the on-screen one (audit F-M01).
+    queryClient.setQueriesData<MediaPages>(
+      { queryKey: ['mediaItems'] },
       (old) => old ? {
         ...old,
         pages: old.pages.map((pg) => ({ ...pg, items: pg.items.map((i) => i.id === item.id ? ({ ...i, ...patch } as MediaItem) : i) })),
@@ -1430,7 +1496,7 @@ const MediaTracker = () => {
         .eq('user_id', item.user_id);
       if (error) throw error;
     } catch (e: unknown) {
-      queryClient.invalidateQueries({ queryKey: ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder] });
+      queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
       queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
       // Roll the open drawer back to the stored values too, not just the caches.
       setEditingItem((prev) => (prev && prev.id === item.id ? ({ ...prev, ...rollback } as MediaItem) : prev));
@@ -1438,7 +1504,7 @@ const MediaTracker = () => {
     } finally {
       setUpdatingIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
     }
-  }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder, toast]);
+  }, [queryClient, toast]);
 
   /**
    * "Watched next" from the Continue rail: advance one episode/chapter without
@@ -1449,7 +1515,8 @@ const MediaTracker = () => {
   const advanceQueueEntry = useCallback((entry: QueueEntry) => {
     const { item, meta } = entry;
     if (READABLE_TYPES.includes(item.type)) {
-      patchMedia(item as MediaItem, { current_chapter: (item.current_chapter ?? 0) + 1 });
+      // Server-based delta, not cached+1 (audit F-M01).
+      applyProgressDelta(item as MediaItem, 'current_chapter', 1);
       return;
     }
     if (!WATCHABLE_TYPES.includes(item.type)) return;
@@ -1478,15 +1545,18 @@ const MediaTracker = () => {
         return;
       }
     }
-    patchMedia(item as MediaItem, { current_season: season || 1, current_episode: nextEp });
-  }, [patchMedia]);
+    // Same season, next episode: a plain +1, so base it on the server (F-M01).
+    if (season >= 1) {
+      applyProgressDelta(item as MediaItem, 'current_episode', 1);
+      return;
+    }
+    patchMedia(item as MediaItem, { current_season: 1, current_episode: nextEp });
+  }, [patchMedia, applyProgressDelta]);
 
-  // +/- a numeric progress field from the detail drawer (floors at 1).
+  // +/- a numeric progress field from the detail drawer (floors at 1). Goes
+  // through the server-based delta writer, not an absolute cached value (F-M01).
   const bumpField = (item: MediaItem, field: 'current_season' | 'current_episode' | 'current_chapter', amount: number) => {
-    const v = Math.max((Number(item[field]) || 0) + amount, 1);
-    const patch: { current_season?: number; current_episode?: number; current_chapter?: number } = {};
-    patch[field] = v;
-    patchMedia(item, patch);
+    void applyProgressDelta(item, field, amount);
   };
 
   const handleExportJson = async () => {
@@ -2014,6 +2084,51 @@ const MediaTracker = () => {
     }
     return toSweep(all);
   }, [selectedGenres, finalItems, imageUrls, activeCategory, customGroups, filterStatus, searchTerm]);
+
+  // Refresh Library scope — resolved ONCE when the dialog opens, and the button
+  // count, the label and the swept list all come from that same array, so they can
+  // never disagree (UX-45: the label used cached per-type counts that ignored the
+  // search, so a one-title search said "Refresh 318 items" and refreshed 1). The
+  // dialog is modal, so the filters can't change while it's open.
+  const [sweepList, setSweepList] = useState<Awaited<ReturnType<typeof getSweepItems>> | null>(null);
+  useEffect(() => {
+    if (!refreshLibraryOpen) { setSweepList(null); return; }
+    let cancelled = false;
+    getSweepItems()
+      .then((items) => { if (!cancelled) setSweepList(items); })
+      .catch(() => { if (!cancelled) setSweepList([]); });
+    return () => { cancelled = true; };
+    // Once per open: getSweepItems' identity changes as covers stream in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshLibraryOpen]);
+
+  const sweepScopeLabel = useMemo(() => {
+    if (sweepList == null) return 'the current view (counting…)';
+    const n = sweepList.length;
+    const noun = `item${n === 1 ? '' : 's'}`;
+    if (selectedGenres.length > 0) return `${n} filtered ${noun}`;
+    const catLabel = activeCategory === 'all'
+      ? ''
+      : isTypeCategory(activeCategory)
+      ? typeOf(activeCategory)
+      : (customGroups.find((g) => g.id === activeCategory)?.name ?? '');
+    const q = searchTerm.trim();
+    const statusLabel = filterStatus === 'Active' ? 'in-progress'
+      : filterStatus === 'Planned' ? 'planned'
+      : filterStatus === 'Completed' ? 'completed' : '';
+    return [
+      activeCategory === 'all' && filterStatus === 'All' && !q ? 'all' : '',
+      String(n),
+      statusLabel,
+      catLabel,
+      noun,
+      q ? `matching “${q}”` : '',
+    ].filter(Boolean).join(' ');
+  }, [sweepList, selectedGenres, activeCategory, customGroups, filterStatus, searchTerm]);
+  const fetchResolvedSweep = useCallback(
+    () => (sweepList ? Promise.resolve(sweepList) : getSweepItems()),
+    [sweepList, getSweepItems],
+  );
 
   // Remove a wrong cover → falls back to the letter-gradient placeholder.
   const handleRemoveCover = useCallback(async (item: MediaItem) => {
@@ -3263,9 +3378,9 @@ const MediaTracker = () => {
           <RefreshLibraryDialog
             open={refreshLibraryOpen}
             onOpenChange={setRefreshLibraryOpen}
-            fetchItems={getSweepItems}
-            count={sweepScope.count}
-            scopeLabel={sweepScope.label}
+            fetchItems={fetchResolvedSweep}
+            count={sweepList?.length ?? 0}
+            scopeLabel={sweepScopeLabel}
             onComplete={() => {
               refetch();
               reloadMetadata();
@@ -3742,7 +3857,7 @@ const MediaTracker = () => {
         onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
         onConfirm={handleDeleteMedia}
         title="Delete Media Item"
-        description="Are you sure you want to delete this media item? This action cannot be undone."
+        description={`Delete ${quoted(mediaItems.find((m) => m.id === deleteConfirm.id)?.title, 'this media item')}? This action cannot be undone.`}
       />
 
       <ConfirmDialog
@@ -3750,7 +3865,7 @@ const MediaTracker = () => {
         onOpenChange={setBulkDeleteOpen}
         onConfirm={bulkDelete}
         title={`Delete ${selectedItems.length} item${selectedItems.length === 1 ? '' : 's'}`}
-        description="Are you sure you want to delete the selected media items? This action cannot be undone."
+        description={`Delete ${quotedList(selectedItems.map((m) => m.title), 'the selected media items')}? This action cannot be undone.`}
       />
     </div>
   );

@@ -112,18 +112,51 @@ const Subscriptions = () => {
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
+  // A subscription whose end_date has passed has ENDED: it must read "Ended", not
+  // "Overdue", and drop out of the costs, Active count and Renews-soon (F-L03 / UX-33).
+  // An end date of today still counts as running today.
+  const todayYMD = dateToYMD(new Date());
+  const isEnded = (sub: Subscription) => !!sub.end_date && sub.end_date < todayYMD;
+
   const summary = useMemo(() => {
-    return calculateSubscriptionSummary(subscriptions);
-  }, [subscriptions]);
+    return calculateSubscriptionSummary(subscriptions.filter((s) => !isEnded(s)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscriptions, todayYMD]);
+
+  // next_renewal_date is only computed when a subscription is saved — nothing rolls
+  // it forward, so one billing cycle later every sub read "Overdue" forever (audit
+  // F-L03). Derive the effective next renewal ON READ; never written back. Ended
+  // (past end_date) and inactive subs keep their stored date.
+  const displaySubscriptions = useMemo(() => {
+    const today = dateToYMD(new Date());
+    const effective = (sub: Subscription): string | null => {
+      const stored = sub.next_renewal_date;
+      if (!stored || stored >= today) return stored;
+      if (sub.status !== 'active' && sub.status !== 'renew') return stored;
+      if (sub.billing_cycle !== 'monthly' && sub.billing_cycle !== 'yearly') return stored;
+      const rolled = calculateNextRenewalDate(stored, sub.billing_cycle);
+      return sub.end_date && rolled > sub.end_date ? stored : rolled;
+    };
+    return subscriptions
+      .map((sub) => ({ ...sub, next_renewal_date: effective(sub) as Subscription['next_renewal_date'], ended: isEnded(sub) }))
+      .sort((a, b) => {
+        if (a.ended !== b.ended) return a.ended ? 1 : -1;
+        if (!a.next_renewal_date) return b.next_renewal_date ? 1 : 0;
+        if (!b.next_renewal_date) return -1;
+        return a.next_renewal_date.localeCompare(b.next_renewal_date);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subscriptions, todayYMD]);
 
   // Count subscriptions (active/renew) renewing within the next 7 days
   const renewsSoonCount = useMemo(() => {
-    return subscriptions.filter((sub) => {
+    return displaySubscriptions.filter((sub) => {
+      if (sub.ended) return false;
       if (sub.status !== 'active' && sub.status !== 'renew') return false;
       const days = getDaysUntilRenewal(sub.next_renewal_date);
       return days !== null && days >= 0 && days <= 7;
     }).length;
-  }, [subscriptions]);
+  }, [displaySubscriptions]);
 
   const handleSubmit = async () => {
     try {
@@ -479,7 +512,7 @@ const Subscriptions = () => {
                 </div>
               ) : (
                 <Stagger className="space-y-3">
-                  {subscriptions.map((sub) => {
+                  {displaySubscriptions.map((sub) => {
                     const daysUntil = getDaysUntilRenewal(sub.next_renewal_date);
                     const statusColor = getStatusBadgeColor(sub.status);
                     const statusVariant =
@@ -525,15 +558,18 @@ const Subscriptions = () => {
                           
                           <div className="text-left flex-shrink-0 sm:text-right">
                             <p className="text-sm font-medium">
-                              {daysUntil === null ? 'No renewal date' :
+                              {sub.ended ? 'Ended' :
+                               daysUntil === null ? 'No renewal date' :
                                daysUntil === 0 ? 'Renews today' :
                                daysUntil === 1 ? 'Renews tomorrow' :
                                daysUntil < 0 ? 'Overdue' :
                                `Renews in ${daysUntil} days`}
                             </p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatDateDDMMYYYY(sub.next_renewal_date)}
-                            </p>
+                            {!sub.ended && (
+                              <p className="text-xs text-muted-foreground">
+                                {formatDateDDMMYYYY(sub.next_renewal_date)}
+                              </p>
+                            )}
                             {sub.end_date && (
                               <p className="text-xs text-muted-foreground">
                                 Ends: {formatDateDDMMYYYY(sub.end_date)}
@@ -541,8 +577,8 @@ const Subscriptions = () => {
                             )}
                           </div>
                           
-                          <Badge variant={statusVariant}>
-                            {getStatusLabel(sub.status)}
+                          <Badge variant={sub.ended ? 'neutral' : statusVariant}>
+                            {sub.ended ? 'Ended' : getStatusLabel(sub.status)}
                           </Badge>
                         </div>
                         

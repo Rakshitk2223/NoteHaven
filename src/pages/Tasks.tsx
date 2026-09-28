@@ -18,6 +18,7 @@ import { CompactTagSelector } from "@/components/CompactTagSelector";
 import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchTaskTags, setTaskTags, createTag, type Tag } from "@/lib/tags";
+import { quoted } from '@/components/confirm-copy';
 
 interface Task {
   id: number;
@@ -169,9 +170,12 @@ const Tasks = () => {
       setLoading(true);
       setError(null);
       
+      // Tags come embedded in the same request. This used to be a second, sequential
+      // round trip (`task_tags … .in('task_id', <every id>)`), which also grew the URL
+      // with every task and silently dropped tags when it failed (audit P-01).
       const { data, error } = await supabase
         .from('tasks')
-        .select('*')
+        .select('*, task_tags(tags(*))')
         .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false });
 
@@ -179,29 +183,12 @@ const Tasks = () => {
         throw error;
       }
 
-      let loaded = data || [];
-
-      // Fetch tags for all tasks
-      const taskIds = loaded.map(t => t.id);
-      if (taskIds.length > 0) {
-        const { data: taskTagsData } = await supabase
-          .from('task_tags')
-          .select('task_id, tags(*)')
-          .in('task_id', taskIds);
-
-        // Group tags by task_id
-        const tagsByTask: Record<number, Tag[]> = {};
-        (taskTagsData as { task_id: number; tags: Tag }[] | null)?.forEach((item) => {
-          if (!tagsByTask[item.task_id]) tagsByTask[item.task_id] = [];
-          tagsByTask[item.task_id].push(item.tags);
-        });
-
-        // Attach tags to tasks
-        loaded = loaded.map(task => ({
-          ...task,
-          tags: tagsByTask[task.id] || []
-        }));
-      }
+      const loaded: Task[] = (data || []).map(({ task_tags, ...task }) => ({
+        ...task,
+        tags: ((task_tags ?? []) as unknown as { tags: Tag | null }[])
+          .map((tt) => tt.tags)
+          .filter((t): t is Tag => !!t),
+      }));
 
       setTasks(loaded);
     } catch (err) {
@@ -710,7 +697,7 @@ const Tasks = () => {
         onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
         onConfirm={handleDeleteTask}
         title="Delete Task"
-        description="Are you sure you want to delete this task? This action cannot be undone."
+        description={`Delete the task ${quoted(tasks.find((t) => t.id === deleteConfirm.id)?.task_text, 'this task')}? This action cannot be undone.`}
       />
     </PageShell>
   );

@@ -5,7 +5,9 @@ import type {
   ToastProps,
 } from "@/components/ui/toast"
 
-const TOAST_LIMIT = 1
+// A few at once, and errors outlive successes: with a limit of 1 any later toast
+// ("Tags saved", "Task added") silently replaced a "Save failed" (audit F-X17).
+const TOAST_LIMIT = 3
 const TOAST_REMOVE_DELAY = 1000000
 
 type ToasterToast = ToastProps & {
@@ -73,11 +75,18 @@ const addToRemoveQueue = (toastId: string) => {
 
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
-    case "ADD_TOAST":
-      return {
-        ...state,
-        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
+    case "ADD_TOAST": {
+      const next = [action.toast, ...state.toasts]
+      // Over the limit, evict (oldest first): already-dismissed toasts, then
+      // non-error toasts; an error only goes when every other slot is an error.
+      const evictIndex = () => {
+        for (let i = next.length - 1; i > 0; i--) if (next[i].open === false) return i
+        for (let i = next.length - 1; i > 0; i--) if (next[i].variant !== "destructive") return i
+        return next.length - 1
       }
+      while (next.length > TOAST_LIMIT) next.splice(evictIndex(), 1)
+      return { ...state, toasts: next }
+    }
 
     case "UPDATE_TOAST":
       return {

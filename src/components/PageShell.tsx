@@ -29,6 +29,11 @@ interface PageShellProps {
   /** Browser-tab title, when the visible heading isn't a good tab name (the
    *  Dashboard's heading is a greeting, which made a useless history entry). */
   documentTitle?: string;
+  /** Controls that live in `actions` on desktop but must stay reachable below
+   *  lg — e.g. a search box. `actions` render only in the lg+ header, so pages
+   *  used to lose their search on a phone (audit F-X08). Shown as a row at the
+   *  top of the content, phones/tablets only. */
+  mobileToolbar?: React.ReactNode;
 }
 
 const maxWidthMap: Record<NonNullable<PageShellProps["maxWidth"]>, string> = {
@@ -49,6 +54,7 @@ export function PageShell({
   icon: Icon,
   actions,
   mobileActions,
+  mobileToolbar,
   children,
   contentClassName,
   fullHeight,
@@ -101,7 +107,10 @@ export function PageShell({
           {fullHeight ? (
             children
           ) : (
-            <PageTransition className={maxWidthMap[maxWidth]}>{children}</PageTransition>
+            <>
+              {mobileToolbar && <div className="lg:hidden mb-4">{mobileToolbar}</div>}
+              <PageTransition className={maxWidthMap[maxWidth]}>{children}</PageTransition>
+            </>
           )}
         </main>
       </div>

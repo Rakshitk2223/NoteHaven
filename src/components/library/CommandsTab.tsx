@@ -33,6 +33,7 @@ import {
   type Command, UNCATEGORIZED,
   fetchCommands, createCommand, updateCommand, deleteCommand, reorderCommands,
 } from '@/lib/commands';
+import { quoted } from '@/components/confirm-copy';
 
 const UNFILED_KEY = 'unfiled';
 
@@ -694,7 +695,7 @@ export const CommandsTab = () => {
         onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
         onConfirm={handleDelete}
         title="Delete Command"
-        description="Are you sure you want to delete this command? This action cannot be undone."
+        description={`Delete the command ${quoted(commands.find((c) => c.id === deleteConfirm.id)?.label, 'this command')}? This action cannot be undone.`}
       />
     </>
   );

@@ -59,22 +59,12 @@ export default defineConfig(({ mode }) => ({
                 statuses: [0, 200]
               }
             }
-          },
-          {
-            urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-api-cache',
-              networkTimeoutSeconds: 10,
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 5 // 5 minutes
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
           }
+          // No Supabase runtime cache (UX-35). It kept every API GET — private rows,
+          // /auth/v1/user, Vault files — in Cache Storage after logout, keyed by URL
+          // only, and its 10 s NetworkFirst timeout turned a slow network into a
+          // stall followed by stale data. The app is online-first; failing fast is
+          // better. App.tsx deletes the old 'supabase-api-cache' on startup.
         ]
       }
     })
@@ -95,6 +85,12 @@ export default defineConfig(({ mode }) => ({
         // circular-chunk warning that aggressive splitting causes.
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
+          // clsx (behind cn()) is also a recharts dependency. Left to Rollup it was
+          // hoisted INTO the forced "charts" chunk, so the entry imported clsx from
+          // there and all of recharts + d3 (~108 kB gz) was modulepreloaded on every
+          // cold load, /login included (audit F-X01). Pin these tiny, app-wide utils
+          // to react-vendor, which the entry loads anyway.
+          if (/[\\/]node_modules[\\/](clsx|tailwind-merge)[\\/]/.test(id)) return "react-vendor";
           if (id.includes("@tiptap") || id.includes("prosemirror")) return "editor";
           // Language grammars are imported on demand by CodeEditor. Leaving them
           // out of the forced "codemirror" chunk lets Rollup emit one small lazy

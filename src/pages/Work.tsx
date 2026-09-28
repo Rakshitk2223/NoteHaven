@@ -33,6 +33,7 @@ import {
 import {
   fetchUserTags, fetchTagsForWorkProjects, setWorkProjectTags, createTag, type Tag,
 } from '@/lib/tags';
+import { quoted } from '@/components/confirm-copy';
 
 const VIEW_STORAGE_KEY = 'work-projects-view';
 
@@ -715,7 +716,7 @@ const Work = () => {
         open={deleteId !== null}
         onOpenChange={(o) => { if (!o) setDeleteId(null); }}
         title="Remove this project?"
-        description="This permanently deletes the project and its tag links."
+        description={`This permanently deletes ${quoted(projects.find((p) => p.id === deleteId)?.name, 'the project')} and its tag links.`}
         confirmText="Delete"
         onConfirm={confirmDelete}
       />

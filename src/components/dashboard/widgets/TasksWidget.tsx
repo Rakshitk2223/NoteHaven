@@ -15,6 +15,9 @@ interface TasksWidgetProps extends WidgetProps {
   onTaskComplete: (taskId: number) => void;
   onViewAll: () => void;
   onTaskClick: (taskId: number) => void;
+  /** Real number of open tasks. `tasks` is only the first 10, so its length
+   *  read "10 pending" with 11 open (UX-47). */
+  pendingCount?: number;
 }
 
 export function TasksWidget({
@@ -23,7 +26,8 @@ export function TasksWidget({
   isLoading,
   onTaskComplete,
   onViewAll,
-  onTaskClick
+  onTaskClick,
+  pendingCount
 }: TasksWidgetProps) {
   const emptyState = (
     <div className="text-center py-8">
@@ -41,7 +45,7 @@ export function TasksWidget({
     >
       <div className="flex items-center justify-between mb-5">
         <span className="text-sm font-medium text-muted-foreground">
-          {tasks.length} pending
+          {pendingCount ?? tasks.length} pending
         </span>
         <Button 
           variant="outline" 

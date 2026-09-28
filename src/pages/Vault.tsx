@@ -63,6 +63,7 @@ import { VaultFileCard } from "@/components/vault/VaultFileCard";
 import { FilePreviewModal } from "@/components/vault/FilePreviewModal";
 import { MoveToFolderDialog } from "@/components/vault/MoveToFolderDialog";
 import { DuplicateResolveDialog } from "@/components/vault/DuplicateResolveDialog";
+import { quotedList } from '@/components/confirm-copy';
 
 const VIEW_KEY = "vault-view";
 
@@ -523,9 +524,15 @@ const Vault = () => {
       icon={FolderLock}
       actions={headerActions}
       mobileActions={
-        <Button variant="gradient" size="icon-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-        </Button>
+        // New folder used to exist only in the desktop header (audit F-X08).
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon-sm" onClick={openCreateFolder} aria-label="New folder">
+            <FolderPlus className="h-4 w-4" />
+          </Button>
+          <Button variant="gradient" size="icon-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading} aria-label="Upload files">
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          </Button>
+        </div>
       }
     >
       <input
@@ -950,7 +957,7 @@ const Vault = () => {
         onOpenChange={setBulkDeleteOpen}
         onConfirm={doBulkDelete}
         title={`Delete ${selectedIds.size} file${selectedIds.size > 1 ? "s" : ""}`}
-        description="The selected files will be permanently deleted. This cannot be undone."
+        description={`${quotedList(files.filter((f) => selectedIds.has(f.id)).map((f) => f.name), 'The selected files')} will be permanently deleted. This cannot be undone.`}
         confirmText="Delete"
       />
 

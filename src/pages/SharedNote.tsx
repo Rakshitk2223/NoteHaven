@@ -1,8 +1,19 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
-import { sanitizePreview } from '@/lib/utils';
+
+// The owner writes with Tiptap (StarterKit + Underline). Sanitising with the
+// list-preview allowlist stripped <s> and <hr>, so a recipient's first keystroke
+// permanently deleted the owner's strikethrough and rules (audit F-N06).
+const sanitizeNoteHtml = (html: string) =>
+  DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'hr', 'ul', 'ol', 'li',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre', 'span'],
+    ALLOWED_ATTR: ['class'],
+    ALLOW_DATA_ATTR: false,
+  });
 
 // Shared notes are reached through two SECURITY DEFINER functions
 // (migration 19), never by querying `notes` / `shared_notes` directly:
@@ -28,6 +39,9 @@ const SharedNote = () => {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLDivElement | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pending values per field, sent together — one shared timer used to let a body
+  // edit cancel a title edit made within 800 ms of it (audit F-N06).
+  const pendingRef = useRef<{ title?: string; content?: string }>({});
 
   const allowEdit = !!note?.allow_edit;
 
@@ -45,11 +59,6 @@ const SharedNote = () => {
         if (!row) throw new Error('This share link is no longer valid.');
 
         setNote(row);
-        // Populate the DOM once; sanitize the stored HTML before injecting it.
-        requestAnimationFrame(() => {
-          if (titleRef.current) titleRef.current.textContent = row.title || '';
-          if (contentRef.current) contentRef.current.innerHTML = sanitizePreview(row.content || '');
-        });
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Unable to load shared note';
         toast({ title: 'Error', description: message, variant: 'destructive' });
@@ -60,19 +69,26 @@ const SharedNote = () => {
     load();
   }, [shareId, toast]);
 
-  // Flush a pending save if the tab closes mid-edit.
-  useEffect(() => {
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, []);
+  // Populate the editable DOM once per loaded note, after React has committed the
+  // note view. The old requestAnimationFrame could fire while the loading view
+  // was still mounted (refs null), leaving an editable-but-blank note whose first
+  // keystroke would overwrite the owner's text.
+  useLayoutEffect(() => {
+    if (!note || loading) return;
+    if (titleRef.current) titleRef.current.textContent = note.title || '';
+    if (contentRef.current) contentRef.current.innerHTML = sanitizeNoteHtml(note.content || '');
+    // Once per loaded note — re-running on every render would reset the caret.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note?.id, loading]);
 
-  const pushUpdate = useCallback(async (field: 'title' | 'content', value: string) => {
+  const pushUpdate = useCallback(async (patch: { title?: string; content?: string }) => {
     if (!allowEdit || !shareId) return;
     try {
       setSaving(true);
       const { data, error } = await supabase.rpc('update_shared_note', {
         p_share_id: shareId,
-        p_title: field === 'title' ? value : null,
-        p_content: field === 'content' ? value : null,
+        p_title: patch.title ?? null,
+        p_content: patch.content ?? null,
       });
       if (error) throw error;
       // The function returns 0 when the share was revoked or set to read-only
@@ -92,10 +108,65 @@ const SharedNote = () => {
     }
   }, [allowEdit, shareId, toast]);
 
+  // Send whatever is pending now. Used by the debounce and by every exit path.
+  const flush = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const patch = pendingRef.current;
+    pendingRef.current = {};
+    if (patch.title !== undefined || patch.content !== undefined) void pushUpdate(patch);
+  }, [pushUpdate]);
+
   const scheduleSave = (field: 'title' | 'content', value: string) => {
+    pendingRef.current = { ...pendingRef.current, [field]: value };
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => pushUpdate(field, value), 800);
+    saveTimer.current = setTimeout(flush, 800);
   };
+
+  // The page is going away (tab closed / hidden). supabase-js awaits the session
+  // before it even calls fetch, and a closing tab never gets that far — UX saw NO
+  // update_shared_note request when the tab closed within ~1 s (F-N06). A keepalive
+  // fetch is dispatched synchronously and outlives the page. Same RPC, same anon
+  // grant. keepalive bodies are capped (~64 KiB), so larger notes take the normal path.
+  const flushOnExit = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const patch = pendingRef.current;
+    if (patch.title === undefined && patch.content === undefined) return;
+    if (!allowEdit || !shareId) return;
+    const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+    const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+    const body = JSON.stringify({ p_share_id: shareId, p_title: patch.title ?? null, p_content: patch.content ?? null });
+    if (!url || !key || new Blob([body]).size > 60_000) { flush(); return; }
+    pendingRef.current = {};
+    try {
+      void fetch(`${url}/rest/v1/rpc/update_shared_note`, {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json', apikey: key, Authorization: `Bearer ${key}` },
+        body,
+      }).catch(() => undefined);
+    } catch {
+      // Nothing more can be done while the page unloads.
+    }
+  }, [allowEdit, shareId, flush]);
+
+  // Flush (not cancel) a pending save when leaving: navigating away in-app (normal
+  // path), hiding the tab or closing it (keepalive path). The old cleanup cleared
+  // the timer, dropping the last edit.
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  const flushOnExitRef = useRef(flushOnExit);
+  flushOnExitRef.current = flushOnExit;
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushOnExitRef.current(); };
+    const onUnload = () => flushOnExitRef.current();
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', onUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onUnload);
+      flushRef.current();
+    };
+  }, []);
 
   const handleTitleInput = () => {
     if (!note) return;
@@ -105,7 +176,7 @@ const SharedNote = () => {
 
   const handleContentInput = () => {
     if (!note) return;
-    const html = sanitizePreview(contentRef.current?.innerHTML || '');
+    const html = sanitizeNoteHtml(contentRef.current?.innerHTML || '');
     scheduleSave('content', html);
   };
 

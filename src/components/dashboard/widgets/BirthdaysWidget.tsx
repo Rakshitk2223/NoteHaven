@@ -21,14 +21,18 @@ export function BirthdaysWidget({
   isLoading,
   onViewAll
 }: BirthdaysWidgetProps) {
+  // Whole days from TODAY (local midnight) to the next birthday. Comparing against
+  // `now` (the current time) made today's midnight "already past", so on the
+  // birthday itself it rolled to next year and read "in 365 days" (audit F-D01).
   const calculateDays = (dateOfBirth: string) => {
     const base = parseYMD(dateOfBirth);
     const now = new Date();
-    const target = new Date(now.getFullYear(), base.getMonth(), base.getDate());
-    if (target.getTime() < now.getTime()) {
-      target.setFullYear(now.getFullYear() + 1);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let target = new Date(today.getFullYear(), base.getMonth(), base.getDate());
+    if (target.getTime() < today.getTime()) {
+      target = new Date(today.getFullYear() + 1, base.getMonth(), base.getDate());
     }
-    return Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    return Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   };
 
   const getMessage = (name: string, days: number) => {

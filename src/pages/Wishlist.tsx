@@ -22,6 +22,7 @@ import {
   isMissingTableError,
   type WishlistItem, type WishlistDraft, type WishlistStatus,
 } from '@/lib/wishlist';
+import { quoted } from '@/components/confirm-copy';
 
 // Currency is implicitly INR across the app's money features.
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
@@ -567,7 +568,7 @@ const Wishlist = () => {
         open={deleteId !== null}
         onOpenChange={(o) => { if (!o) setDeleteId(null); }}
         title="Remove this item?"
-        description="This permanently deletes the wishlist item and its price history."
+        description={`This permanently deletes ${quoted(items.find((i) => i.id === deleteId)?.name, 'the wishlist item')} and its price history.`}
         confirmText="Delete"
         onConfirm={confirmDelete}
       />

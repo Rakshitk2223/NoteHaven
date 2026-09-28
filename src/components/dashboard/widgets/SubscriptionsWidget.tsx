@@ -79,7 +79,9 @@ export function SubscriptionsWidget({
                 {renewal.name}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {renewal.days_until === 0
+                {renewal.days_until < 0
+                  ? 'Overdue'
+                  : renewal.days_until === 0
                   ? 'Today'
                   : renewal.days_until === 1
                   ? 'Tomorrow'

@@ -8,7 +8,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchUserTags, type Tag } from '@/lib/tags';
-import { getUpcomingRenewals, type UpcomingRenewal } from '@/lib/subscriptions';
+import { getUpcomingRenewals, calculateNextRenewalDate, type UpcomingRenewal } from '@/lib/subscriptions';
 import { getLedgerSummary, getMonthName } from '@/lib/ledger';
 import { parseYMD, dateToYMD } from '@/lib/date-utils';
 import {
@@ -39,6 +39,7 @@ import {
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { MasonryItem } from '@/components/dashboard/MasonryItem';
 import { cn } from '@/lib/utils';
+import { quoted } from '@/components/confirm-copy';
 
 interface Task {
   id: number;
@@ -97,6 +98,42 @@ interface LedgerSummaryData {
   year: number;
 }
 
+/**
+ * next_renewal_date is only written when a subscription is saved, so after one cycle
+ * the RPC hands back past dates and the widget read "In -34 days" (audit F-L03).
+ * Roll each one forward to its next real renewal ON READ (never persisted), keep
+ * the ones inside the window, soonest first.
+ */
+const rollRenewalsForward = (
+  rows: UpcomingRenewal[],
+  windowDays: number,
+  endDates: Map<number, string>,
+): UpcomingRenewal[] => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayYMD = dateToYMD(today);
+  return rows
+    // An ENDED subscription (end_date before today) has no next renewal (UX-33).
+    .filter((r) => { const end = endDates.get(r.id); return !end || end >= todayYMD; })
+    .map((r) => {
+      if (!r.next_renewal_date || r.next_renewal_date.slice(0, 10) >= todayYMD) return r;
+      if (r.billing_cycle !== 'monthly' && r.billing_cycle !== 'yearly') return r;
+      const next = calculateNextRenewalDate(r.next_renewal_date.slice(0, 10), r.billing_cycle);
+      const days = Math.round((parseYMD(next).getTime() - today.getTime()) / 86_400_000);
+      return { ...r, next_renewal_date: next, days_until: days };
+    })
+    // …nor one whose rolled-forward date falls after its end date.
+    .filter((r) => { const end = endDates.get(r.id); return !end || r.next_renewal_date.slice(0, 10) <= end; })
+    .filter((r) => r.days_until >= 0 && r.days_until <= windowDays)
+    .sort((a, b) => a.days_until - b.days_until);
+};
+
+/** Union of two task lists by id, first list wins (keeps due-date order first). */
+const mergeTasks = (first: Task[], second: Task[]): Task[] => {
+  const seen = new Set(first.map((t) => t.id));
+  return [...first, ...second.filter((t) => !seen.has(t.id))];
+};
+
 const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [widgets, setWidgets] = useState<DashboardWidget[]>(DEFAULT_WIDGETS);
@@ -115,6 +152,10 @@ const Dashboard = () => {
   }>({ open: false, id: null });
 
   const [tasks, setTasks] = useState<Task[]>([]);
+  // Incomplete tasks with a due date (overdue → +60 days), ordered by due date. The
+  // Today widget and mini-calendar used to read only the 10 newest-CREATED pending
+  // tasks, so an older overdue task never showed (audit F-D03).
+  const [dueTasks, setDueTasks] = useState<Task[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -161,7 +202,9 @@ const Dashboard = () => {
         statsResult,
         tagsResult,
         renewalsResult,
-        ledgerResult
+        ledgerResult,
+        dueTasksResult,
+        endDatesResult
       ] = await Promise.allSettled([
         fetchPendingTasks(userId),
         fetchRecentNotes(userId),
@@ -173,7 +216,9 @@ const Dashboard = () => {
         fetchStats(userId),
         fetchUserTags(),
         getUpcomingRenewals(30),
-        fetchLedgerSummary()
+        fetchLedgerSummary(),
+        fetchDueTasks(userId),
+        fetchSubscriptionEndDates(userId)
       ]);
 
       const value = <T,>(r: PromiseSettledResult<T>, label: string, fallback: T): T => {
@@ -183,11 +228,17 @@ const Dashboard = () => {
       };
 
       const tasksData = value(tasksResult, 'tasks', [] as Task[]);
+      const dueTasksData = value(dueTasksResult, 'due tasks', [] as Task[]);
       const birthdaysData = value(birthdaysResult, 'birthdays', [] as Birthday[]);
-      const renewalsData = value(renewalsResult, 'renewals', [] as UpcomingRenewal[]);
+      const renewalsData = rollRenewalsForward(
+        value(renewalsResult, 'renewals', [] as UpcomingRenewal[]),
+        30,
+        value(endDatesResult, 'subscription end dates', new Map<number, string>()),
+      );
       const countdownsData = value(countdownResult, 'countdowns', [] as Countdown[]);
 
       setTasks(tasksData);
+      setDueTasks(dueTasksData);
       setNotes(value(notesResult, 'notes', [] as Note[]));
       setMedia(value(mediaResult, 'media', [] as MediaItem[]));
       setPrompts(value(promptsResult, 'prompts', [] as Prompt[]));
@@ -200,7 +251,7 @@ const Dashboard = () => {
       setLedgerData(ledgerResult.status === 'fulfilled' ? ledgerResult.value : null);
 
       setCalendarEvents(
-        generateCalendarEvents(tasksData, birthdaysData, renewalsData, countdownsData)
+        generateCalendarEvents(mergeTasks(dueTasksData, tasksData), birthdaysData, renewalsData, countdownsData)
       );
 
       // Only shout if the whole page is useless; individual gaps are logged above.
@@ -248,6 +299,35 @@ const Dashboard = () => {
 
     if (error) throw error;
     return data || [];
+  };
+
+  const fetchDueTasks = async (userId: string): Promise<Task[]> => {
+    const horizon = new Date();
+    horizon.setDate(horizon.getDate() + 60);
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('id, task_text, is_completed, due_date')
+      .eq('user_id', userId)
+      .eq('is_completed', false)
+      .not('due_date', 'is', null)
+      .lte('due_date', dateToYMD(horizon))
+      .order('due_date', { ascending: true })
+      .limit(100);
+
+    if (error) throw error;
+    return data || [];
+  };
+
+  // The renewals RPC doesn't return end_date; this light read lets the widget drop
+  // ended subscriptions instead of rolling them forward.
+  const fetchSubscriptionEndDates = async (userId: string): Promise<Map<number, string>> => {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('id, end_date')
+      .eq('user_id', userId)
+      .not('end_date', 'is', null);
+    if (error) throw error;
+    return new Map((data || []).map((s) => [s.id, String(s.end_date).slice(0, 10)]));
   };
 
   const fetchRecentNotes = async (userId: string): Promise<Note[]> => {
@@ -487,6 +567,7 @@ const Dashboard = () => {
     completingTasksRef.current.add(taskId);
 
     const taskToComplete = tasks.find((t) => t.id === taskId);
+    const dueToComplete = dueTasks.find((t) => t.id === taskId);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -494,6 +575,7 @@ const Dashboard = () => {
       if (!userId) throw new Error('User not authenticated');
 
       setTasks((prev) => prev.filter((task) => task.id !== taskId));
+      setDueTasks((prev) => prev.filter((task) => task.id !== taskId));
 
       const { error } = await supabase
         .from('tasks')
@@ -513,6 +595,9 @@ const Dashboard = () => {
     } catch (error) {
       if (taskToComplete) {
         setTasks((prev) => [taskToComplete, ...prev]);
+      }
+      if (dueToComplete) {
+        setDueTasks((prev) => [...prev, dueToComplete].sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? '')));
       }
       toast({
         title: 'Error',
@@ -624,7 +709,7 @@ const Dashboard = () => {
           <TodayWidget
             {...commonProps}
             events={calendarEvents}
-            tasks={tasks}
+            tasks={mergeTasks(dueTasks, tasks)}
             onTaskComplete={handleTaskComplete}
             onNavigate={(path) => navigate(path)}
           />
@@ -649,6 +734,8 @@ const Dashboard = () => {
           <TasksWidget
             {...commonProps}
             tasks={tasks}
+            // Head-only counts from fetchStats, never below what's listed (count query failed → 0).
+            pendingCount={Math.max(stats.tasks - stats.completedTasks, tasks.length)}
             onTaskComplete={handleTaskComplete}
             onViewAll={() => navigate('/tasks')}
             onTaskClick={(id) => navigate(`/tasks?task=${id}`)}
@@ -867,7 +954,7 @@ const Dashboard = () => {
           if (deleteConfirm.id) handleDeleteCountdown(deleteConfirm.id);
         }}
         title="Delete Countdown"
-        description="Are you sure you want to delete this countdown? This action cannot be undone."
+        description={`Delete the countdown ${quoted(countdowns.find((c) => c.id === deleteConfirm.id)?.event_name, 'this countdown')}? This action cannot be undone.`}
       />
     </PageShell>
   );

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Stagger, StaggerItem } from "@/components/ui/motion";
 import { parseYMD, formatDateForDisplay } from '@/lib/date-utils';
+import { quoted } from '@/components/confirm-copy';
 
 interface Birthday { id: number; name: string; date_of_birth: string; }
 
@@ -307,6 +308,21 @@ const Birthdays = () => {
     );
   };
 
+  // One search box, shown in the desktop header and (via mobileToolbar) on phones,
+  // where `actions` don't render (audit F-X08).
+  const searchBox = (
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <Input
+        placeholder="Search birthdays by name..."
+        aria-label="Search birthdays"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        className="pl-10"
+      />
+    </div>
+  );
+
   return (
     <PageShell
       title="Birthdays"
@@ -314,18 +330,11 @@ const Birthdays = () => {
       subtitle={birthdays.length > 0 ? `${birthdays.length} ${birthdays.length === 1 ? 'birthday' : 'birthdays'} tracked` : undefined}
       actions={
         <>
-          <div className="relative w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search birthdays by name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
+          <div className="w-64">{searchBox}</div>
           <Button variant="gradient" onClick={openAddModal}><Plus className="h-4 w-4 mr-2" />Add Birthday</Button>
         </>
       }
+      mobileToolbar={searchBox}
       mobileActions={
         <Button variant="gradient" size="icon-sm" onClick={openAddModal} aria-label="Add birthday"><Plus className="h-4 w-4" /></Button>
       }
@@ -494,7 +503,10 @@ const Birthdays = () => {
         onOpenChange={(open) => setDeleteConfirm({ open, id: null })}
         onConfirm={handleDelete}
         title="Delete Birthday"
-        description="Are you sure you want to delete this birthday? This action cannot be undone."
+        description={(() => {
+          const name = birthdays.find((b) => b.id === deleteConfirm.id)?.name;
+          return `${name ? `Delete ${quoted(name)}'s birthday` : 'Delete this birthday'}? This action cannot be undone.`;
+        })()}
       />
     </PageShell>
   );

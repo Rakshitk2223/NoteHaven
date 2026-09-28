@@ -26,6 +26,7 @@ import {
   categoryMeta,
   type BucketItem, type BucketDraft, type BucketStatus,
 } from '@/lib/bucket-list';
+import { quoted } from '@/components/confirm-copy';
 
 const emptyDraft = (): BucketDraft => ({
   title: '', description: '', category: 'Adventure', status: 'dreaming', image_url: '', target_date: '',
@@ -279,6 +280,14 @@ const BucketList = () => {
 
   const pill = filterPill;
 
+  // Shown in the desktop header and, via mobileToolbar, on phones (audit F-X08).
+  const searchBox = (
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input placeholder="Search dreams…" aria-label="Search dreams" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+    </div>
+  );
+
   return (
     <PageShell
       title="Bucket List"
@@ -286,13 +295,11 @@ const BucketList = () => {
       subtitle={total > 0 ? `${achievedCount} of ${total} lived` : undefined}
       actions={
         <>
-          <div className="relative w-56">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input placeholder="Search dreams…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
-          </div>
+          <div className="w-56">{searchBox}</div>
           <Button variant="gradient" onClick={openAdd}><Plus className="mr-2 h-4 w-4" />Add Dream</Button>
         </>
       }
+      mobileToolbar={searchBox}
       mobileActions={<Button variant="gradient" size="icon-sm" onClick={openAdd} aria-label="Add dream"><Plus className="h-4 w-4" /></Button>}
     >
       <div className="space-y-6">
@@ -485,7 +492,7 @@ const BucketList = () => {
         open={deleteId !== null}
         onOpenChange={(o) => { if (!o) setDeleteId(null); }}
         title="Remove this dream?"
-        description="This permanently deletes the bucket-list item."
+        description={`This permanently deletes ${quoted(items.find((i) => i.id === deleteId)?.title, 'the bucket-list item')}.`}
         confirmText="Delete"
         onConfirm={confirmDelete}
       />

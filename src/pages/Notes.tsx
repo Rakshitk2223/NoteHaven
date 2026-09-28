@@ -23,7 +23,8 @@ import { TagBadge } from "@/components/TagBadge";
 import { TagFilter } from "@/components/TagFilter";
 import { fetchUserTags, fetchNoteTags, setNoteTags, createTag, type Tag } from "@/lib/tags";
 // Removed markdown rendering libraries; now storing & rendering raw HTML
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, type Editor } from '@tiptap/react';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
 
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -45,6 +46,50 @@ interface Note {
 // joined in rather than stored, so Partial<Note> is not a valid update payload
 // (audit BUG-02 — this was masked while `Tag` resolved to `any`).
 type NoteUpdate = Partial<Pick<Note, 'title' | 'content' | 'is_pinned' | 'background_color'>>;
+
+/**
+ * Load `html` into the editor with an EMPTY undo history. setContent() on its own
+ * records the swap as an undoable step, so Ctrl+Z right after opening note B used
+ * to put note A's body back into B — and autosave then wrote it to B (audit F-N01).
+ * Rebuilding the EditorState re-initialises every plugin, history included, so no
+ * step from a previous note survives. updateState() dispatches no transaction, so
+ * this never fires onUpdate (no spurious autosave). `keepCaret` holds the cursor
+ * near where it was — for a remote edit landing in the note already open.
+ */
+/** A failed title/content save, kept for retry (UX-48). */
+interface FailedSave {
+  noteId: number;
+  field: 'title' | 'content';
+  value: string;
+  previous: string;
+  seq: number;
+  /** Server updated_at the edit was made on top of — restore only if unchanged. */
+  baseUpdatedAt: string | null;
+}
+const UNSAVED_KEY = 'notehaven_unsaved_notes_v1';
+function readUnsaved(): FailedSave[] {
+  try {
+    const raw = localStorage.getItem(UNSAVED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+function writeUnsaved(entries: FailedSave[]) {
+  try {
+    if (entries.length) localStorage.setItem(UNSAVED_KEY, JSON.stringify(entries));
+    else localStorage.removeItem(UNSAVED_KEY);
+  } catch { /* storage full/blocked: the in-memory copy still retries */ }
+}
+
+function loadIntoEditor(editor: Editor, html: string, keepCaret = false) {
+  const caret = editor.state.selection.from;
+  editor.commands.setContent(html);
+  const { doc, plugins } = editor.state;
+  const selection = keepCaret
+    ? TextSelection.near(doc.resolve(Math.min(caret, doc.content.size)))
+    : editor.state.selection;
+  editor.view.updateState(EditorState.create({ doc, plugins, selection }));
+}
 
 // HTML-only persistence: any legacy markdown handling removed
 
@@ -79,9 +124,26 @@ const Notes = () => {
   const { toast } = useToast();
   // Track local edit state to prevent remote overwrites
   const hasLocalChangesRef = useRef<boolean>(false);
-  // updated_at of the most recent save WE made, used to ignore our own realtime echoes
-  // (server vs. client clock comparison was the source of the false "conflict detected" toasts)
-  const lastSavedUpdatedAtRef = useRef<string | null>(null);
+  // updated_at of the saves WE made, used to ignore our own realtime echoes
+  // (server vs. client clock comparison was the source of the false "conflict detected" toasts).
+  // A set, not one slot: a title+content flush produces two echoes, and remembering only
+  // the latest made the first one look like a remote edit that reverted the list (F-N04).
+  const ownWritesRef = useRef<Set<string>>(new Set());
+  // Saves currently in flight per note id — their echo can arrive before the response.
+  const inFlightSavesRef = useRef<Map<number, number>>(new Map());
+  // Saves that FAILED (offline, network blip), per `${noteId}:${field}`. They are kept
+  // and retried — never dropped on a note switch — and mirrored to localStorage so
+  // leaving the page doesn't lose them either (UX-48). `seq` orders saves per key, so
+  // a late failure can never overwrite a newer successful save.
+  const failedSavesRef = useRef<Map<string, FailedSave>>(new Map());
+  const saveSeqRef = useRef(0);
+  const latestSeqRef = useRef<Map<string, number>>(new Map());
+  const [unsavedCount, setUnsavedCount] = useState(0);
+  // Drafts restored from storage whose note changed elsewhere since: kept in storage,
+  // never auto-applied over the newer server version.
+  const parkedSavesRef = useRef<FailedSave[]>([]);
+  const notesRef = useRef<Note[]>([]);
+  notesRef.current = notes;
   // Track last loaded note ID to prevent cursor reset on auto-save
   const lastLoadedNoteIdRef = useRef<number | null>(null);
   // Sharing state
@@ -255,8 +317,8 @@ const Notes = () => {
   // Load selected note into editor (HTML direct).
   // Keyed on selectedNote.id ONLY: this effect must NOT re-run when the selectedNote
   // object reference changes due to an auto-save or a realtime echo, otherwise the
-  // editor.commands.setContent() below would reset the caret mid-typing. The id-only
-  // dependency means setContent() runs exactly once per real note switch.
+  // loadIntoEditor() below would reset the caret (and the undo history) mid-typing.
+  // The id-only dependency means it runs exactly once per real note switch.
   useEffect(() => {
     if (!editor) return;
 
@@ -265,7 +327,7 @@ const Notes = () => {
       const html = selectedNote.content || '';
       setTitleValue(title);
       setContentValue(html);
-      editor.commands.setContent(html);
+      loadIntoEditor(editor, html);
       // Track that we loaded this note
       lastLoadedNoteIdRef.current = selectedNote.id;
       // Loading a fresh copy from the server -> no unsaved local changes yet
@@ -273,7 +335,7 @@ const Notes = () => {
     } else {
       setTitleValue('');
       setContentValue('');
-      editor.commands.clearContent();
+      loadIntoEditor(editor, '');
       lastLoadedNoteIdRef.current = null;
     }
 
@@ -326,40 +388,49 @@ const Notes = () => {
       setLoading(true);
       setError(null);
 
+      // Tags come embedded in the same request — this used to be a second, sequential
+      // `note_tags … .in('note_id', <every id>)` round trip whose error was ignored (P-01).
       const { data, error } = await supabase
         .from('notes')
-        .select('*')
-  .order('is_pinned', { ascending: false })
-  .order('updated_at', { ascending: false });
+        .select('*, note_tags(tags(*))')
+        .order('is_pinned', { ascending: false })
+        .order('updated_at', { ascending: false });
 
       if (error) {
         throw error;
       }
 
-      let loaded = data || [];
+      let loaded: Note[] = (data || []).map(({ note_tags, ...note }) => ({
+        ...note,
+        tags: ((note_tags ?? []) as unknown as { tags: Tag | null }[])
+          .map((nt) => nt.tags)
+          .filter((t): t is Tag => !!t),
+      }));
 
-      // Fetch tags for all notes
-      const noteIds = loaded.map(n => n.id);
-      if (noteIds.length > 0) {
-        const { data: noteTagsData } = await supabase
-          .from('note_tags')
-          .select('note_id, tags(*)')
-          .in('note_id', noteIds);
-
-        // Group tags by note_id
-        const tagsByNote: Record<number, Tag[]> = {};
-        type NoteTagRow = { note_id: number; tags: Tag | null };
-        (noteTagsData as NoteTagRow[] | null)?.forEach((item) => {
-          if (!item.tags) return;
-          if (!tagsByNote[item.note_id]) tagsByNote[item.note_id] = [];
-          tagsByNote[item.note_id].push(item.tags);
-        });
-
-        // Attach tags to notes
-        loaded = loaded.map(note => ({
-          ...note,
-          tags: tagsByNote[note.id] || []
-        }));
+      // Re-apply saves that failed before the page was left (UX-48) — only onto notes
+      // the server hasn't changed since; anything else is parked, not applied.
+      const stored = readUnsaved();
+      if (stored.length) {
+        const parked: FailedSave[] = [];
+        for (const f of stored) {
+          const note = loaded.find(n => n.id === f.noteId);
+          if (note && note.updated_at === f.baseUpdatedAt) {
+            loaded = loaded.map(n => n.id === f.noteId ? { ...n, [f.field]: f.value } : n);
+            failedSavesRef.current.set(`${f.noteId}:${f.field}`, f);
+          } else if (note) {
+            parked.push(f);
+          }
+        }
+        parkedSavesRef.current = parked;
+        writeUnsaved([...failedSavesRef.current.values(), ...parked]);
+        setUnsavedCount(failedSavesRef.current.size);
+        if (failedSavesRef.current.size) setTimeout(() => retryFailedSaves(), 0);
+        if (parked.length) {
+          toast({
+            title: 'Offline edit kept aside',
+            description: `An unsaved edit to “${loaded.find(n => n.id === parked[0].noteId)?.title || 'a note'}” wasn't applied because the note changed elsewhere. It's kept in this browser.`,
+          });
+        }
       }
 
       // 1. Locate existing Inbox (exact title match only now)
@@ -447,42 +518,63 @@ const Notes = () => {
               // Ignore the realtime echo of our OWN save (matched by the server updated_at
               // we recorded when saving). This replaces the old client-vs-server clock
               // comparison, which produced false "conflict" handling under clock skew.
-              const isOwnEcho = updatedNote.updated_at === lastSavedUpdatedAtRef.current;
+              const isOwnEcho = ownWritesRef.current.has(updatedNote.updated_at);
+
+              // Unsaved local edits are tracked per note: typing in note A used to block
+              // (and silently drop) a remote change to note C (audit F-N04).
+              const id = updatedNote.id;
+              const localEdits =
+                (lastLoadedNoteIdRef.current === id && hasLocalChangesRef.current) ||
+                pendingTitleRef.current?.noteId === id ||
+                pendingContentRef.current?.noteId === id ||
+                (inFlightSavesRef.current.get(id) ?? 0) > 0 ||
+                failedSavesRef.current.has(`${id}:title`) ||
+                failedSavesRef.current.has(`${id}:content`);
 
               // Apply a genuine remote change only when we have no unsaved local edits.
-              const shouldApplyRemote = !isOwnEcho && !hasLocalChangesRef.current;
+              const shouldApplyRemote = !isOwnEcho && !localEdits;
 
+              // Merge, never replace: the payload has no joined `tags`, so replacing the
+              // row made the note's tag badges vanish until reload.
               setNotes(prev => prev.map(note => {
-                if (note.id !== updatedNote.id) return note;
-                // Only update note list if remote is newer
-                if (shouldApplyRemote) {
-                  return updatedNote;
-                }
-                return note;
+                if (note.id !== id || !shouldApplyRemote) return note;
+                return { ...note, ...updatedNote, tags: note.tags };
               }));
-              
+
               // If the currently selected note was updated
               setSelectedNote(prev => {
-                if (prev?.id !== updatedNote.id) return prev;
-                
+                if (prev?.id !== id) return prev;
+
                 // If we have local changes, don't overwrite content
-                if (hasLocalChangesRef.current) {
+                if (localEdits) {
                   // Only update metadata (pinned, color), not title/content
-                  return { 
-                    ...prev, 
+                  return {
+                    ...prev,
                     is_pinned: updatedNote.is_pinned,
                     background_color: updatedNote.background_color,
                     updated_at: updatedNote.updated_at
                   };
                 }
-                
-                // Apply full update if remote is newer
+
                 if (shouldApplyRemote) {
-                  return updatedNote;
+                  return { ...prev, ...updatedNote, tags: prev.tags };
                 }
-                
+
                 return prev;
               });
+
+              // The editor only reads a note on a note switch, so a remote edit to the
+              // OPEN note used to refresh the list preview while the editor kept the
+              // old text — and the next keystroke saved that old text over the other
+              // device's edit (audit F-N03). Push it into the editor, keeping the caret.
+              if (shouldApplyRemote && lastLoadedNoteIdRef.current === id) {
+                const ed = editorRef.current;
+                if (ed && !ed.isDestroyed && typeof updatedNote.content === 'string' && ed.getHTML() !== updatedNote.content) {
+                  loadIntoEditor(ed, updatedNote.content, true);
+                  setContentValue(updatedNote.content);
+                }
+                if (typeof updatedNote.title === 'string') setTitleValue(updatedNote.title);
+              }
             } else if (payload.eventType === 'DELETE') {
               const deletedNote = payload.old as Note;
               setNotes(prev => prev.filter(note => note.id !== deletedNote.id));
@@ -544,7 +636,7 @@ const Notes = () => {
   // Reset form values
   setTitleValue(data.title || "");
   setContentValue(data.content || "");
-  editor?.commands.setContent(data.content || '');
+  if (editor) loadIntoEditor(editor, data.content || '');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create note';
       setError(message);
@@ -613,7 +705,16 @@ const Notes = () => {
   };
 
   // Debounced auto-save functions
-  const saveField = useCallback(async (noteId: number, field: 'title' | 'content', value: string, previous: string) => {
+  const syncUnsaved = useCallback(() => {
+    writeUnsaved([...failedSavesRef.current.values(), ...parkedSavesRef.current]);
+    setUnsavedCount(failedSavesRef.current.size);
+  }, []);
+
+  const saveField = useCallback(async (noteId: number, field: 'title' | 'content', value: string, previous: string, quiet = false) => {
+    const key = `${noteId}:${field}`;
+    const seq = ++saveSeqRef.current;
+    latestSeqRef.current.set(key, seq);
+    inFlightSavesRef.current.set(noteId, (inFlightSavesRef.current.get(noteId) ?? 0) + 1);
     try {
       setIsSaving(true);
 
@@ -632,24 +733,57 @@ const Notes = () => {
 
       const now = saved?.updated_at ?? new Date().toISOString();
       // Record the server timestamp of our own write so its realtime echo is ignored.
-      lastSavedUpdatedAtRef.current = now;
+      ownWritesRef.current.add(now);
+      if (ownWritesRef.current.size > 100) {
+        ownWritesRef.current.delete(ownWritesRef.current.values().next().value as string);
+      }
       // Reset local changes flag only if nothing else is still queued (e.g. the user
       // already switched to another note that has its own pending edit).
       if (!pendingTitleRef.current && !pendingContentRef.current) {
         hasLocalChangesRef.current = false;
       }
+      // This save supersedes any older failed one for the same field.
+      const failed = failedSavesRef.current.get(key);
+      if (failed && failed.seq <= seq) {
+        failedSavesRef.current.delete(key);
+        syncUnsaved();
+      }
       // Update list & selected note with new field value so previews stay fresh
       setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value, updated_at: now } : n));
       setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value, updated_at: now } : prev);
     } catch (e) {
-      // Revert field in list (do NOT touch local editor state; user keeps typing)
-      setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: previous } : n));
-      const message = e instanceof Error ? e.message : 'Could not save note';
-      toast({ title: 'Save failed', description: message, variant: 'destructive' });
+      // KEEP the edit (UX-48). This used to revert the list to `previous`, so after
+      // "Save failed" a note switch reloaded the old text and the edit was gone.
+      // Only the newest save for this field is kept; an older failure is moot.
+      if (latestSeqRef.current.get(key) === seq) {
+        const baseUpdatedAt = notesRef.current.find(n => n.id === noteId)?.updated_at ?? null;
+        failedSavesRef.current.set(key, { noteId, field, value, previous, seq, baseUpdatedAt });
+        syncUnsaved();
+        setNotes(prev => prev.map(n => n.id === noteId ? { ...n, [field]: value } : n));
+        setSelectedNote(prev => prev && prev.id === noteId ? { ...prev, [field]: value } : prev);
+      }
+      // Background retries stay quiet — the footer already says "Unsaved changes".
+      if (!quiet) {
+        const message = e instanceof Error ? e.message : 'Could not save note';
+        toast({ title: 'Save failed — kept, will retry', description: message, variant: 'destructive' });
+      }
     } finally {
+      const left = (inFlightSavesRef.current.get(noteId) ?? 1) - 1;
+      if (left > 0) inFlightSavesRef.current.set(noteId, left);
+      else inFlightSavesRef.current.delete(noteId);
       setIsSaving(false);
     }
-  }, [toast]);
+  }, [toast, syncUnsaved]);
+
+  // Re-send every failed save that isn't already superseded by a queued one.
+  const retryFailedSaves = useCallback(() => {
+    for (const f of [...failedSavesRef.current.values()]) {
+      const queued = f.field === 'title' ? pendingTitleRef.current : pendingContentRef.current;
+      if (queued?.noteId === f.noteId) continue; // the queued save carries a newer value
+      if ((inFlightSavesRef.current.get(f.noteId) ?? 0) > 0) continue;
+      void saveField(f.noteId, f.field, f.value, f.previous, true);
+    }
+  }, [saveField]);
 
   const scheduleTitleSave = useCallback((noteId: number, newValue: string, previous: string) => {
     pendingTitleRef.current = { noteId, value: newValue, previous };
@@ -683,15 +817,30 @@ const Notes = () => {
     const pc = pendingContentRef.current; pendingContentRef.current = null;
     if (pt) saveField(pt.noteId, 'title', pt.value, pt.previous);
     if (pc) saveField(pc.noteId, 'content', pc.value, pc.previous);
-  }, [saveField]);
+    retryFailedSaves();
+  }, [saveField, retryFailedSaves]);
+
+  // Retry failed saves when the connection returns, and every 15 s while any remain.
+  useEffect(() => {
+    if (unsavedCount === 0) return;
+    const onOnline = () => retryFailedSaves();
+    window.addEventListener('online', onOnline);
+    const timer = window.setInterval(retryFailedSaves, 15_000);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.clearInterval(timer);
+    };
+  }, [unsavedCount, retryFailedSaves]);
 
   const handleTitleChange = (val: string) => {
     setTitleValue(val);
     // Mark that user has made local changes
     hasLocalChangesRef.current = true;
     if (selectedNote) {
-      const previous = selectedNote.title || '';
-      if (val !== previous) scheduleTitleSave(selectedNote.id, val, previous);
+      // Always (re)schedule, even when the value is back to the saved one: skipping
+      // it left the earlier queued save alive, so select-all/delete/undo inside the
+      // debounce window still wrote the emptied text (audit F-N02).
+      scheduleTitleSave(selectedNote.id, val, selectedNote.title || '');
     }
   };
 
@@ -700,8 +849,8 @@ const Notes = () => {
     // Mark that user has made local changes
     hasLocalChangesRef.current = true;
     if (selectedNote) {
-      const previous = selectedNote.content || '';
-      if (html !== previous) scheduleContentSave(selectedNote.id, html, previous);
+      // Always (re)schedule — see handleTitleChange (audit F-N02).
+      scheduleContentSave(selectedNote.id, html, selectedNote.content || '');
     }
     // Note: We do NOT call editor.commands.setContent(html) here because
     // that would reset the cursor position. The editor's content is already
@@ -798,6 +947,28 @@ const Notes = () => {
     }
   };
 
+  // Opening Share starts from THIS note's share, not whatever the previously shared
+  // note left behind — the dialog used to show and copy note A's link on note B, and
+  // its edit switch (never loaded from the existing share) silently flipped
+  // permissions on "Create / Update" (audit F-N07). Read-only lookup.
+  const handleShareOpenChange = async (open: boolean) => {
+    setShareOpen(open);
+    if (!open || !selectedNote) return;
+    const noteId = selectedNote.id;
+    setShareLink(null);
+    setAllowEditShare(false);
+    const { data } = await supabase
+      .from('shared_notes')
+      .select('id, allow_edit')
+      .eq('note_id', noteId)
+      .limit(1);
+    const existing = data?.[0];
+    if (existing) {
+      setAllowEditShare(!!existing.allow_edit);
+      setShareLink(`${window.location.origin}/notes/share/${existing.id}`);
+    }
+  };
+
   // Generate or fetch existing share link
   const generateShareLink = async () => {
     if (!selectedNote) return;
@@ -818,7 +989,8 @@ const Notes = () => {
         shareId = existing.id as string;
         // If allow_edit changed, update
         if (existing.allow_edit !== allowEditShare) {
-          await supabase.from('shared_notes').update({ allow_edit: allowEditShare }).eq('id', shareId);
+          const { error: updErr } = await supabase.from('shared_notes').update({ allow_edit: allowEditShare }).eq('id', shareId);
+          if (updErr) throw updErr;
         }
       } else {
         const { data: inserted, error: insertErr } = await supabase
@@ -854,7 +1026,7 @@ const Notes = () => {
   // beforeunload is kept purely to warn if something is still in flight.
   useEffect(() => {
     const hasPending = () =>
-      Boolean(pendingTitleRef.current || pendingContentRef.current);
+      Boolean(pendingTitleRef.current || pendingContentRef.current) || failedSavesRef.current.size > 0;
 
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') flushPendingSaves();
@@ -1260,7 +1432,7 @@ const Notes = () => {
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
-                      <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+                      <Dialog open={shareOpen} onOpenChange={handleShareOpenChange}>
                         <DialogTrigger asChild>
                           <Button size="icon" variant="ghost" title="Share note">
                             <Share2 className="h-4 w-4" />
@@ -1330,7 +1502,7 @@ const Notes = () => {
                       </div>
                     </div>
                     <div className="flex-none flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 sm:gap-2 pt-2 border-t border-border text-xs text-muted-foreground">
-                      <div className="flex items-center gap-2"><span className="hidden sm:inline">{isSaving ? 'Saving…' : 'Autosaved'}</span><span className="sm:hidden">{isSaving ? 'Saving…' : 'Saved'}</span></div>
+                      <div className="flex items-center gap-2"><span className={cn('hidden sm:inline', unsavedCount > 0 && !isSaving && 'text-warning')}>{isSaving ? 'Saving…' : unsavedCount > 0 ? 'Unsaved changes — retrying' : 'Autosaved'}</span><span className={cn('sm:hidden', unsavedCount > 0 && !isSaving && 'text-warning')}>{isSaving ? 'Saving…' : unsavedCount > 0 ? 'Unsaved' : 'Saved'}</span></div>
                       <div className="px-2 tabular-nums select-none">Words: {wordCount}<span className="hidden sm:inline"> | Lines: {lineCount}</span></div>
                     </div>
                   </div>

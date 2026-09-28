@@ -11,6 +11,7 @@ import { PreferencesProvider, usePreferences } from "@/hooks/usePreferences";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { getCurrentTheme, applyTheme } from "@/lib/themes";
 import { getStoredMode, resolveMode, getCachedPrefs, applyPreferencesToDOM } from "@/lib/preferences";
+import { supabase } from "@/integrations/supabase/client";
 import { AuroraBackdrop } from "@/components/AuroraBackdrop";
 import { RouteFallback } from "@/components/RouteFallback";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -55,8 +56,26 @@ const queryClient = new QueryClient({
   },
 });
 
+// Signing out must drop every cached query. Query keys carry no user id, so the
+// next account to sign in on this browser was served the previous account's
+// prompts, snippets, commands and media straight from cache (audit F-X02).
+// SIGNED_OUT also arrives when another tab signs out.
+const QueryCacheAuthReset = () => {
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') queryClient.clear();
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+  return null;
+};
+
 const AppInner = () => {
   useEffect(() => {
+    // Drop the Supabase API responses the old service worker runtime-cached
+    // (UX-35). Cache Storage only — never user data in the database.
+    if ('caches' in window) caches.delete('supabase-api-cache').catch(() => undefined);
+
     const savedColorTheme = getCurrentTheme();
     const apply = () => {
       const mode = resolveMode(getStoredMode());
@@ -133,6 +152,7 @@ const AppShell = () => {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <QueryCacheAuthReset />
       <PreferencesProvider>
         <SidebarProvider>
           <RefreshActivityProvider>
