@@ -54,3 +54,6 @@ backups/
 
 # Playwright MCP scratch output (screenshots, snapshots, console logs)
 .playwright-mcp/
+
+# Butler coordination (lane briefs, reports, locks)
+.claude/butler/
