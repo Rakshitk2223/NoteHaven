@@ -699,6 +699,140 @@ export type Database = {
         }
         Relationships: []
       }
+      media_progress_log: {
+        Row: {
+          created_at: string
+          field: string
+          from_value: number | null
+          id: number
+          kind: string
+          media_id: number
+          season: number | null
+          to_value: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          field: string
+          from_value?: number | null
+          id?: never
+          kind?: string
+          media_id: number
+          season?: number | null
+          to_value?: number | null
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          field?: string
+          from_value?: number | null
+          id?: never
+          kind?: string
+          media_id?: number
+          season?: number | null
+          to_value?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_progress_log_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "media_tracker"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      media_source_meta: {
+        Row: {
+          alt_ids: Json | null
+          alt_titles: string[] | null
+          authors: string[] | null
+          banner: string | null
+          cast_members: Json | null
+          chapters: number | null
+          country: string | null
+          cover: string | null
+          description: string | null
+          episodes: number | null
+          episodes_detail: Json | null
+          fetched_at: string
+          format: string | null
+          genres: string[] | null
+          latest_chapter: number | null
+          medium: string | null
+          next_airing: Json | null
+          runtime: number | null
+          score: number | null
+          seasons: Json | null
+          source: string
+          source_id: string
+          source_url: string | null
+          status: string | null
+          title: string
+          total_seasons: number | null
+          year: number | null
+        }
+        Insert: {
+          alt_ids?: Json | null
+          alt_titles?: string[] | null
+          authors?: string[] | null
+          banner?: string | null
+          cast_members?: Json | null
+          chapters?: number | null
+          country?: string | null
+          cover?: string | null
+          description?: string | null
+          episodes?: number | null
+          episodes_detail?: Json | null
+          fetched_at?: string
+          format?: string | null
+          genres?: string[] | null
+          latest_chapter?: number | null
+          medium?: string | null
+          next_airing?: Json | null
+          runtime?: number | null
+          score?: number | null
+          seasons?: Json | null
+          source: string
+          source_id: string
+          source_url?: string | null
+          status?: string | null
+          title: string
+          total_seasons?: number | null
+          year?: number | null
+        }
+        Update: {
+          alt_ids?: Json | null
+          alt_titles?: string[] | null
+          authors?: string[] | null
+          banner?: string | null
+          cast_members?: Json | null
+          chapters?: number | null
+          country?: string | null
+          cover?: string | null
+          description?: string | null
+          episodes?: number | null
+          episodes_detail?: Json | null
+          fetched_at?: string
+          format?: string | null
+          genres?: string[] | null
+          latest_chapter?: number | null
+          medium?: string | null
+          next_airing?: Json | null
+          runtime?: number | null
+          score?: number | null
+          seasons?: Json | null
+          source?: string
+          source_id?: string
+          source_url?: string | null
+          status?: string | null
+          title?: string
+          total_seasons?: number | null
+          year?: number | null
+        }
+        Relationships: []
+      }
       media_tags: {
         Row: {
           media_id: number
@@ -731,7 +865,9 @@ export type Database = {
       }
       media_tracker: {
         Row: {
+          alt_ids: Json | null
           cover_image: string | null
+          cover_pinned: boolean
           created_at: string | null
           current_chapter: number | null
           current_episode: number | null
@@ -739,10 +875,19 @@ export type Database = {
           has_new_content: boolean
           id: number
           last_activity_at: string | null
+          last_known_latest_chapter: number | null
           last_known_total_episodes: number | null
           last_known_total_seasons: number | null
+          latest_changed_at: string | null
+          latest_checked_at: string | null
+          link_status: string
+          linked_at: string | null
+          platform: string | null
           rating: number | null
           release_date: string | null
+          resume_url: string | null
+          source: string | null
+          source_id: string | null
           status: string | null
           title: string
           type: string | null
@@ -750,7 +895,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          alt_ids?: Json | null
           cover_image?: string | null
+          cover_pinned?: boolean
           created_at?: string | null
           current_chapter?: number | null
           current_episode?: number | null
@@ -758,10 +905,19 @@ export type Database = {
           has_new_content?: boolean
           id?: number
           last_activity_at?: string | null
+          last_known_latest_chapter?: number | null
           last_known_total_episodes?: number | null
           last_known_total_seasons?: number | null
+          latest_changed_at?: string | null
+          latest_checked_at?: string | null
+          link_status?: string
+          linked_at?: string | null
+          platform?: string | null
           rating?: number | null
           release_date?: string | null
+          resume_url?: string | null
+          source?: string | null
+          source_id?: string | null
           status?: string | null
           title: string
           type?: string | null
@@ -769,7 +925,9 @@ export type Database = {
           user_id: string
         }
         Update: {
+          alt_ids?: Json | null
           cover_image?: string | null
+          cover_pinned?: boolean
           created_at?: string | null
           current_chapter?: number | null
           current_episode?: number | null
@@ -777,10 +935,19 @@ export type Database = {
           has_new_content?: boolean
           id?: number
           last_activity_at?: string | null
+          last_known_latest_chapter?: number | null
           last_known_total_episodes?: number | null
           last_known_total_seasons?: number | null
+          latest_changed_at?: string | null
+          latest_checked_at?: string | null
+          link_status?: string
+          linked_at?: string | null
+          platform?: string | null
           rating?: number | null
           release_date?: string | null
+          resume_url?: string | null
+          source?: string | null
+          source_id?: string | null
           status?: string | null
           title?: string
           type?: string | null
