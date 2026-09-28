@@ -14,6 +14,7 @@ import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { invalidateImageCache } from './image-cache';
 import { isUsableCover } from './cover-medium';
 import { hitMatchesTitle } from './title-match';
+import { refreshLinked } from './media-link';
 
 // Pure progress helpers + metadata shapes live in their own module so they can
 // be tested without the Supabase client. Re-exported here for existing callers.
@@ -339,6 +340,10 @@ export interface SweepItem {
   current_chapter?: number | null;
   last_known_total_episodes?: number | null;
   last_known_total_seasons?: number | null;
+  /** Media v2 link fields: when present and linked, refresh goes by id. */
+  link_status?: string | null;
+  source?: string | null;
+  source_id?: string | null;
 }
 
 export type ItemOutcome = 'updated' | 'failed' | 'skipped';
@@ -403,6 +408,14 @@ async function refreshOne(
   userId: string | undefined,
   progress: RefreshProgress
 ): Promise<ItemOutcome> {
+  // Media v2: a LINKED entry refreshes by its source id — no title search, no
+  // cover or user-field change, and the same answer every time (media-link.ts).
+  if (item.link_status === 'linked' && item.source && item.source_id) {
+    const r = await refreshLinked(item.id);
+    if (r.ok === false) return r.reason === 'not-linked' ? 'skipped' : 'failed';
+    return r.latestChanged ? 'updated' : 'skipped';
+  }
+
   let applied = false;   // fresh data was written somewhere
   let attempted = false; // we tried to fetch something
   let errored = false;   // a fetch/match failed

@@ -223,7 +223,7 @@ export async function setCoverPinned(
  */
 export async function refreshLinked(
   trackerId: number,
-): Promise<LinkOutcome<{ detail: SourceDetail; latestGrew: boolean }>> {
+): Promise<LinkOutcome<{ detail: SourceDetail; latestGrew: boolean; latestChanged: boolean }>> {
   const before = await readLinkRow(trackerId);
   if (typeof before === 'string') return { ok: false, reason: before };
   if (before.link_status !== 'linked' || !before.source || !before.source_id) return { ok: false, reason: 'not-linked' };
@@ -242,7 +242,7 @@ export async function refreshLinked(
 
   const res = await writeWithUndo(trackerId, before, patch);
   if (res.ok === false) return res;
-  return { ...res, detail, latestGrew };
+  return { ...res, detail, latestGrew, latestChanged: latest != null && latest !== prev };
 }
 
 type MetaRow = Tables<'media_source_meta'>;
