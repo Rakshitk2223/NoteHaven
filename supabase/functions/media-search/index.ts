@@ -42,7 +42,10 @@ function isAuthenticatedUser(req: Request): boolean {
   if (!token) return false;
   try {
     const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-    return payload?.role === 'authenticated' && !!payload?.sub;
+    // service_role: the maintenance scripts (backfill:metadata) call with the
+    // service key. It is a secret, never shipped to browsers, so it is as
+    // trustworthy as a signed-in user here (audit E-01).
+    return (payload?.role === 'authenticated' && !!payload?.sub) || payload?.role === 'service_role';
   } catch {
     return false;
   }
@@ -52,6 +55,62 @@ function clampLimit(raw: string | null): number {
   const n = parseInt(raw || '10', 10);
   if (!Number.isFinite(n)) return 10;
   return Math.min(Math.max(n, 1), MAX_LIMIT);
+}
+
+// ---------------------------------------------------------------------------
+// Cover medium guard. Mirror of src/lib/cover-medium.ts (edge functions can't
+// import from src/). AniList, MAL and Kitsu put the medium in the image path;
+// TMDB/TVmaze only host screen art. Used so a cache hit can never hand a
+// manhua the anime/donghua poster, or a manhwa a K-drama poster.
+// ---------------------------------------------------------------------------
+const READING_TYPES = ['manga', 'manhwa', 'manhua'];
+function coverMediumOf(url: string | null | undefined): 'comic' | 'anime' | 'screen' | 'unknown' {
+  if (!url) return 'unknown';
+  let host = '', path = '';
+  try { const u = new URL(url); host = u.hostname.toLowerCase(); path = u.pathname.toLowerCase(); } catch { return 'unknown'; }
+  if (host.includes('tmdb.org') || host.includes('tvmaze.com') || host.includes('media-amazon.com')) return 'screen';
+  if (host.includes('mangadex.org') || host.includes('mangaupdates.com')) return 'comic';
+  if (host.includes('anilist.co')) return path.includes('/media/anime/') ? 'anime' : path.includes('/media/manga/') ? 'comic' : 'unknown';
+  if (host.includes('myanimelist.net')) return path.includes('/images/anime/') ? 'anime' : path.includes('/images/manga/') ? 'comic' : 'unknown';
+  if (host.includes('kitsu')) return path.includes('/anime/') ? 'anime' : path.includes('/manga/') ? 'comic' : 'unknown';
+  return 'unknown';
+}
+function coverFitsType(url: string | null | undefined, type: string | null | undefined): boolean {
+  if (!url) return false;
+  const t = (type || '').toLowerCase();
+  const m = coverMediumOf(url);
+  if (READING_TYPES.includes(t)) return m !== 'anime' && m !== 'screen';
+  if (t && t !== 'all') return m !== 'comic';
+  return true;
+}
+
+/** De-duplicated, non-empty strings. */
+function altTitles(...vals: Array<string | null | undefined>): string[] {
+  const out: string[] = [];
+  for (const v of vals) if (typeof v === 'string' && v.trim() && !out.includes(v)) out.push(v);
+  return out;
+}
+
+// Explicit-content genres on MangaUpdates. Excluded in the search request and
+// filtered again on the way out, in case the API ever ignores the parameter.
+const MU_ADULT_GENRES = ['Hentai', 'Adult', 'Smut'];
+
+// media_metadata.type CHECK values. A batch upsert containing any other type
+// (MangaUpdates returns 'novel', 'doujinshi', 'oel', ...) or the same
+// (title, type) twice aborts as a whole, so filter and de-duplicate first.
+const CACHE_TYPES = new Set(['anime', 'manga', 'movie', 'series', 'kdrama', 'jdrama', 'manhwa', 'manhua']);
+function cacheable<T extends { title?: string; type?: string }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.map((r) => {
+    const { alt_titles: _alt, ...rest } = r as T & { alt_titles?: unknown };
+    return rest as T;
+  }).filter((r) => {
+    if (!r?.title || !r?.type || !CACHE_TYPES.has(r.type)) return false;
+    const key = `${r.title}\u0000${r.type}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // Helper: Add timeout to any promise
@@ -114,6 +173,10 @@ interface MediaResult {
   episodes_detail: EpisodeDetail[] | null;
   cast_members: CastMember[] | null;
   runtime: number | null;
+  // Other names the source knows this title by (romaji, English, native, a
+  // MangaUpdates alias...). Returned to the client for its title-similarity gate
+  // (UX-13); never cached (media_metadata has no such column; see cacheable()).
+  alt_titles?: string[];
   // Internal-only TVmaze id, stripped before returning to the client.
   _tvmaze_id?: number;
 }
@@ -127,6 +190,7 @@ type MediaEnrichment = Partial<Pick<MediaResult, 'total_seasons' | 'seasons' | '
 interface MangaUpdatesHit {
   hit_title?: string;
   record?: {
+    series_id?: number;
     title?: string;
     type?: string;
     description?: string;
@@ -144,7 +208,8 @@ interface MangaDexManga {
   relationships?: MangaDexRelationship[];
   attributes?: {
     title?: Record<string, string>;
-    description?: { en?: string };
+    description?: { en?: string }; originalLanguage?: string;
+    altTitles?: Array<Record<string, string>>;
     status?: string;
   };
 }
@@ -180,6 +245,7 @@ interface TVmazeCastItem {
 interface AniListMedia {
   id?: number;
   title: { romaji?: string; english?: string; native?: string };
+  synonyms?: string[];
   description?: string;
   coverImage?: { large?: string; extraLarge?: string };
   bannerImage?: string | null;
@@ -198,6 +264,7 @@ interface JikanResult {
   title?: string;
   title_english?: string;
   title_japanese?: string;
+  titles?: Array<{ title?: string }>;
   synopsis?: string;
   images?: { jpg?: { large_image_url?: string; image_url?: string } };
   trailer?: { images?: { maximum_image_url?: string | null } };
@@ -231,6 +298,8 @@ interface TMDBResult {
   id?: number;
   title?: string;
   name?: string;
+  original_title?: string;
+  original_name?: string;
   poster_path?: string | null;
   backdrop_path?: string | null;
   overview?: string;
@@ -259,6 +328,7 @@ interface WikidataSearchEntity {
   id: string;
   label?: string;
   description?: string;
+  aliases?: string[];
 }
 
 // Row shape of the media_metadata cache rows we read back.
@@ -277,7 +347,8 @@ async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify({ search: query, stype: 'title', perpage: 5, page: 1 }),
+      // UX-13: never offer explicit titles (a fuzzy hit gave a nonsense query an adult cover).
+      body: JSON.stringify({ search: query, stype: 'title', perpage: 5, page: 1, exclude_genre: MU_ADULT_GENRES }),
     });
 
     if (!response.ok) return [];
@@ -286,7 +357,9 @@ async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
     const results = data?.results;
     if (!Array.isArray(results)) return [];
 
-    return (results as MangaUpdatesHit[]).map((r): MediaResult => {
+    const safe = (results as MangaUpdatesHit[]).filter((r) =>
+      !(r?.record?.genres || []).some((g) => MU_ADULT_GENRES.includes(String(g?.genre))));
+    const mapped = safe.map((r): MediaResult & { _mu_id?: number } => {
       const record = r?.record;
       const image = record?.image?.url?.original || record?.image?.url?.thumb || '';
       return {
@@ -308,11 +381,54 @@ async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
         episodes_detail: null,
         cast_members: null,
         runtime: null,
+        _mu_id: record?.series_id,
+        alt_titles: altTitles(record?.title, r?.hit_title),
       };
     }).filter((x) => x.cover_image);
+
+    // Search records carry NO status, rating or chapter count (they are null
+    // there); only GET /v1/series/{id} has them. Without this, MangaUpdates, the
+    // lead source for manhwa/manhua, could never supply status, score or a
+    // chapter total. Enrich the first few comic hits (the client picks among
+    // them by type). Found 2026-09-28 on "Book eating magicians".
+    let enriched = 0;
+    for (const m of mapped) {
+      if (enriched >= 3) break;
+      if (!m._mu_id || !['manga', 'manhwa', 'manhua'].includes(m.type)) continue;
+      enriched += 1;
+      const detail = await fetchMangaUpdatesDetail(m._mu_id);
+      if (detail) Object.assign(m, detail);
+    }
+    mapped.forEach((m) => delete m._mu_id);
+    return mapped;
   } catch (error) {
     console.error('MangaUpdates error:', error);
     return [];
+  }
+}
+
+// MangaUpdates series detail: the only MangaUpdates call that returns status,
+// the latest chapter and a score. `status` is free text (e.g. "114 Chapters
+// (Cancelled)"), so the `completed` flag decides and the text only adds hiatus.
+async function fetchMangaUpdatesDetail(seriesId: number): Promise<Partial<MediaResult> | null> {
+  try {
+    const res = await pacedFetch('mangaupdates', `https://api.mangaupdates.com/v1/series/${seriesId}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const d = await res.json() as { completed?: boolean; status?: string; latest_chapter?: number; bayesian_rating?: number };
+    const text = String(d?.status || '');
+    const status = /hiatus/i.test(text) ? 'hiatus'
+      : d?.completed === true ? 'completed'
+      : d?.completed === false ? 'ongoing'
+      : null;
+    const out: Partial<MediaResult> = {};
+    if (status) out.status = status;
+    if (typeof d?.latest_chapter === 'number' && d.latest_chapter > 0) out.chapters = d.latest_chapter;
+    if (typeof d?.bayesian_rating === 'number' && d.bayesian_rating > 0) out.rating = Math.round(d.bayesian_rating * 10) / 10;
+    return out;
+  } catch {
+    return null;
   }
 }
 
@@ -320,7 +436,9 @@ async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
 async function searchMangaDex(query: string): Promise<MediaResult[]> {
   try {
     const response = await pacedFetch('mangadex',
-      `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=5&includes[]=cover_art`
+      // Safe + suggestive only (no erotica/pornographic, UX-13); relevance order,
+      // or MangaDex's default sort returns unrelated series first.
+      `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=5&includes[]=cover_art&contentRating[]=safe&contentRating[]=suggestive&order[relevance]=desc`
     );
 
     if (!response.ok) return [];
@@ -343,6 +461,10 @@ async function searchMangaDex(query: string): Promise<MediaResult[]> {
 
       return {
         title,
+        alt_titles: altTitles(
+          ...Object.values(manga.attributes?.title || {}),
+          ...(manga.attributes?.altTitles || []).flatMap((t) => Object.values(t)),
+        ),
         type: mangadexMediaType(manga.attributes?.originalLanguage),
         cover_image: coverImage,
         banner_image: null,
@@ -517,8 +639,9 @@ async function searchAniList(query: string, type: string): Promise<MediaResult[]
         query: `
           query ($search: String, $type: MediaType) {
             Page(perPage: 10) {
-              media(search: $search, type: $type) {
+              media(search: $search, type: $type, isAdult: false) {
                 id
+                synonyms
                 title {
                   romaji
                   english
@@ -571,6 +694,7 @@ async function searchAniList(query: string, type: string): Promise<MediaResult[]
         : null;
       return {
         title: item.title.english || item.title.romaji || item.title.native || query,
+        alt_titles: altTitles(item.title.english, item.title.romaji, item.title.native, ...(item.synonyms || [])),
         // Not the coarse search type: AniList files manga, manhwa and manhua all
         // under MANGA, and reporting them all as "manga" is what let a manhwa
         // lookup be satisfied by the wrong medium.
@@ -774,7 +898,7 @@ async function searchJikan(query: string, type: string): Promise<MediaResult[]> 
     if (!typeParam) return [];
 
     const response = await pacedFetch('jikan',
-      `https://api.jikan.moe/v4/${typeParam}?q=${encodeURIComponent(query)}&limit=10`
+      `https://api.jikan.moe/v4/${typeParam}?q=${encodeURIComponent(query)}&limit=10&sfw=true`
     );
 
     if (!response.ok) return [];
@@ -791,6 +915,7 @@ async function searchJikan(query: string, type: string): Promise<MediaResult[]> 
         : null;
       return {
         title: result.title || result.title_english || result.title_japanese || query,
+        alt_titles: altTitles(result.title, result.title_english, result.title_japanese, ...(result.titles || []).map((t) => t.title)),
         type,
         cover_image: result.images?.jpg?.large_image_url || result.images?.jpg?.image_url || '',
         banner_image: result.trailer?.images?.maximum_image_url || null,
@@ -837,7 +962,7 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
 
     const searchType = type === 'movie' ? 'movie' : 'tv';
     const response = await pacedFetch('tmdb',
-      `https://api.themoviedb.org/3/search/${searchType}?api_key=${apiKey}&query=${encodeURIComponent(query)}&page=1`
+      `https://api.themoviedb.org/3/search/${searchType}?api_key=${apiKey}&query=${encodeURIComponent(query)}&page=1&include_adult=false`
     );
 
     if (!response.ok) return [];
@@ -850,6 +975,7 @@ async function searchTMDB(query: string, type: string, apiKey: string): Promise<
     // Get top 10 results
     const mapped = (results as TMDBResult[]).slice(0, 10).map((result): MediaResult => ({
       title: result.title || result.name || query,
+      alt_titles: altTitles(result.title, result.name, result.original_title, result.original_name),
       type: determineType(result, type),
       cover_image: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : '',
       banner_image: result.backdrop_path ? `https://image.tmdb.org/t/p/original${result.backdrop_path}` : null,
@@ -966,6 +1092,7 @@ async function searchWikidata(query: string, type: string): Promise<MediaResult[
 
       return [{
         title: candidate.label || query,
+        alt_titles: altTitles(candidate.label, ...(candidate.aliases || [])),
         type: mapped,
         cover_image: coverImage,
         banner_image: null,
@@ -1003,7 +1130,7 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
     const isMovie = type === 'movie';
     const tmdbSearchType = isMovie ? 'movie' : 'tv';
     const tmdbRes = await pacedFetch('tmdb',
-      `https://api.themoviedb.org/3/search/${tmdbSearchType}?api_key=${tmdbKey}&query=${encodeURIComponent(query)}&page=1`
+      `https://api.themoviedb.org/3/search/${tmdbSearchType}?api_key=${tmdbKey}&query=${encodeURIComponent(query)}&page=1&include_adult=false`
     );
     if (!tmdbRes.ok) return [];
     const tmdbData = await tmdbRes.json();
@@ -1288,10 +1415,11 @@ Deno.serve(async (req) => {
       // Cache freshly fetched results for future lookups (fire and forget).
       // The full MediaResult objects carry the V2 columns (episodes_detail,
       // cast_members, runtime) when a source populated them, so they persist here.
-      if (sourceResults.length > 0) {
+      const toCache = cacheable(sourceResults.slice(0, 10));
+      if (toCache.length > 0) {
         supabase.from('media_metadata')
-          .upsert(sourceResults.slice(0, 10), { onConflict: 'title,type' })
-          .then(() => {}).catch(() => {});
+          .upsert(toCache, { onConflict: 'title,type' })
+          .then(({ error }) => { if (error) console.error('Cache error:', error.message); });
       }
 
       return new Response(
@@ -1309,20 +1437,33 @@ Deno.serve(async (req) => {
 
     // DB-first lookup (skipped when refresh=1 so the client can force a fresh fetch).
     if (!refresh) {
+      // Only rows that actually carry a cover can answer: a cover-less row
+      // (written by the metadata sweep) used to "win" here, so the external
+      // APIs were never asked and the item never got a cover (audit M-02).
+      // Wrong-medium covers are skipped too, and an exact title match ranks
+      // first — an unordered ILIKE could answer "Naruto" with "Boruto: …".
       const dbQuery = supabase
         .from('media_metadata')
         .select('*')
         .ilike('title', `%${query}%`)
-        .limit(limit);
+        .not('cover_image', 'is', null)
+        .neq('cover_image', '')
+        .limit(Math.max(limit, 20));
 
       if (type) {
         dbQuery.eq('type', type.toLowerCase());
       }
 
-      const { data: cachedResults } = await dbQuery;
+      const { data: rawCached } = await dbQuery;
+      const q = query.toLowerCase();
+      const cachedResults = (rawCached || [])
+        .filter((row: MediaMetadataRow) => coverFitsType(row.cover_image, type))
+        .sort((a: MediaMetadataRow, b: MediaMetadataRow) =>
+          Number(b.title.toLowerCase() === q) - Number(a.title.toLowerCase() === q))
+        .slice(0, limit);
 
       // If found in database, return immediately
-      if (cachedResults && cachedResults.length > 0) {
+      if (cachedResults.length > 0) {
         return new Response(
           JSON.stringify({
             success: true,
@@ -1416,7 +1557,7 @@ Deno.serve(async (req) => {
 
     // Save results to database (fire and forget)
     if (uniqueResults.length > 0) {
-      supabase.from('media_metadata').upsert(uniqueResults.slice(0, 10), { onConflict: 'title,type' })
+      supabase.from('media_metadata').upsert(cacheable(uniqueResults.slice(0, 10)), { onConflict: 'title,type' })
         .then(() => console.log('💾 Cached results to database'))
         .catch(err => console.error('Cache error:', err));
     }
