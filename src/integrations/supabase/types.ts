@@ -1438,7 +1438,7 @@ export const Constants = {
 } as const
 
 // ---------------------------------------------------------------------------
-// Convenience row aliases used across the app (lib/ledger.ts, lib/buckets.ts,
+// Convenience row aliases used across the app (lib/ledger.ts, lib/accounts.ts,
 // lib/subscriptions.ts, pages). Derived from the generated Database type.
 // ---------------------------------------------------------------------------
 export type LedgerCategory = Database["public"]["Tables"]["ledger_categories"]["Row"]

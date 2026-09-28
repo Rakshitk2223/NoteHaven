@@ -51,7 +51,7 @@ echo ""
 # SECURITY: JWT verification is ON. The previous --no-verify-jwt deploy made this
 # a public, unauthenticated proxy that holds the service-role key — anyone could
 # write to media_metadata and burn the TMDB quota. The client sends its session
-# token via supabase.functions.invoke(), so signed-in users are unaffected.
+# token (lib/edge-function.ts mediaSearchGet), so signed-in users are unaffected.
 echo "📦 Deploying media-search edge function..."
 supabase functions deploy media-search
 
@@ -64,10 +64,10 @@ echo "✅ Function deployed successfully!"
 echo ""
 
 # Set environment variables
-# SECURITY: never hard-code secrets here. The previously-committed TMDB key was
-# exposed in git history and MUST be rotated at
-#   https://www.themoviedb.org/settings/api
-# Then provide the new key via your environment before running this script:
+# SECURITY: never hard-code secrets here. The previously-committed TMDB key is
+# still readable in git history; not rotating it is an accepted risk (decided
+# 2026-08-20, worst case is free-tier quota). Provide the key via your
+# environment before running this script:
 #   export TMDB_API_KEY=your_new_key      (and optionally FANART_API_KEY=...)
 echo "🔧 Setting environment variables..."
 if [ -z "$TMDB_API_KEY" ]; then
@@ -93,6 +93,9 @@ echo ""
 
 echo "🎉 Deployment complete!"
 echo ""
+# The printed curl is unauthenticated, so verify_jwt answers 401. Add
+#   -H "Authorization: Bearer <a signed-in user's access token>"
+# to get results.
 echo "Test the function:"
 echo "  curl 'https://ylefihvjlyzabhvgdnoe.supabase.co/functions/v1/media-search?q=naruto&type=anime'"
 echo ""

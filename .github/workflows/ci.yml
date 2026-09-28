@@ -1,7 +1,8 @@
 # Every push and PR proves itself: typecheck, lint, unit tests, production build.
 #
-# No secrets required — the build does not need Supabase env vars (the client
-# reads import.meta.env at runtime, not build time), and the insight tests are
+# No secrets required — the build does not need Supabase env vars (Vite inlines
+# import.meta.env at build time; missing values just build an unconfigured
+# bundle, which is fine for a verification build), and the insight tests are
 # pure functions with no network or database access. That is deliberate: CI
 # that needs production credentials to pass is CI nobody dares run on a fork.
 name: CI
@@ -26,8 +27,9 @@ jobs:
       - name: Install
         run: npm ci
 
-      # Zero errors is the bar; the ~19 exhaustive-deps warnings on deliberate
-      # mount-only effects are pre-existing and allowed (matches CLAUDE.md).
+      # Zero errors is the bar; ~19 pre-existing warnings are allowed (about 10
+      # react-hooks/exhaustive-deps on deliberate mount-only effects, 9
+      # react-refresh/only-export-components; tally 2026-09-28).
       - name: Lint
         run: npm run lint
 
