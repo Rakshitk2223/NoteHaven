@@ -11,6 +11,8 @@
 //   unknown = null (never 0 / '' / 'upcoming'), statuses normalised, adult
 //   entries excluded at the source, MangaDex covers never hotlinked (null).
 
+import { hasAdultGenre, MU_EXCLUDE_GENRES } from './adult.ts';
+
 type Json = Record<string, unknown>;
 // Upstream API payloads are untyped JSON with source-specific shapes; each
 // adapter reads them defensively (every field optional-chained and coerced by
@@ -82,7 +84,7 @@ const SOURCES_FOR: Record<TType, Source[]> = {
 const TYPES = Object.keys(SOURCES_FOR) as TType[];
 const READING: TType[] = ['manga', 'manhwa', 'manhua'];
 const UA = { 'User-Agent': 'NoteHaven/1.0 (personal media tracker)' };
-const MU_ADULT = ['Hentai', 'Adult', 'Smut'];
+const MU_ADULT = MU_EXCLUDE_GENRES;
 
 // ---------------------------------------------------------------------------
 // Normalisers
@@ -263,7 +265,7 @@ async function searchMangaUpdates(d: V2Deps, q: string, limit: number): Promise<
   });
   const data = await ok(res, 'mangaupdates') as Loose;
   const safe = ((data?.results || []) as Json[]).filter((r) =>
-    !(((r as Loose)?.record?.genres || []) as Json[]).some((g) => MU_ADULT.includes(String(g?.genre))));
+    !hasAdultGenre((r as Loose)?.record?.genres));
   // MangaUpdates may ignore perpage (25 came back for 4), so cap here.
   const out = safe.map(muCandidate).filter((c) => c.title && c.source_id !== 'undefined').slice(0, limit);
   // Search records carry no status / latest chapter / authors; fill the first
@@ -272,10 +274,11 @@ async function searchMangaUpdates(d: V2Deps, q: string, limit: number): Promise<
   for (const c of out) {
     if (n >= 3 || c.medium !== 'comic') continue;
     n += 1;
-    const full = await muDetailRaw(d, c.source_id).catch(() => null);
+    const full = await muDetailRaw(d, c.source_id).catch(() => null) as Loose;
+    if (full && hasAdultGenre(full.genres)) { c.source_id = ''; continue; } // explicit at detail level: drop
     if (full) Object.assign(c, muFields(full));
   }
-  return out;
+  return out.filter((c) => c.source_id);
 }
 
 async function muDetailRaw(d: V2Deps, id: string): Promise<Json | null> {
@@ -361,7 +364,9 @@ async function searchJikan(d: V2Deps, q: string, type: TType, limit: number): Pr
   const kind = type === 'anime' ? 'anime' : 'manga';
   const res = await d.pacedFetch('jikan', `https://api.jikan.moe/v4/${kind}?q=${encodeURIComponent(q)}&limit=${limit}&sfw=true`);
   const data = await ok(res, 'jikan') as Loose;
-  return ((data?.data || []) as Json[]).map((r) => jikanCandidate(r, kind)).filter((c) => c.title);
+  return ((data?.data || []) as Loose[])
+    .filter((r) => !hasAdultGenre(r?.genres) && !hasAdultGenre(r?.explicit_genres) && !/^rx\b/i.test(String(r?.rating || '')))
+    .map((r) => jikanCandidate(r, kind)).filter((c) => c.title);
 }
 
 function tmdbCandidate(r: Loose, kind: 'tv' | 'movie'): Candidate {
@@ -479,7 +484,7 @@ async function detailAniList(d: V2Deps, id: string, type: TType): Promise<Detail
   });
   const data = await ok(res, 'anilist') as Loose;
   const m = data?.data?.Media;
-  if (!m) return null;
+  if (!m || hasAdultGenre(m.genres)) return null;
   const det = baseDetail(anilistCandidate(m));
   det.description = plain(m.description);
   det.banner = str(m.bannerImage);
@@ -515,10 +520,10 @@ async function detailAniList(d: V2Deps, id: string, type: TType): Promise<Detail
 
 async function detailMangaUpdates(d: V2Deps, id: string): Promise<Detail | null> {
   const full = await muDetailRaw(d, id) as Loose;
-  if (!full) return null;
+  if (!full || hasAdultGenre(full.genres)) return null; // adult filter holds for by-id too
   const det = baseDetail({ ...muCandidate(full), ...muFields(full) } as Candidate);
   det.description = plain(full.description);
-  det.genres = uniq(((full.genres || []) as Json[]).map((g) => g?.genre).filter((g) => !MU_ADULT.includes(String(g))));
+  det.genres = uniq(((full.genres || []) as Json[]).map((g) => g?.genre));
   det.alt_ids.mu = String(full.series_id);
   return det;
 }
@@ -560,7 +565,8 @@ async function detailJikan(d: V2Deps, id: string, type: TType): Promise<Detail |
   const data = await ok(res, 'jikan') as Loose;
   const r = data?.data;
   if (!r) return null;
-  if (((r.genres || []) as Loose[]).some((g) => /hentai|erotica/i.test(g?.name))) return null;
+  // Adult filter holds for by-id too: explicit genres, or MAL's "Rx - Hentai" rating.
+  if (hasAdultGenre(r.genres) || hasAdultGenre(r.explicit_genres) || /^rx\b/i.test(String(r.rating || ''))) return null;
   const det = baseDetail(jikanCandidate(r, kind));
   det.description = plain(r.synopsis);
   det.genres = uniq(((r.genres || []) as Loose[]).map((g) => g?.name));

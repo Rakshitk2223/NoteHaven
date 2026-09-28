@@ -1,6 +1,7 @@
 // Optimized media search with parallel APIs and proper timeout handling
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { handleV2 } from './v2.ts';
+import { hasAdultGenre, MU_EXCLUDE_GENRES } from './adult.ts';
 
 // CORS. Set ALLOWED_ORIGINS to a comma-separated allow-list (e.g.
 // "https://notehaven.example,http://localhost:8080"). Unset falls back to '*'
@@ -93,8 +94,8 @@ function altTitles(...vals: Array<string | null | undefined>): string[] {
 }
 
 // Explicit-content genres on MangaUpdates. Excluded in the search request and
-// filtered again on the way out, in case the API ever ignores the parameter.
-const MU_ADULT_GENRES = ['Hentai', 'Adult', 'Smut'];
+// filtered again on the way out (adult.ts), in case the API ever ignores it.
+const MU_ADULT_GENRES = MU_EXCLUDE_GENRES;
 
 // media_metadata.type CHECK values. A batch upsert containing any other type
 // (MangaUpdates returns 'novel', 'doujinshi', 'oel', ...) or the same
@@ -359,7 +360,7 @@ async function searchMangaUpdates(query: string): Promise<MediaResult[]> {
     if (!Array.isArray(results)) return [];
 
     const safe = (results as MangaUpdatesHit[]).filter((r) =>
-      !(r?.record?.genres || []).some((g) => MU_ADULT_GENRES.includes(String(g?.genre))));
+      !hasAdultGenre(r?.record?.genres));
     const mapped = safe.map((r): MediaResult & { _mu_id?: number } => {
       const record = r?.record;
       const image = record?.image?.url?.original || record?.image?.url?.thumb || '';
@@ -1264,11 +1265,13 @@ async function handleBatchSearch(req: Request, supabase: SupabaseClient): Promis
   const titles = items.map(i => i.title);
   const { data: cached } = await supabase
     .from('media_metadata')
-    .select('title, type, cover_image')
+    .select('title, type, cover_image, genres')
     .in('title', titles);
 
   const cacheMap = new Map<string, string>();
-  cached?.forEach((row: MediaMetadataRow) => {
+  cached?.forEach((row: MediaMetadataRow & { genres?: unknown }) => {
+    // Rows cached before the adult filters existed can still be explicit.
+    if (hasAdultGenre(row.genres)) return;
     const key = `${row.title.toLowerCase()}_${row.type.toLowerCase()}`;
     cacheMap.set(key, row.cover_image);
   });
@@ -1470,7 +1473,10 @@ Deno.serve(async (req) => {
       const { data: rawCached } = await dbQuery;
       const q = query.toLowerCase();
       const cachedResults = (rawCached || [])
-        .filter((row: MediaMetadataRow) => coverFitsType(row.cover_image, type))
+        // Skip wrong-medium covers and explicit rows cached before the adult
+        // filters existed (e.g. "Kaikan Tesuto" came back as source:"database").
+        .filter((row: MediaMetadataRow & { genres?: unknown }) =>
+          coverFitsType(row.cover_image, type) && !hasAdultGenre(row.genres))
         .sort((a: MediaMetadataRow, b: MediaMetadataRow) =>
           Number(b.title.toLowerCase() === q) - Number(a.title.toLowerCase() === q))
         .slice(0, limit);
