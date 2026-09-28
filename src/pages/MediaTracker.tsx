@@ -558,6 +558,7 @@ const MediaTracker = () => {
     current_chapter: ""
   });
   const [isImporting, setIsImporting] = useState(false);
+  const formOpenedWithRef = useRef<{ type: string; current_season: string; current_episode: string; current_chapter: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState(''); // debounced term actually used for query
   const [typedSearchTerm, setTypedSearchTerm] = useState(''); // immediate input echo
   const searchDebounceRef = useRef<number | null>(null);
@@ -1337,6 +1338,15 @@ const MediaTracker = () => {
     const shown = item[field];
     if (shown == null && amount < 0) return Promise.resolve(null);
 
+    // A fetch already in flight (e.g. the rails refetching right after landing on
+    // /media) read the row BEFORE this write; landing after our settle it put the
+    // old number back into that copy — the card said 113, the drawer opened from
+    // the rail said 112. Cancel those first (only queries that already hold data:
+    // cancelling a first load would strand the grid on its placeholder).
+    const loaded = { predicate: (q: { state: { data: unknown } }) => q.state.data !== undefined };
+    void queryClient.cancelQueries({ queryKey: ['mediaItems'], ...loaded });
+    void queryClient.cancelQueries({ queryKey: ['mediaRails'], ...loaded });
+
     // Instant feedback everywhere; reconciled with the server's answer below.
     patchCachedItem(item.id, { [field]: Math.max((shown || 0) + amount, 1) } as Partial<MediaItem>);
     pendingProgressRef.current.set(key, (pendingProgressRef.current.get(key) ?? 0) + 1);
@@ -1363,6 +1373,8 @@ const MediaTracker = () => {
         if (error) throw error;
         if (data && data.length > 0) {
           confirmedProgressRef.current.set(key, target);
+          // The rails copy must re-read next time rather than trust a pre-write fetch.
+          void queryClient.invalidateQueries({ queryKey: ['mediaRails'], refetchType: 'none' });
           return target;
         }
         // Lost the race: read what the server holds now and apply the delta to that.
@@ -1913,9 +1925,34 @@ const MediaTracker = () => {
         mediaData.current_episode = formData.current_episode ? parseInt(formData.current_episode) : null;
       }
 
+      // Progress is written only when the user changed it here (or the type changed,
+      // which deliberately clears the other type's fields). The form is a snapshot:
+      // a stale one used to write its old chapter back over progress logged since
+      // it opened (the card showed 113, Update wrote 112).
+      const opened = formOpenedWithRef.current;
+      const typeChanged = !opened || opened.type !== formData.type;
+      const payload: {
+        title: string;
+        type: string;
+        status: string;
+        rating: number | null;
+        current_season?: number | null;
+        current_episode?: number | null;
+        current_chapter?: number | null;
+        last_activity_at?: string;
+      } = { title: mediaData.title, type: mediaData.type, status: mediaData.status, rating: mediaData.rating };
+      let progressChanged = false;
+      for (const f of ['current_season', 'current_episode', 'current_chapter'] as const) {
+        if (typeChanged || !opened || formData[f] !== opened[f]) {
+          payload[f] = mediaData[f];
+          progressChanged = true;
+        }
+      }
+      if (progressChanged) payload.last_activity_at = new Date().toISOString();
+
       const { error } = await supabase
         .from('media_tracker')
-        .update({ ...mediaData, last_activity_at: new Date().toISOString() })
+        .update(payload)
         .eq('id', editingItem.id)
         .eq('user_id', editingItem.user_id);
 
@@ -1995,6 +2032,13 @@ const MediaTracker = () => {
     setEditingItem(item);
     setDetailsMode(mode);
     if (mode === 'edit') {
+      // What the form OPENED with: Update only writes progress the user changed.
+      formOpenedWithRef.current = {
+        type: item.type,
+        current_season: item.current_season?.toString() || "",
+        current_episode: item.current_episode?.toString() || "",
+        current_chapter: item.current_chapter?.toString() || "",
+      };
       setFormData({
         title: item.title,
         type: item.type,
