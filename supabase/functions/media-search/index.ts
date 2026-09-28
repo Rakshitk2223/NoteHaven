@@ -1,5 +1,6 @@
 // Optimized media search with parallel APIs and proper timeout handling
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { handleV2 } from './v2.ts';
 
 // CORS. Set ALLOWED_ORIGINS to a comma-separated allow-list (e.g.
 // "https://notehaven.example,http://localhost:8080"). Unset falls back to '*'
@@ -789,7 +790,7 @@ function typeMatchScore(resultType: string, requested: string | null): number {
 
 /** Minimum ms between requests to each upstream. */
 const SOURCE_SPACING_MS: Record<string, number> = {
-  anilist: 1100,   // documented 1 req/s — leave headroom
+  anilist: 2100,   // AniList runs at a reduced 30 req/min (live header, 2026-09-28): ≥2 s apart
   jikan: 400,      // ~3 req/s and 60/min
   mangadex: 250,
   mangaupdates: 250,
@@ -1389,8 +1390,20 @@ Deno.serve(async (req) => {
     const source = searchParams.get('source');
     const refresh = ['1', 'true'].includes((searchParams.get('refresh') || '').toLowerCase());
 
-    // Batch endpoint: POST with { items: [...] }
+    // Media v2 actions (search | detail | resolve). The legacy q= / source= /
+    // batch paths below stay as they were: unlinked entries still use them.
+    const v2Deps = { supabase, pacedFetch, env: (k: string) => Deno.env.get(k) || '' };
+    const action = searchParams.get('action');
+    if (action) {
+      return await handleV2(action, req, new URL(req.url), corsHeaders, v2Deps);
+    }
+
+    // Batch endpoint: POST with { items: [...] }  (or a v2 POST with { action })
     if (req.method === 'POST' && !query) {
+      const body = await req.clone().json().catch(() => null) as Record<string, unknown> | null;
+      if (body && typeof body.action === 'string') {
+        return await handleV2(body.action, req, new URL(req.url), corsHeaders, v2Deps, body);
+      }
       return await handleBatchSearch(req, supabase);
     }
 
