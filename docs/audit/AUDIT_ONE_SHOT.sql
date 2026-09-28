@@ -80,7 +80,8 @@ tag_drift AS (
          + (SELECT COUNT(*) FROM task_tags         WHERE tag_id = t.id)
          + (SELECT COUNT(*) FROM media_tags        WHERE tag_id = t.id)
          + (SELECT COUNT(*) FROM prompt_tags       WHERE tag_id = t.id)
-         + (SELECT COUNT(*) FROM code_snippet_tags WHERE tag_id = t.id) AS actual
+         + (SELECT COUNT(*) FROM code_snippet_tags WHERE tag_id = t.id)
+         + (SELECT COUNT(*) FROM work_project_tags WHERE tag_id = t.id) AS actual
   ) x
   WHERE t.usage_count IS DISTINCT FROM x.actual
 ),
@@ -96,6 +97,7 @@ orphan_tags AS (
     AND NOT EXISTS (SELECT 1 FROM media_tags        WHERE tag_id = t.id)
     AND NOT EXISTS (SELECT 1 FROM prompt_tags       WHERE tag_id = t.id)
     AND NOT EXISTS (SELECT 1 FROM code_snippet_tags WHERE tag_id = t.id)
+    AND NOT EXISTS (SELECT 1 FROM work_project_tags WHERE tag_id = t.id)
 ),
 
 -- [8] Vault: rows whose bytes are gone, and bytes with no row (storage leak).
@@ -150,16 +152,22 @@ ledger_unattributed AS (
   GROUP BY type
 ),
 
--- [13] Is ledger_buckets genuinely dead? (CLAUDE.md says the UI was removed.)
---      Zero rows AND zero references = safe to DROP.
+-- [13] Did the ledger_buckets retirement (20_data_cleanup.sql) stick?
+--      Catalog lookups only: this section used to SELECT from ledger_buckets and
+--      ledger_entries.bucket_id directly, which made the WHOLE one-shot audit fail
+--      once 20 dropped them. Expect 'retired' on both rows.
 buckets_dead AS (
   SELECT '13 · ledger_buckets' AS section,
-         'rows in ledger_buckets' AS item,
-         (SELECT COUNT(*)::text FROM public.ledger_buckets) AS detail
+         'table ledger_buckets' AS item,
+         CASE WHEN to_regclass('public.ledger_buckets') IS NULL THEN 'retired' ELSE 'STILL PRESENT' END AS detail
   UNION ALL
   SELECT '13 · ledger_buckets',
-         'entries still referencing a bucket',
-         (SELECT COUNT(*)::text FROM public.ledger_entries WHERE bucket_id IS NOT NULL)
+         'ledger_entries bucket columns',
+         CASE WHEN EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'ledger_entries'
+                  AND column_name IN ('bucket_id', 'from_bucket_id'))
+              THEN 'STILL PRESENT' ELSE 'retired' END
 ),
 
 -- [14] Leftover materialised subscription->ledger links (migration 15 retired

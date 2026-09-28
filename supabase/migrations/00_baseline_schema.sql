@@ -13,6 +13,12 @@
 -- one (next: 20_*.sql).
 --
 -- Assembled 2026-08-14. Originals are preserved in git history.
+--
+-- Amended 2026-09-28 (B-02): section 15 now creates the two subscription columns
+-- it reads, so this file builds a fresh project. That is the only deviation from
+-- the verbatim originals. NOT safe to re-run on production: it would abort at the
+-- media_metadata policies (section 19), and if forced it would re-create the
+-- ledger_buckets table that 20_data_cleanup.sql retired.
 -- ============================================================================
 
 
@@ -1721,6 +1727,17 @@ DROP TRIGGER IF EXISTS subscription_auto_ledger   ON public.subscriptions;
 DROP TRIGGER IF EXISTS subscription_delete_ledger ON public.subscriptions;
 DROP FUNCTION IF EXISTS public.handle_subscription_ledger_entry() CASCADE;
 DROP FUNCTION IF EXISTS public.delete_subscription_ledger_entry() CASCADE;
+
+-- [2026-09-28 fix B-02] The two statements below read subscriptions.ledger_entry_id,
+-- which section 18 creates ~190 lines later. On a fresh project that aborted the
+-- whole baseline ("column ledger_entry_id does not exist"). Create both section-18
+-- subscription columns here first; section 18's IF NOT EXISTS then no-ops.
+-- No-op on production (both columns already exist).
+ALTER TABLE public.subscriptions
+  ADD COLUMN IF NOT EXISTS end_date DATE;
+ALTER TABLE public.subscriptions
+  ADD COLUMN IF NOT EXISTS ledger_entry_id INTEGER
+  REFERENCES public.ledger_entries(id) ON DELETE SET NULL;
 
 -- Delete the auto-created subscription ledger rows so derived charges don't
 -- double-count, then clear the now-unused link values.
