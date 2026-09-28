@@ -12,10 +12,16 @@
 //   entries excluded at the source, MangaDex covers never hotlinked (null).
 
 type Json = Record<string, unknown>;
+// Upstream API payloads are untyped JSON with source-specific shapes; each
+// adapter reads them defensively (every field optional-chained and coerced by
+// the normalisers below). One named escape hatch instead of `any` scattered
+// through the file.
+// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = any;
 
 export interface V2Deps {
-  // deno-lint-ignore no-explicit-any
-  supabase: any;
+  supabase: Loose;
   pacedFetch: (source: string, input: string, init?: RequestInit) => Promise<Response>;
   env: (key: string) => string;
 }
@@ -179,8 +185,7 @@ const ANILIST_FIELDS = `
   studios(isMain: true) { nodes { name } }
   staff(perPage: 4, sort: RELEVANCE) { edges { role node { name { full } } } }`;
 
-// deno-lint-ignore no-explicit-any
-function anilistCandidate(m: any): Candidate {
+function anilistCandidate(m: Loose): Candidate {
   const isAnime = m.format && ['TV', 'TV_SHORT', 'MOVIE', 'SPECIAL', 'OVA', 'ONA', 'MUSIC'].includes(m.format);
   const country = str(m.countryOfOrigin);
   const medium: Medium = isAnime ? 'anime' : m.format === 'NOVEL' ? 'novel' : 'comic';
@@ -190,8 +195,7 @@ function anilistCandidate(m: any): Candidate {
   const status = normStatus('anilist', m.status);
   const authors = isAnime
     ? uniq((m.studios?.nodes || []).map((n: Json) => n?.name))
-    // deno-lint-ignore no-explicit-any
-    : uniq((m.staff?.edges || []).filter((e: any) => /story|art|original/i.test(e?.role || '')).map((e: any) => e?.node?.name?.full));
+    : uniq((m.staff?.edges || []).filter((e: Loose) => /story|art|original/i.test(e?.role || '')).map((e: Loose) => e?.node?.name?.full));
   return {
     source: 'anilist',
     source_id: String(m.id),
@@ -222,13 +226,11 @@ async function searchAniList(d: V2Deps, q: string, type: TType, limit: number): 
       variables: { q, t: mediaType, n: limit },
     }),
   });
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'anilist') as any;
+  const data = await ok(res, 'anilist') as Loose;
   return ((data?.data?.Page?.media || []) as Json[]).map(anilistCandidate).filter((c) => c.title);
 }
 
-// deno-lint-ignore no-explicit-any
-function muCandidate(r: any): Candidate {
+function muCandidate(r: Loose): Candidate {
   const rec = r?.record || r;
   const type = str(rec?.type);
   const country = countryForComicType(type);
@@ -259,11 +261,9 @@ async function searchMangaUpdates(d: V2Deps, q: string, limit: number): Promise<
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...UA },
     body: JSON.stringify({ search: q, stype: 'title', perpage: limit, page: 1, exclude_genre: MU_ADULT }),
   });
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'mangaupdates') as any;
+  const data = await ok(res, 'mangaupdates') as Loose;
   const safe = ((data?.results || []) as Json[]).filter((r) =>
-    // deno-lint-ignore no-explicit-any
-    !(((r as any)?.record?.genres || []) as Json[]).some((g) => MU_ADULT.includes(String(g?.genre))));
+    !(((r as Loose)?.record?.genres || []) as Json[]).some((g) => MU_ADULT.includes(String(g?.genre))));
   // MangaUpdates may ignore perpage (25 came back for 4), so cap here.
   const out = safe.map(muCandidate).filter((c) => c.title && c.source_id !== 'undefined').slice(0, limit);
   // Search records carry no status / latest chapter / authors; fill the first
@@ -286,8 +286,7 @@ async function muDetailRaw(d: V2Deps, id: string): Promise<Json | null> {
   return data && (data as Json).series_id ? data : null;
 }
 
-// deno-lint-ignore no-explicit-any
-function muFields(full: any): Partial<Candidate> {
+function muFields(full: Loose): Partial<Candidate> {
   const status = normStatus('mangaupdates', full.status, { completed: full.completed });
   const latest = posNum(full.latest_chapter);
   return {
@@ -300,8 +299,7 @@ function muFields(full: any): Partial<Candidate> {
   };
 }
 
-// deno-lint-ignore no-explicit-any
-function mdCandidate(m: any): Candidate {
+function mdCandidate(m: Loose): Candidate {
   const a = m.attributes || {};
   const country = langToCountry(a.originalLanguage);
   const status = normStatus('mangadex', a.status);
@@ -313,8 +311,7 @@ function mdCandidate(m: any): Candidate {
     cover: null, // MangaDex blocks hotlinked covers; the UI falls back to the letter tile
     year: yearOf(a.year),
     authors: uniq(((m.relationships || []) as Json[])
-      // deno-lint-ignore no-explicit-any
-      .filter((r: any) => r.type === 'author' || r.type === 'artist').map((r: any) => r.attributes?.name)),
+      .filter((r: Loose) => r.type === 'author' || r.type === 'artist').map((r: Loose) => r.attributes?.name)),
     format: comicFormatFromCountry(country),
     medium: 'comic',
     country,
@@ -331,13 +328,11 @@ async function searchMangaDex(d: V2Deps, q: string, limit: number): Promise<Cand
   const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(q)}&limit=${limit}` +
     '&includes[]=author&includes[]=artist&contentRating[]=safe&contentRating[]=suggestive&order[relevance]=desc';
   const res = await d.pacedFetch('mangadex', url, { headers: UA });
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'mangadex') as any;
+  const data = await ok(res, 'mangadex') as Loose;
   return ((data?.data || []) as Json[]).map(mdCandidate).filter((c) => c.title);
 }
 
-// deno-lint-ignore no-explicit-any
-function jikanCandidate(r: any, kind: 'anime' | 'manga'): Candidate {
+function jikanCandidate(r: Loose, kind: 'anime' | 'manga'): Candidate {
   const type = str(r.type);
   const medium: Medium = kind === 'anime' ? 'anime' : /novel/i.test(type || '') ? 'novel' : 'comic';
   const status = normStatus('jikan', r.status);
@@ -365,13 +360,11 @@ function jikanCandidate(r: any, kind: 'anime' | 'manga'): Candidate {
 async function searchJikan(d: V2Deps, q: string, type: TType, limit: number): Promise<Candidate[]> {
   const kind = type === 'anime' ? 'anime' : 'manga';
   const res = await d.pacedFetch('jikan', `https://api.jikan.moe/v4/${kind}?q=${encodeURIComponent(q)}&limit=${limit}&sfw=true`);
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'jikan') as any;
+  const data = await ok(res, 'jikan') as Loose;
   return ((data?.data || []) as Json[]).map((r) => jikanCandidate(r, kind)).filter((c) => c.title);
 }
 
-// deno-lint-ignore no-explicit-any
-function tmdbCandidate(r: any, kind: 'tv' | 'movie'): Candidate {
+function tmdbCandidate(r: Loose, kind: 'tv' | 'movie'): Candidate {
   const country = str(r.origin_country?.[0]) ?? langToCountry(r.original_language);
   return {
     source: 'tmdb',
@@ -399,13 +392,11 @@ async function searchTMDB(d: V2Deps, q: string, type: TType, limit: number): Pro
   const kind = type === 'movie' ? 'movie' : 'tv';
   const res = await d.pacedFetch('tmdb',
     `https://api.themoviedb.org/3/search/${kind}?api_key=${key}&query=${encodeURIComponent(q)}&page=1&include_adult=false`);
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'tmdb') as any;
+  const data = await ok(res, 'tmdb') as Loose;
   return ((data?.results || []) as Json[]).slice(0, limit).map((r) => tmdbCandidate(r, kind)).filter((c) => c.title);
 }
 
-// deno-lint-ignore no-explicit-any
-function tvmazeCandidate(show: any): Candidate {
+function tvmazeCandidate(show: Loose): Candidate {
   const country = str(show.network?.country?.code) ?? str(show.webChannel?.country?.code) ?? langToCountry(
     ({ Korean: 'ko', Japanese: 'ja', Chinese: 'zh', English: 'en' } as Record<string, string>)[show.language] ?? null);
   return {
@@ -486,8 +477,7 @@ async function detailAniList(d: V2Deps, id: string, type: TType): Promise<Detail
       variables: { id: Number(id) },
     }),
   });
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'anilist') as any;
+  const data = await ok(res, 'anilist') as Loose;
   const m = data?.data?.Media;
   if (!m) return null;
   const det = baseDetail(anilistCandidate(m));
@@ -498,8 +488,7 @@ async function detailAniList(d: V2Deps, id: string, type: TType): Promise<Detail
   det.next_airing = m.nextAiringEpisode?.airingAt
     ? { episode: m.nextAiringEpisode.episode, airs_at: new Date(m.nextAiringEpisode.airingAt * 1000).toISOString() }
     : null;
-  // deno-lint-ignore no-explicit-any
-  det.cast_members = ((m.characters?.edges || []) as any[]).map((e) => ({
+  det.cast_members = ((m.characters?.edges || []) as Loose[]).map((e) => ({
     name: e?.node?.name?.full, character: e?.role ?? null, image: e?.node?.image?.medium ?? null,
   })).filter((c) => c.name) || null;
   if (!det.cast_members?.length) det.cast_members = null;
@@ -525,8 +514,7 @@ async function detailAniList(d: V2Deps, id: string, type: TType): Promise<Detail
 }
 
 async function detailMangaUpdates(d: V2Deps, id: string): Promise<Detail | null> {
-  // deno-lint-ignore no-explicit-any
-  const full = await muDetailRaw(d, id) as any;
+  const full = await muDetailRaw(d, id) as Loose;
   if (!full) return null;
   const det = baseDetail({ ...muCandidate(full), ...muFields(full) } as Candidate);
   det.description = plain(full.description);
@@ -538,16 +526,14 @@ async function detailMangaUpdates(d: V2Deps, id: string): Promise<Detail | null>
 async function detailMangaDex(d: V2Deps, id: string): Promise<Detail | null> {
   const res = await d.pacedFetch('mangadex',
     `https://api.mangadex.org/manga/${encodeURIComponent(id)}?includes[]=author&includes[]=artist`, { headers: UA });
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'mangadex') as any;
+  const data = await ok(res, 'mangadex') as Loose;
   const m = data?.data;
   if (!m) return null;
   const rating = m.attributes?.contentRating;
   if (rating && !['safe', 'suggestive'].includes(rating)) return null; // adult filter holds for by-id too
   const det = baseDetail(mdCandidate(m));
   det.description = plain(m.attributes?.description?.en ?? Object.values(m.attributes?.description || {})[0]);
-  // deno-lint-ignore no-explicit-any
-  det.genres = uniq(((m.attributes?.tags || []) as any[]).filter((t) => t?.attributes?.group === 'genre').map((t) => t?.attributes?.name?.en));
+  det.genres = uniq(((m.attributes?.tags || []) as Loose[]).filter((t) => t?.attributes?.group === 'genre').map((t) => t?.attributes?.name?.en));
   const links = m.attributes?.links || {};
   if (links.al) det.alt_ids.anilist = String(links.al);
   if (links.mal) det.alt_ids.mal = String(links.mal);
@@ -555,8 +541,7 @@ async function detailMangaDex(d: V2Deps, id: string): Promise<Detail | null> {
   // Latest released chapter from the aggregate (uploaded chapters).
   try {
     const agg = await d.pacedFetch('mangadex', `https://api.mangadex.org/manga/${encodeURIComponent(id)}/aggregate`, { headers: UA });
-    // deno-lint-ignore no-explicit-any
-    const a = await ok(agg, 'mangadex') as any;
+    const a = await ok(agg, 'mangadex') as Loose;
     let max = 0;
     for (const vol of Object.values(a?.volumes || {}) as Json[]) {
       for (const ch of Object.values((vol as Json).chapters || {}) as Json[]) {
@@ -572,16 +557,13 @@ async function detailMangaDex(d: V2Deps, id: string): Promise<Detail | null> {
 async function detailJikan(d: V2Deps, id: string, type: TType): Promise<Detail | null> {
   const kind = type === 'anime' ? 'anime' : 'manga';
   const res = await d.pacedFetch('jikan', `https://api.jikan.moe/v4/${kind}/${encodeURIComponent(id)}/full`);
-  // deno-lint-ignore no-explicit-any
-  const data = await ok(res, 'jikan') as any;
+  const data = await ok(res, 'jikan') as Loose;
   const r = data?.data;
   if (!r) return null;
-  // deno-lint-ignore no-explicit-any
-  if (((r.genres || []) as any[]).some((g) => /hentai|erotica/i.test(g?.name))) return null;
+  if (((r.genres || []) as Loose[]).some((g) => /hentai|erotica/i.test(g?.name))) return null;
   const det = baseDetail(jikanCandidate(r, kind));
   det.description = plain(r.synopsis);
-  // deno-lint-ignore no-explicit-any
-  det.genres = uniq(((r.genres || []) as any[]).map((g) => g?.name));
+  det.genres = uniq(((r.genres || []) as Loose[]).map((g) => g?.name));
   if (kind === 'anime') {
     const m = /(\d+)\s*min/i.exec(String(r.duration || ''));
     det.runtime = m ? posInt(m[1]) : null;
@@ -596,30 +578,24 @@ async function detailTMDB(d: V2Deps, id: string, type: TType): Promise<Detail | 
   const kind = type === 'movie' ? 'movie' : 'tv';
   const res = await d.pacedFetch('tmdb',
     `https://api.themoviedb.org/3/${kind}/${encodeURIComponent(id)}?api_key=${key}&append_to_response=external_ids,credits`);
-  // deno-lint-ignore no-explicit-any
-  const r = await ok(res, 'tmdb') as any;
+  const r = await ok(res, 'tmdb') as Loose;
   if (!r?.id || r.adult === true) return null;
   const det = baseDetail(tmdbCandidate(r, kind));
   det.status = normStatus('tmdb', kind === 'movie' && r.status === 'In Production' ? 'Planned' : r.status);
   det.description = plain(r.overview);
   det.banner = r.backdrop_path ? `https://image.tmdb.org/t/p/original${r.backdrop_path}` : null;
-  // deno-lint-ignore no-explicit-any
-  det.genres = uniq(((r.genres || []) as any[]).map((g) => g?.name));
+  det.genres = uniq(((r.genres || []) as Loose[]).map((g) => g?.name));
   det.authors = kind === 'movie'
-    // deno-lint-ignore no-explicit-any
-    ? uniq(((r.credits?.crew || []) as any[]).filter((c) => c?.job === 'Director').slice(0, 2).map((c) => c?.name))
-    // deno-lint-ignore no-explicit-any
-    : uniq(((r.created_by || []) as any[]).map((c) => c?.name));
+    ? uniq(((r.credits?.crew || []) as Loose[]).filter((c) => c?.job === 'Director').slice(0, 2).map((c) => c?.name))
+    : uniq(((r.created_by || []) as Loose[]).map((c) => c?.name));
   det.episodes = posInt(r.number_of_episodes);
   det.total_seasons = posInt(r.number_of_seasons);
-  // deno-lint-ignore no-explicit-any
-  const seasons = ((r.seasons || []) as any[])
+  const seasons = ((r.seasons || []) as Loose[])
     .filter((s) => (s?.season_number ?? 0) > 0 && (s?.episode_count ?? 0) > 0)
     .map((s) => ({ season_number: s.season_number, episode_count: s.episode_count, air_date: s.air_date || null, name: s.name || `Season ${s.season_number}` }));
   det.seasons = seasons.length ? seasons : null;
   det.runtime = posInt(kind === 'movie' ? r.runtime : r.episode_run_time?.[0]);
-  // deno-lint-ignore no-explicit-any
-  const cast = ((r.credits?.cast || []) as any[]).slice(0, 12).map((c) => ({
+  const cast = ((r.credits?.cast || []) as Loose[]).slice(0, 12).map((c) => ({
     name: c?.name, character: c?.character ?? null, image: c?.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
   })).filter((c) => c.name);
   det.cast_members = cast.length ? cast : null;
@@ -631,14 +607,12 @@ async function detailTMDB(d: V2Deps, id: string, type: TType): Promise<Detail | 
 
 async function detailTVmaze(d: V2Deps, id: string): Promise<Detail | null> {
   const res = await d.pacedFetch('tvmaze', `https://api.tvmaze.com/shows/${encodeURIComponent(id)}?embed[]=episodes&embed[]=cast`);
-  // deno-lint-ignore no-explicit-any
-  const s = await ok(res, 'tvmaze') as any;
+  const s = await ok(res, 'tvmaze') as Loose;
   if (!s?.id) return null;
   const det = baseDetail(tvmazeCandidate(s));
   det.description = plain(s.summary);
   det.genres = uniq(s.genres || []);
-  // deno-lint-ignore no-explicit-any
-  const eps = ((s._embedded?.episodes || []) as any[]).filter((e) => e?.type !== 'insignificant_special');
+  const eps = ((s._embedded?.episodes || []) as Loose[]).filter((e) => e?.type !== 'insignificant_special');
   const bySeason = new Map<number, { count: number; first: string | null }>();
   for (const e of eps) {
     const n = posInt(e.season);
@@ -658,8 +632,7 @@ async function detailTVmaze(d: V2Deps, id: string): Promise<Detail | null> {
   }));
   if (!det.episodes_detail.length) det.episodes_detail = null;
   det.runtime = posInt(s.averageRuntime ?? s.runtime);
-  // deno-lint-ignore no-explicit-any
-  const cast = ((s._embedded?.cast || []) as any[]).slice(0, 12).map((c) => ({
+  const cast = ((s._embedded?.cast || []) as Loose[]).slice(0, 12).map((c) => ({
     name: c?.person?.name, character: c?.character?.name ?? null, image: c?.person?.image?.medium ?? null,
   })).filter((c) => c.name);
   det.cast_members = cast.length ? cast : null;
