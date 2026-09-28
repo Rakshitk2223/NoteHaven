@@ -60,10 +60,17 @@ is about 30 per 154. Movies can't link locally because there's no TMDB key; prod
   hidden on other sections. Media chunk 46.18 KiB gz. Cold load 236.68 KiB (gzip -9) / **237.29 (default
   gzip)**, which is right at the 237 gate. Pick ONE measurement method and trim if needed.
 
+- **Edit-loss hole closed** (073448e): any title switch or close with unsaved changes asks "Discard
+  changes?". Unsaved tag edits are no longer wiped by background patches.
+- **A3 declutter done** (144c0cf): status shown once; one ⋮ MediaActionsMenu (pin, refresh, remove cover,
+  delete); 44px ⋮ on list rows; Edit focuses the progress field; the 1180 chip row scrolls with Group
+  and settings pinned; Movies get a Watched toggle with Undo; no Quick Add trace left. Media chunk 47.15
+  KiB gz.
+
 ## First fixes when resuming
-1. **Hole to fix before shipping:** clicking another grid card while editing in the Mac pane silently
-   drops unsaved edits. Confirm first, or keep the edit.
-2. A3 declutter.
+1. Browser-verify A2 + A3 (the UX pass may be partial; see below): the discard prompt in all 3 layouts, ⋮
+   at 390 / 1440, chips at 1180, the Movies toggle, the Mac two-pane, the iPad and phone sheets, Browse,
+   Fix match, pin, History.
 2. Run the full Phase 1 browser gate, including the A1 checks that weren't run and the re-check of the
    three fixes above.
 
