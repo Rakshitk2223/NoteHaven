@@ -18,10 +18,12 @@
     "backfill:covers": "tsx scripts/backfill-cover-images.ts",
     "backfill:metadata": "tsx scripts/backfill-media-metadata.ts",
     "backup:media": "tsx scripts/backup-media.ts",
+    "backup:vault": "tsx scripts/backup-vault.ts",
     "backfill:releases": "tsx scripts/backfill-release-dates.ts",
     "test:insights": "tsx scripts/__tests__/media-insights.test.ts",
     "audit:coverage": "tsx scripts/audit-metadata-coverage.ts",
-    "smoke:apis": "tsx scripts/smoke-media-apis.ts"
+    "smoke:apis": "tsx scripts/smoke-media-apis.ts",
+    "audit:covers": "tsx scripts/audit-cover-medium.ts"
   },
   "dependencies": {
     "@codemirror/lang-cpp": "^6.0.3",

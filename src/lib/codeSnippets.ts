@@ -81,33 +81,22 @@ export const LANGUAGE_EXTENSIONS: Record<string, string> = {
 };
 
 export async function fetchSnippets(): Promise<CodeSnippet[]> {
+  // One request: the tag links ride along as an embedded select (the same
+  // pattern MediaTracker uses), instead of a second round trip that waited for
+  // the snippet list and then filtered code_snippet_tags by every id (P-01).
   const { data, error } = await supabase
     .from('code_snippets')
-    .select('*')
+    .select('*, code_snippet_tags(tags(*))')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
 
-  let loaded = data || [];
-
-  const snippetIds = loaded.map(s => s.id);
-  if (snippetIds.length > 0) {
-    const { data: snippetTagsData } = await supabase
-      .from('code_snippet_tags')
-      .select('snippet_id, tags(*)')
-      .in('snippet_id', snippetIds);
-
-    const tagsBySnippet: Record<number, Tag[]> = {};
-    snippetTagsData?.forEach((item: { snippet_id: number; tags: Tag }) => {
-      if (!tagsBySnippet[item.snippet_id]) tagsBySnippet[item.snippet_id] = [];
-      tagsBySnippet[item.snippet_id].push(item.tags);
-    });
-
-    loaded = loaded.map(snippet => ({
-      ...snippet,
-      tags: tagsBySnippet[snippet.id] || []
-    }));
-  }
+  type Row = CodeSnippet & { code_snippet_tags?: Array<{ tags: Tag | null }> | null };
+  const loaded: CodeSnippet[] = ((data || []) as unknown as Row[]).map(({ code_snippet_tags, ...snippet }) => ({
+    ...snippet,
+    // Links whose tag isn't visible come back as null; drop them.
+    tags: (code_snippet_tags || []).map((l) => l.tags).filter((t): t is Tag => Boolean(t)),
+  }));
 
   return loaded;
 }

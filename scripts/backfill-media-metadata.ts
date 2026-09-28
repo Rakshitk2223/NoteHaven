@@ -171,7 +171,13 @@ async function backfill() {
     const url = `${EDGE_URL}?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(item.type.toLowerCase())}&source=${source}`;
 
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+      // The edge function requires a JWT (verify_jwt = true) and a caller role it
+      // trusts. A bare fetch 401'd on every item (audit E-01). Needs the edge
+      // function redeployed with the service_role check to pass.
+      const res = await fetch(url, {
+        headers: { apikey: serviceKey!, Authorization: `Bearer ${serviceKey}` },
+        signal: AbortSignal.timeout(20000),
+      });
       if (!res.ok) { failed++; console.log(`  [FAIL] ${item.title} (${item.type}) - HTTP ${res.status}`); continue; }
       const data = (await res.json()) as EdgeResponse;
       const top = data?.results?.[0];

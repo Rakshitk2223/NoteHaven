@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { getCachedPrefs } from '@/lib/preferences';
-import { dateToYMD, parseYMD, formatDateDDMMYYYY as formatDateDDMMYYYYUtil } from '@/lib/date-utils';
+import { dateToYMD, addDays, addMonthsClamped, formatDateDDMMYYYY as formatDateDDMMYYYYUtil } from '@/lib/date-utils';
+import { fetchAllRows } from '@/lib/fetch-all';
 import type { LedgerEntry, LedgerCategory, LedgerSummary } from '@/integrations/supabase/types';
 
 export type { LedgerEntry, LedgerCategory, LedgerSummary };
@@ -21,26 +22,32 @@ export async function fetchLedgerEntries(
   const user = session?.user;
   if (!user) throw new Error('Not authenticated');
 
-  let query = supabase
-    .from('ledger_entries')
-    .select('*, category:ledger_categories(*)')
-    .eq('user_id', user.id)
-    .order('transaction_date', { ascending: false });
+  // Paged (audit L-01): "money in hand", account balances and charts are all
+  // computed client-side from this list, and a single request stops at 1000
+  // rows — dropping the OLDEST entries (date DESC) without any error.
+  // `id` breaks ties so offset paging can't skip or repeat same-day rows.
+  const makeQuery = () => {
+    let query = supabase
+      .from('ledger_entries')
+      .select('*, category:ledger_categories(*)')
+      .eq('user_id', user.id)
+      .order('transaction_date', { ascending: false })
+      .order('id', { ascending: false });
 
-  if (startDate) {
-    query = query.gte('transaction_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('transaction_date', endDate);
-  }
-  if (type) {
-    query = query.eq('type', type);
-  }
+    if (startDate) {
+      query = query.gte('transaction_date', startDate);
+    }
+    if (endDate) {
+      query = query.lte('transaction_date', endDate);
+    }
+    if (type) {
+      query = query.eq('type', type);
+    }
+    return query;
+  };
 
-  const { data, error } = await query;
-
-  if (error) throw error;
-  return (data as unknown as LedgerEntry[]) || [];
+  const data = await fetchAllRows(makeQuery);
+  return data as unknown as LedgerEntry[];
 }
 
 export async function createLedgerEntry(
@@ -299,15 +306,17 @@ export interface SubscriptionCharge {
 
 const INACTIVE_SUB_STATUSES = new Set(['cancelled', 'canceled', 'paused', 'inactive', 'ended']);
 
-function stepBillingCycle(ymdStr: string, cycle: string): string {
-  const d = parseYMD(ymdStr);
+// The n-th charge date (n = 0 is the start date), computed from the START each
+// time. Stepping a carried cursor with setMonth() overflowed month ends: a sub
+// starting Jan 31 was charged Mar 3, Apr 3, ... so February had no charge and
+// March had two (audit L-07). addMonthsClamped keeps Jan 31 → Feb 28 → Mar 31.
+function nthBillingDate(startYMD: string, cycle: string, n: number): string {
   const c = (cycle || 'monthly').toLowerCase();
-  if (c.includes('year') || c.includes('annual')) d.setFullYear(d.getFullYear() + 1);
-  else if (c.includes('quarter')) d.setMonth(d.getMonth() + 3);
-  else if (c.includes('week')) d.setDate(d.getDate() + 7);
-  else if (c.includes('day')) d.setDate(d.getDate() + 1);
-  else d.setMonth(d.getMonth() + 1); // monthly default
-  return dateToYMD(d);
+  if (c.includes('year') || c.includes('annual')) return addMonthsClamped(startYMD, 12 * n);
+  if (c.includes('quarter')) return addMonthsClamped(startYMD, 3 * n);
+  if (c.includes('week')) return addDays(startYMD, 7 * n);
+  if (c.includes('day')) return addDays(startYMD, n);
+  return addMonthsClamped(startYMD, n); // monthly default
 }
 
 /**
@@ -326,9 +335,9 @@ export function deriveSubscriptionCharges(
     if (!s.start_date) continue;
     if (s.status && INACTIVE_SUB_STATUSES.has(s.status.toLowerCase())) continue;
     const end = s.end_date && s.end_date < asOfYMD ? s.end_date : asOfYMD;
+    let n = 0;
     let cursor = s.start_date;
-    let guard = 0;
-    while (cursor <= end && guard < 1000) {
+    while (cursor <= end && n < 1000) {
       out.push({
         subscription_id: s.id,
         name: s.name,
@@ -336,8 +345,8 @@ export function deriveSubscriptionCharges(
         date: cursor,
         ledger_category_id: s.ledger_category_id ?? null,
       });
-      cursor = stepBillingCycle(cursor, s.billing_cycle);
-      guard++;
+      n++;
+      cursor = nthBillingDate(s.start_date, s.billing_cycle, n);
     }
   }
   return out;

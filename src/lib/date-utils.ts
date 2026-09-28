@@ -68,3 +68,19 @@ export function addDays(dateString: string, days: number): string {
   date.setDate(date.getDate() + days);
   return dateToYMD(date);
 }
+
+/**
+ * `anchor` plus `months` calendar months, clamped to the target month's last
+ * day: Jan 31 + 1 → Feb 28 (29 in a leap year), + 2 → Mar 31, + 3 → Apr 30.
+ *
+ * Always step from the ORIGINAL anchor (anchor + n), never from the previous
+ * result: Date#setMonth overflows (Jan 31 + 1 month = Mar 3), and carrying that
+ * forward left every later renewal on the 3rd (audit F-L04 / L-07).
+ */
+export function addMonthsClamped(anchor: string, months: number): string {
+  const a = parseYMD(anchor);
+  const target = new Date(a.getFullYear(), a.getMonth() + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(a.getDate(), lastDay));
+  return dateToYMD(target);
+}

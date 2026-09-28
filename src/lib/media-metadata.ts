@@ -12,6 +12,8 @@ import { mediaSearchGet } from '@/lib/edge-function';
 import type { MediaMeta, EpisodeDetail, SeasonInfo, CastMember } from '@/lib/media-progress';
 import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { invalidateImageCache } from './image-cache';
+import { isUsableCover } from './cover-medium';
+import { hitMatchesTitle } from './title-match';
 
 // Pure progress helpers + metadata shapes live in their own module so they can
 // be tested without the Supabase client. Re-exported here for existing callers.
@@ -214,6 +216,71 @@ function metadataSourcesFor(type: string): string[] {
   return ['tmdb', 'wikidata'];
 }
 
+// Reading types — the ones whose Jikan search hits the /manga endpoint.
+const READING_TYPES = new Set(['manga', 'manhwa', 'manhua']);
+
+/**
+ * Strip the "no data" placeholders some sources send as real-looking values, so
+ * hasAllWanted()/mergeFill() treat them as blanks and a later source can fill
+ * them (audit F-M21). Without this, MangaUpdates — first in line for manhwa and
+ * manhua — "filled" rating and status, the sweep stopped early, and AniList's
+ * real score, status and chapter total never landed.
+ *   - rating <= 0: every mapper's "unscored" (MangaUpdates, MangaDex, AniList…).
+ *   - status 'upcoming': hard-coded by MangaUpdates, and the edge function's
+ *     mapStatus() fallback for any string it doesn't know — which is every
+ *     MangaDex status and every Jikan *manga* status.
+ * Done here, not in the edge function, so it works without a redeploy.
+ */
+function normalizeSourceHit(source: string, type: string, hit: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...hit };
+  if (typeof out.rating === 'number' && out.rating <= 0) out.rating = null;
+  const statusIsFallback =
+    source === 'mangaupdates' ||
+    source === 'mangadex' ||
+    (source === 'jikan' && READING_TYPES.has(type.toLowerCase()));
+  if (statusIsFallback && out.status === 'upcoming') out.status = null;
+  return out;
+}
+
+// Which hit of a source search to trust. Sources return several results and the
+// first is often another medium or a spin-off: for "Book eating magicians"
+// MangaUpdates ranks the light NOVEL first, a 4-koma spin-off second and the
+// actual manhwa third — taking results[0] wrote the novel's synopsis into the
+// manhwa's row (found 2026-09-28). Keep only the requested family, prefer the
+// exact type, demote spin-offs, otherwise keep the source's own order.
+const COMIC_FAMILY = ['manga', 'manhwa', 'manhua'];
+const LIVE_FAMILY = ['series', 'kdrama', 'jdrama', 'movie']; // TMDB tags Korean films 'kdrama'
+const SPINOFF_RE = /\b(novel|4-?koma|side stor(?:y|ies)|spin-?off|one-?shot|anthology|pilot|doujinshi|artbook|omake)\b/i;
+
+function sameFamily(resultType: string, wanted: string): boolean {
+  if (!resultType) return true; // untyped hit: let rank order decide
+  if (COMIC_FAMILY.includes(wanted)) return COMIC_FAMILY.includes(resultType);
+  if (LIVE_FAMILY.includes(wanted)) return LIVE_FAMILY.includes(resultType);
+  return resultType === wanted;
+}
+
+function pickSourceHit(
+  results: Array<Record<string, unknown>> | undefined,
+  type: string,
+  query: string,
+): Record<string, unknown> | null {
+  if (!Array.isArray(results) || results.length === 0) return null;
+  const want = type.toLowerCase();
+  const queryIsSpinoff = SPINOFF_RE.test(query);
+  const rank = (r: Record<string, unknown>) => {
+    const t = String(r.type ?? '').toLowerCase();
+    return (t === want ? 0 : 1) + (!queryIsSpinoff && SPINOFF_RE.test(String(r.title ?? '')) ? 2 : 0);
+  };
+  // UX-13: every source returns SOMETHING for any query (a nonsense title got an
+  // unrelated, once explicit, manga). Only hits whose title — or an alternative
+  // title the edge function sends — resembles the query are candidates.
+  const candidates = results.filter((r) =>
+    sameFamily(String(r.type ?? '').toLowerCase(), want) && hitMatchesTitle(query, r));
+  if (candidates.length === 0) return null;
+  // Array.prototype.sort is stable, so equal ranks keep the source's relevance order.
+  return [...candidates].sort((a, b) => rank(a) - rank(b))[0];
+}
+
 // True when `top` already carries non-empty values for every field the user
 // ticked — lets the refresh stop early instead of hitting every fallback source.
 function hasAllWanted(top: Record<string, unknown>, o: RefreshOptions): boolean {
@@ -339,6 +406,10 @@ async function refreshOne(
   let applied = false;   // fresh data was written somewhere
   let attempted = false; // we tried to fetch something
   let errored = false;   // a fetch/match failed
+  // First right-medium cover seen among the metadata hits (M-02). Reusing it
+  // avoids a second, DB-first lookup that the metadata row written below would
+  // answer with "found — no cover".
+  let metaCover: string | null = null;
 
   // 1) Metadata (synopsis / totals / rating / status / seasons) — one fetch
   //    repopulates the cache for all of these at once.
@@ -359,9 +430,13 @@ async function refreshOne(
           { q: item.title, type: item.type.toLowerCase(), source },
           AbortSignal.timeout(15000),
         ) as { results?: Array<Record<string, unknown>> } | null;
-        const hit = data?.results?.[0];
-        if (!hit) continue;
-        top = top ? mergeFill(top, hit) : { ...hit };
+        const raw = pickSourceHit(data?.results, item.type, item.title);
+        if (!raw) continue;
+        if (!metaCover && typeof raw.cover_image === 'string' && isUsableCover(raw.cover_image, item.type)) {
+          metaCover = raw.cover_image;
+        }
+        const hit = normalizeSourceHit(source, item.type, raw);
+        top = top ? mergeFill(top, hit) : hit;
       } catch (error) {
         devLog(`metadata source "${source}" failed for "${item.title}": ${String(error)}`);
       }
@@ -384,6 +459,11 @@ async function refreshOne(
           const filled = (key: string): boolean => {
             const v = existing?.[key];
             if (v == null) return false;
+            // Placeholders an earlier sweep stored before normalizeSourceHit()
+            // existed count as blanks, so fill-gaps can replace them. A real
+            // 'upcoming' is only ever overwritten by a newer real status.
+            if (key === 'rating' && typeof v === 'number' && v <= 0) return false;
+            if (key === 'status' && v === 'upcoming') return false;
             if (Array.isArray(v)) return v.length > 0;
             if (typeof v === 'string') return v.trim().length > 0;
             return true;
@@ -480,17 +560,36 @@ async function refreshOne(
   }
 
   // 2) Fill MISSING covers only — never overwrite an existing/intentionally-removed cover.
+  //
+  // M-02: this used to do a plain DB-first lookup, which the cover-less metadata
+  // row written in step 1 answered with "found — no cover", so an item could get
+  // its synopsis and lose its cover for good. Use the cover the metadata sources
+  // already returned; otherwise force a live search (refresh: 1 skips the DB).
+  // isUsableCover() refuses wrong-medium art (a donghua poster for a manhua, a
+  // TV poster for a manhwa) and MangaDex hotlinks, which render broken.
   if (opts.covers && !item.cover_image && userId) {
     attempted = true;
     try {
-      const data = await mediaSearchGet(
-        { q: item.title, type: item.type.toLowerCase(), limit: 1 },
-        AbortSignal.timeout(10000),
-      ) as { results?: Array<{ cover_image?: string }> } | null;
-      const cover = data?.results?.[0]?.cover_image;
+      let cover = metaCover;
+      if (!cover) {
+        const data = await mediaSearchGet(
+          { q: item.title, type: item.type.toLowerCase(), limit: 5, refresh: 1 },
+          AbortSignal.timeout(10000),
+        ) as { results?: Array<Record<string, unknown>> } | null;
+        const hit = data?.results?.find((r) =>
+          isUsableCover(r.cover_image as string | undefined, item.type) && hitMatchesTitle(item.title, r));
+        cover = (hit?.cover_image as string | undefined) ?? null;
+      }
       if (cover) {
-        await supabase.from('media_tracker').update({ cover_image: cover }).eq('id', item.id).eq('user_id', userId);
-        applied = true;
+        // .is(null): only fill a still-empty cover, never overwrite one set meanwhile.
+        const { error } = await supabase
+          .from('media_tracker')
+          .update({ cover_image: cover })
+          .eq('id', item.id)
+          .eq('user_id', userId)
+          .is('cover_image', null);
+        if (error) errored = true;
+        else applied = true;
       }
     } catch (error) {
       devLog(`cover refresh failed for "${item.title}": ${String(error)}`);

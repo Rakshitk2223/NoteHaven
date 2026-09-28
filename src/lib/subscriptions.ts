@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { dateToYMD, parseYMD, formatDateDDMMYYYY as formatDateDDMMYYYYUtil } from '@/lib/date-utils';
+import { dateToYMD, addMonthsClamped, formatDateDDMMYYYY as formatDateDDMMYYYYUtil } from '@/lib/date-utils';
 import { formatCurrency } from '@/lib/ledger';
 import type {
   Subscription,
@@ -151,24 +151,19 @@ export async function getUpcomingRenewals(days: number = 4): Promise<UpcomingRen
 }
 
 export function calculateNextRenewalDate(refDate: string, billingCycle: 'monthly' | 'yearly'): string {
-  const ref = parseYMD(refDate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const nextDate = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
-
-  if (billingCycle === 'monthly') {
-    // Add months until we get a date in the future
-    while (nextDate <= today) {
-      nextDate.setMonth(nextDate.getMonth() + 1);
-    }
-  } else {
-    // Add years until we get a date in the future
-    while (nextDate <= today) {
-      nextDate.setFullYear(nextDate.getFullYear() + 1);
-    }
+  // First renewal strictly after today, stepping from `refDate` itself with
+  // month-end clamping (addMonthsClamped). This used setMonth(+1) on a carried
+  // date, so a Jan 31 renewal overflowed to Mar 3 and stayed on the 3rd forever
+  // (audit F-L04). Signature unchanged: Subscriptions and Dashboard call it on read.
+  const today = dateToYMD(new Date());
+  const step = billingCycle === 'monthly' ? 1 : 12;
+  let n = 0;
+  let next = refDate;
+  while (next <= today && n < 12000) {
+    n += 1;
+    next = addMonthsClamped(refDate, n * step);
   }
-
-  return dateToYMD(nextDate);
+  return next;
 }
 
 // ============================================

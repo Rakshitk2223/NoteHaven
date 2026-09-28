@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { dateToYMD } from '@/lib/date-utils';
 import { IMAGE_CACHE_PREFIXES } from '@/lib/image-cache';
+import { restoreBackup } from '@/lib/restore';
 import { SettingsSection, SettingRow } from '@/components/settings/primitives';
 
 // Full backup — every user-owned table.
@@ -34,42 +35,8 @@ const EXPORT_JUNCTIONS = [
   'work_project_tags',
 ] as const;
 
-// Restore inserts NEW rows (ids stripped) so it can never corrupt id sequences,
-// then rewrites every foreign key through an old-id -> new-id map. That keeps
-// folder trees, ledger references and tag links intact, which a flat insert of
-// self-contained tables could not (audit DATA-03).
-//
-// Parents first — these reference nothing else the restore creates.
-const IMPORT_PARENTS = [
-  'tags', 'ledger_categories', 'ledger_accounts', 'subscription_categories',
-  'snippet_folders', 'recipe_folders',
-  'notes', 'tasks', 'prompts', 'birthdays', 'countdowns',
-  'media_tracker', 'bucket_list', 'wishlist_items', 'work_projects',
-] as const;
-
-// Then children, with each FK column mapped to the parent table it points at.
-const IMPORT_CHILDREN: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> = [
-  ['ledger_entries', { account_id: 'ledger_accounts', category_id: 'ledger_categories' }],
-  ['code_snippets', { folder_id: 'snippet_folders' }],
-  ['commands', { folder_id: 'snippet_folders' }],
-  ['recipes', { folder_id: 'recipe_folders' }],
-  ['subscriptions', { ledger_category_id: 'ledger_categories' }],
-] as const;
-
-// Finally tag links: [junction table, parent column, parent table]. Both ends
-// are remapped ids. Note work_project_tags keys on project_id, not work_project_id.
-const IMPORT_JUNCTIONS: ReadonlyArray<readonly [string, string, string]> = [
-  ['note_tags', 'note_id', 'notes'],
-  ['task_tags', 'task_id', 'tasks'],
-  ['media_tags', 'media_id', 'media_tracker'],
-  ['prompt_tags', 'prompt_id', 'prompts'],
-  ['code_snippet_tags', 'snippet_id', 'code_snippets'],
-  ['work_project_tags', 'project_id', 'work_projects'],
-] as const;
-
-// Deliberately NOT restored: vault_folders / vault_files (the rows would point
-// at Storage objects this backup does not contain, so a "restored" vault would
-// be a tree of dead links) and user_preferences (device-local layout).
+// Restore logic (FK remapping, natural-key matching, what is and isn't
+// restored) lives in lib/restore.ts so it can be tested against a real Postgres.
 
 
 // localStorage cache key prefixes wiped by "Clear cache" (image/metadata caches
@@ -221,92 +188,17 @@ export function DataSection() {
       const user = session?.user;
       if (!user) throw new Error('Not authenticated');
 
-      let inserted = 0;
-      const failed: string[] = [];
-      // old id -> new id, per table, so children and tag links can be rewritten.
-      const idMap: Record<string, Map<string | number, string | number>> = {};
-
-      const rowsFor = (table: string) =>
-        Array.isArray(pendingImport[table]) ? (pendingImport[table] as Record<string, unknown>[]) : [];
-
-      const strip = (row: Record<string, unknown>) => {
-        const r: Record<string, unknown> = { ...row };
-        delete r.id; delete r.created_at; delete r.updated_at;
-        r.user_id = user.id;
-        return r;
-      };
-
-      // Insert, then remember how each old id maps onto its new one. PostgREST
-      // returns inserted rows in request order, so index alignment holds.
-      const insertMapped = async (table: string, rows: Record<string, unknown>[]) => {
-        if (!rows.length) return;
-        const { data, error } = await supabase
-          .from(table as never)
-          .insert(rows.map(strip) as never)
-          .select('id');
-        if (error) {
-          // A failed table must never be reported as a clean import (audit DATA-02).
-          console.error(`Import failed for ${table}:`, error);
-          failed.push(`${table} (${error.message})`);
-          return;
-        }
-        const newRows = (data ?? []) as unknown as { id: string | number }[];
-        const m = new Map<string | number, string | number>();
-        rows.forEach((row, i) => {
-          const oldId = row.id as string | number | undefined;
-          const newId = newRows[i]?.id;
-          if (oldId !== undefined && newId !== undefined) m.set(oldId, newId);
-        });
-        idMap[table] = m;
-        inserted += newRows.length;
-      };
-
-      // 1. Parents.
-      for (const table of IMPORT_PARENTS) {
-        await insertMapped(table, rowsFor(table));
-      }
-
-      // 2. Children — repoint each FK at the newly created parent. If the parent
-      //    is missing from the backup, drop the reference, not the row.
-      for (const [table, fks] of IMPORT_CHILDREN) {
-        const rows = rowsFor(table).map((row) => {
-          const r: Record<string, unknown> = { ...row };
-          for (const [col, parent] of Object.entries(fks)) {
-            const old = r[col];
-            r[col] = old == null ? null : (idMap[parent]?.get(old as string | number) ?? null);
-          }
-          // Retired column — migration 15 dropped the trigger and nulled every value.
-          if (table === 'subscriptions') r.ledger_entry_id = null;
-          return r;
-        });
-        await insertMapped(table, rows);
-      }
-
-      // 3. Tag links. These carry no user_id (RLS scopes them via their parent),
-      //    so they bypass strip(); a link with either end missing is skipped.
-      for (const [table, col, parent] of IMPORT_JUNCTIONS) {
-        const links = rowsFor(table).flatMap((row) => {
-          const parentId = idMap[parent]?.get(row[col] as string | number);
-          const tagId = idMap.tags?.get(row.tag_id as string | number);
-          if (parentId === undefined || tagId === undefined) return [];
-          return [{ [col]: parentId, tag_id: tagId }];
-        });
-        if (!links.length) continue;
-        const { error } = await supabase.from(table as never).insert(links as never);
-        if (error) {
-          console.error(`Import failed for ${table}:`, error);
-          failed.push(`${table} (${error.message})`);
-        }
-      }
+      const { inserted, reused, failed } = await restoreBackup(supabase, user.id, pendingImport);
+      const matched = reused ? ` ${reused} matched existing item${reused === 1 ? '' : 's'}.` : '';
 
       if (failed.length) {
         toast({
           title: inserted ? 'Import partly failed' : 'Import failed',
-          description: `${inserted} item${inserted === 1 ? '' : 's'} added. Could not import: ${failed.join('; ')}`,
+          description: `${inserted} item${inserted === 1 ? '' : 's'} added.${matched} Could not import: ${failed.join('; ')}`,
           variant: 'destructive',
         });
       } else {
-        toast({ title: 'Import complete', description: `${inserted} item${inserted === 1 ? '' : 's'} added.` });
+        toast({ title: 'Import complete', description: `${inserted} item${inserted === 1 ? '' : 's'} added.${matched}` });
       }
     } catch (e) {
       toast({ title: 'Import failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' });

@@ -5,17 +5,22 @@ import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
 import { mediaSearchGet } from '@/lib/edge-function';
 import { invalidateImageCache } from '@/lib/image-cache';
+import { isReadingType, isUsableCover } from '@/lib/cover-medium';
+import { bestTitleSimilarity, hitMatchesTitle, TITLE_MATCH_MIN } from '@/lib/title-match';
 
 // API priority order based on media type
-// MangaDex/MangaUpdates excluded: no CORS headers (fail from browser, work in edge function).
+// MangaDex excluded: no CORS, and its covers break when hotlinked.
 // AniList/Kitsu/Jikan excluded for live-action types: they return wrong fuzzy anime matches.
+// TVmaze/TMDB excluded for READING types: they only host screen art, so for a
+// manhwa/manhua they returned the drama adaptation's poster (the "kdrama-looking"
+// covers). MangaUpdates is reached through the edge function (it 403s browsers).
 // wikidata + fanart are keyless/fallback poster sources for live-action types
 // (movies incl. Bollywood, series, k/j-drama). OMDB removed: its poster endpoint is patron-gated.
 const API_PRIORITY: Record<string, string[]> = {
   'anime':   ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
-  'manga':   ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
-  'manhwa':  ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
-  'manhua':  ['anilist', 'kitsu', 'jikan', 'tvmaze', 'tmdb'],
+  'manga':   ['anilist', 'kitsu', 'jikan', 'mangaupdates'],
+  'manhwa':  ['anilist', 'kitsu', 'jikan', 'mangaupdates'],
+  'manhua':  ['anilist', 'mangaupdates', 'kitsu', 'jikan'],
   'movie':   ['tmdb', 'tvmaze', 'wikidata', 'fanart'],
   'series':  ['tvmaze', 'tmdb', 'wikidata', 'fanart'],
   'kdrama':  ['tvmaze', 'tmdb', 'wikidata', 'fanart'],
@@ -29,10 +34,8 @@ interface RefreshResult {
 }
 
 // Fetch from specific API.
-// Note: 'mangadex' and 'mangaupdates' are deliberately absent — neither sends
-// CORS headers, so they can only be reached server-side. They are covered by the
-// edge function's own fallback chain, not from here. (Audit DEAD-03 removed the
-// two unreachable browser-side implementations.)
+// Note: 'mangadex' is deliberately absent (no CORS, hotlink-blocked covers).
+// 'mangaupdates' has no CORS either, so it goes through the edge function.
 async function fetchFromApi(api: string, title: string, type: string): Promise<RefreshResult | null> {
   const normalizedType = type.toLowerCase();
 
@@ -46,6 +49,8 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
         return await fetchFromJikan(title, normalizedType);
       case 'tvmaze':
         return await fetchFromTVmaze(title, normalizedType);
+      case 'mangaupdates':
+        return await fetchFromEdgeSource('mangaupdates', title, normalizedType);
       case 'tmdb':
         return await fetchFromTMDB(title, normalizedType);
       case 'wikidata':
@@ -62,9 +67,21 @@ async function fetchFromApi(api: string, title: string, type: string): Promise<R
 }
 
 // AniList API
+//
+// Reading types must search MANGA. This used to search ANIME for everything
+// except the literal type "manga", so a manhwa/manhua got its anime or donghua
+// adaptation's poster: 44 such covers in the 2026-09-28 export. AniList files
+// manga, manhwa and manhua all under MANGA and tells them apart by
+// countryOfOrigin, so prefer the entry from the right country.
+//
+// Every browser-direct fetcher below also (UX-13): excludes adult entries at
+// the source where the API can (AniList isAdult:false, Jikan sfw, Kitsu
+// nsfw/R18), and accepts a hit only if one of its titles resembles the query
+// (title-match.ts). Blindly taking the first fuzzy hit gave a nonsense title an
+// explicit adult cover.
 async function fetchFromAniList(title: string, type: string): Promise<RefreshResult | null> {
-  const searchType = type === 'anime' || type === 'manga' ? type.toUpperCase() : 'ANIME';
-  
+  const searchType = isReadingType(type) ? 'MANGA' : 'ANIME';
+  const wantCountry = type === 'manhwa' ? ['KR'] : type === 'manhua' ? ['CN', 'TW'] : type === 'manga' ? ['JP'] : null;
   const response = await fetch('https://graphql.anilist.co', {
     method: 'POST',
     headers: {
@@ -75,11 +92,14 @@ async function fetchFromAniList(title: string, type: string): Promise<RefreshRes
       query: `
         query ($search: String, $type: MediaType) {
           Page(perPage: 5) {
-            media(search: $search, type: $type) {
+            media(search: $search, type: $type, isAdult: false) {
               id
+              countryOfOrigin
+              synonyms
               title {
                 romaji
                 english
+                native
               }
               coverImage {
                 extraLarge
@@ -94,14 +114,24 @@ async function fetchFromAniList(title: string, type: string): Promise<RefreshRes
   });
 
   if (!response.ok) return null;
-  
+
   const data = await response.json();
-  const media = data?.data?.Page?.media?.[0];
-  
-  if (!media?.coverImage?.extraLarge && !media?.coverImage?.large) return null;
-  
+  type AniListHit = {
+    countryOfOrigin?: string | null;
+    synonyms?: string[] | null;
+    title?: { romaji?: string | null; english?: string | null; native?: string | null };
+    coverImage?: { extraLarge?: string; large?: string };
+  };
+  const list: AniListHit[] = data?.data?.Page?.media || [];
+  const matches = list.filter((m) =>
+    (m?.coverImage?.extraLarge || m?.coverImage?.large) &&
+    bestTitleSimilarity(title, [m.title?.english, m.title?.romaji, m.title?.native, ...(m.synonyms || [])]) >= TITLE_MATCH_MIN);
+  const media = (wantCountry && matches.find((m) => wantCountry.includes((m.countryOfOrigin || '').toUpperCase())))
+    || matches[0];
+  if (!media) return null;
+
   return {
-    coverImage: media.coverImage.extraLarge || media.coverImage.large,
+    coverImage: (media.coverImage?.extraLarge || media.coverImage?.large) as string,
     apiSource: 'anilist',
   };
 }
@@ -109,32 +139,40 @@ async function fetchFromAniList(title: string, type: string): Promise<RefreshRes
 // Jikan API
 async function fetchFromJikan(title: string, type: string): Promise<RefreshResult | null> {
   const jikanType = ['manga', 'manhwa', 'manhua'].includes(type) ? 'manga' : 'anime';
-  
   const response = await fetch(
-    `https://api.jikan.moe/v4/${jikanType}?q=${encodeURIComponent(title)}&limit=1`,
+    `https://api.jikan.moe/v4/${jikanType}?q=${encodeURIComponent(title)}&limit=5&sfw=true`,
     { signal: AbortSignal.timeout(3000) }
   );
 
   if (!response.ok) return null;
-  
+
   const data = await response.json();
-  const result = data?.data?.[0];
-  
-  if (!result?.images?.jpg?.large_image_url) return null;
-  
+  type JikanHit = {
+    title?: string; title_english?: string | null; title_japanese?: string | null;
+    titles?: Array<{ title?: string }>;
+    images?: { jpg?: { large_image_url?: string } };
+  };
+  const result = ((data?.data || []) as JikanHit[]).find((r) =>
+    r?.images?.jpg?.large_image_url &&
+    bestTitleSimilarity(title, [r.title, r.title_english, r.title_japanese, ...(r.titles || []).map((t) => t.title)]) >= TITLE_MATCH_MIN);
+  if (!result) return null;
+
   return {
-    coverImage: result.images.jpg.large_image_url,
+    coverImage: result.images!.jpg!.large_image_url!,
     apiSource: 'jikan',
   };
 }
 
 // Kitsu API
+//
+// Kitsu has no reliable adult filter for manga (a probe returned an explicit
+// title rated "PG"), so the title gate is what protects this source; entries
+// flagged nsfw or R18 are skipped as well.
 async function fetchFromKitsu(title: string, type: string): Promise<RefreshResult | null> {
   try {
     const kitsuType = type === 'anime' ? 'anime' : 'manga';
-    
     const response = await fetch(
-      `https://kitsu.io/api/edge/${kitsuType}?filter[text]=${encodeURIComponent(title)}&page[limit]=1`,
+      `https://kitsu.io/api/edge/${kitsuType}?filter[text]=${encodeURIComponent(title)}&page[limit]=5`,
       {
         headers: {
           'Accept': 'application/vnd.api+json',
@@ -145,14 +183,21 @@ async function fetchFromKitsu(title: string, type: string): Promise<RefreshResul
     );
 
     if (!response.ok) return null;
-    
+
     const data = await response.json();
-    const result = data?.data?.[0];
-    
-    if (!result?.attributes?.posterImage?.original) return null;
-    
+    type KitsuHit = { attributes?: {
+      canonicalTitle?: string; titles?: Record<string, string | null>; abbreviatedTitles?: string[] | null;
+      nsfw?: boolean | null; ageRating?: string | null; posterImage?: { original?: string } | null;
+    } };
+    const result = ((data?.data || []) as KitsuHit[]).find((r) => {
+      const a = r?.attributes;
+      if (!a?.posterImage?.original || a.nsfw === true || a.ageRating === 'R18') return false;
+      return bestTitleSimilarity(title, [a.canonicalTitle, ...Object.values(a.titles || {}), ...(a.abbreviatedTitles || [])]) >= TITLE_MATCH_MIN;
+    });
+    if (!result) return null;
+
     return {
-      coverImage: result.attributes.posterImage.original,
+      coverImage: result.attributes!.posterImage!.original!,
       apiSource: 'kitsu',
     };
   } catch (error) {
@@ -172,10 +217,13 @@ async function fetchFromTVmaze(title: string, type: string): Promise<RefreshResu
     if (!response.ok) return null;
 
     const data = await response.json();
-    if (!data?.[0]?.show?.image?.original) return null;
+    type TVmazeHit = { show?: { name?: string; image?: { original?: string } | null } };
+    const hit = ((data || []) as TVmazeHit[]).find((r) =>
+      r?.show?.image?.original && bestTitleSimilarity(title, [r.show.name]) >= TITLE_MATCH_MIN);
+    if (!hit) return null;
 
     return {
-      coverImage: data[0].show.image.original,
+      coverImage: hit.show!.image!.original!,
       apiSource: 'tvmaze',
     };
   } catch (error) {
@@ -189,14 +237,16 @@ async function fetchFromTVmaze(title: string, type: string): Promise<RefreshResu
 // so these must be fetched via the edge function rather than called directly.
 async function fetchFromEdgeSource(source: string, title: string, type: string): Promise<RefreshResult | null> {
   const data = await mediaSearchGet(
-    { q: title, type, source, refresh: 1, limit: 1 },
+    { q: title, type, source, refresh: 1, limit: 5 },
     AbortSignal.timeout(8000),
-  ) as { success?: boolean; results?: Array<{ cover_image?: string }> } | null;
+  ) as { success?: boolean; results?: Array<Record<string, unknown>> } | null;
 
-  const cover = data?.results?.[0]?.cover_image;
-  if (!data?.success || !cover) return null;
+  if (!data?.success) return null;
+  // Same title gate as the direct fetchers (UX-13); alt_titles come from the edge.
+  const hit = data.results?.find((r) => typeof r.cover_image === 'string' && r.cover_image && hitMatchesTitle(title, r));
+  if (!hit) return null;
 
-  return { coverImage: cover, apiSource: source };
+  return { coverImage: hit.cover_image as string, apiSource: source };
 }
 
 // TMDB API (proxied through the edge function — key is server-side)
@@ -225,10 +275,22 @@ export async function refreshCoverImage(
 ): Promise<{ coverImage: string; apiSource: string } | null> {
   const normalizedType = type.toLowerCase();
   const priority = API_PRIORITY[normalizedType] || ['anilist', 'tmdb'];
-  
-  // Determine which API to try next
-  const currentIndex = currentApiSource ? priority.indexOf(currentApiSource) : -1;
-  
+
+  // Determine which API to try next.
+  //
+  // The caller's label is often not a chain member: after a reload it is
+  // 'tracker' / 'database' / 'cache', or the edge function's "AniList, Jikan".
+  // indexOf() then returned -1, so every first press restarted at priority[0]
+  // and re-applied the very cover the user was trying to replace ("Refresh
+  // cover does nothing"). Fall back to the source the current cover URL came
+  // from, and never accept the same URL back.
+  const currentCover = mediaId ? await readCurrentCover(mediaId) : null;
+  let currentIndex = currentApiSource ? priority.indexOf(currentApiSource) : -1;
+  if (currentIndex === -1) {
+    const inferred = sourceFromCoverUrl(currentCover);
+    if (inferred) currentIndex = priority.indexOf(inferred);
+  }
+
   devLog(`[COVER] Refreshing "${title}" (type: ${type})`);
   devLog(`[COVER] Current source: ${currentApiSource || 'none'}`);
   devLog(`[COVER] Fallback chain: ${priority.join(' > ')}`);
@@ -241,7 +303,18 @@ export async function refreshCoverImage(
     devLog(`[COVER] [${i}/${priority.length}] Trying ${apiToTry}...`);
     
     const result = await fetchFromApi(apiToTry, title, type);
-    
+
+    if (result && result.coverImage === currentCover) {
+      devLog(`[COVER] ${apiToTry} returned the current cover, trying next...`);
+      continue;
+    }
+    // Refuse provably wrong-medium art (an anime/donghua poster or a TV poster
+    // for a manga/manhwa/manhua, and vice versa) and MangaDex hotlinks.
+    if (result && !isUsableCover(result.coverImage, normalizedType)) {
+      devLog(`[COVER] ${apiToTry} returned wrong-medium art, trying next...`);
+      continue;
+    }
+
     if (result) {
       devLog(`[COVER] [${i}/${priority.length}] ${apiToTry} SUCCESS - got cover from ${result.apiSource}`);
       await updateMediaTracker(title, type, result, mediaId);
@@ -253,6 +326,36 @@ export async function refreshCoverImage(
   }
   
   devLog(`[COVER] All ${priority.length} APIs failed for "${title}"`);
+  return null;
+}
+
+/** The cover currently stored on the tracker row (RLS scopes it to the caller). */
+async function readCurrentCover(mediaId: number): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('media_tracker')
+      .select('cover_image')
+      .eq('id', mediaId)
+      .maybeSingle();
+    return data?.cover_image ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Which chain member a cover URL came from, by host. */
+function sourceFromCoverUrl(url: string | null): string | null {
+  if (!url) return null;
+  let host = '';
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return null; }
+  if (host.includes('anilist.co')) return 'anilist';
+  if (host.includes('kitsu')) return 'kitsu';
+  if (host.includes('myanimelist.net')) return 'jikan';
+  if (host.includes('mangaupdates.com')) return 'mangaupdates';
+  if (host.includes('tvmaze.com')) return 'tvmaze';
+  if (host.includes('tmdb.org')) return 'tmdb';
+  if (host.includes('wikimedia.org')) return 'wikidata';
+  if (host.includes('fanart.tv')) return 'fanart';
   return null;
 }
 

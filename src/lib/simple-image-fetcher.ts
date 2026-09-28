@@ -5,6 +5,8 @@
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
 import { mediaSearchGet } from '@/lib/edge-function';
+import { isUsableCover } from '@/lib/cover-medium';
+import { hitMatchesTitle } from '@/lib/title-match';
 import { readImageCache, mergeImageCache } from '@/lib/image-cache';
 
 export interface ImageResult {
@@ -91,7 +93,10 @@ async function fetchFromMediaMetadata(
     items.forEach(item => {
       const key = `${item.title.toLowerCase()}_${item.type.toLowerCase()}`;
       const cover = dbMap.get(key);
-      if (cover) {
+      // The shared cache can hold a wrong-medium cover written by an older
+      // per-card refresh (e.g. a donghua poster under a manhua title). Skip it
+      // so the item falls through to a live, type-routed lookup instead.
+      if (cover && isUsableCover(cover, item.type)) {
         images.set(item.id, cover);
         sources.set(item.id, 'database');
       }
@@ -101,6 +106,25 @@ async function fetchFromMediaMetadata(
     console.error('media_metadata fetch error:', error);
   }
   return { images, sources };
+}
+
+/**
+ * Cover for a title from the edge search, or null. Takes the first of the top
+ * results that (a) is the right medium (cover-medium.ts) and (b) actually
+ * resembles the title (title-match.ts). Accepting results[0] blindly gave a
+ * nonsense title an unrelated manga's cover, and one an explicit adult cover
+ * (UX-13). Exported so the add-item flow can use the same gate.
+ */
+export async function searchCover(
+  title: string,
+  type: string,
+): Promise<{ cover: string; source: string } | null> {
+  const data = await mediaSearchGet({ q: title, type, limit: 5 }) as
+    { success?: boolean; source?: string; results?: Array<Record<string, unknown>> } | null;
+  if (!data?.success) return null;
+  const hit = data.results?.find((r) =>
+    typeof r.cover_image === 'string' && isUsableCover(r.cover_image, type) && hitMatchesTitle(title, r));
+  return hit ? { cover: hit.cover_image as string, source: data.source || 'api' } : null;
 }
 
 // Fetch missing items from edge function in PARALLEL batches
@@ -121,19 +145,10 @@ async function fetchMissingItemsFromAPI(
     const batch = missingItems.slice(i, i + batchSize);
     
     const promises = batch.map(async (item) => {
-      const data = await mediaSearchGet({ q: item.title, type: item.type, limit: 1 }) as
-        { success?: boolean; source?: string; results?: Array<{ cover_image?: string }> } | null;
-
-      if (data?.success && data.results?.[0]?.cover_image) {
-        return {
-          id: item.id,
-          imageUrl: data.results[0].cover_image,
-          apiSource: data.source || 'api',
-        };
-      }
-      return null;
+      const hit = await searchCover(item.title, item.type);
+      return hit ? { id: item.id, imageUrl: hit.cover, apiSource: hit.source } : null;
     });
-    
+
     const batchResults = await Promise.all(promises);
     
     batchResults.forEach(result => {
