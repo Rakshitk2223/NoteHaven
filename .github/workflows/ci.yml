@@ -36,6 +36,9 @@ jobs:
       - name: Unit tests (media insights)
         run: npm run test:insights
 
+      - name: Unit tests (Vitest — src/lib + edge pure helpers)
+        run: npm test
+
       # Runs typecheck first (build = typecheck && vite build).
       - name: Build
         run: npm run build

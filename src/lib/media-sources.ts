@@ -14,6 +14,7 @@
 //   - Adult entries are excluded at the source; covers are never MangaDex hotlinks.
 
 import { mediaSearchGet, mediaSearchPost } from '@/lib/edge-function';
+import { typeFit, rankCandidates } from '@/lib/media-match';
 import type { SeasonInfo, EpisodeDetail, CastMember } from '@/lib/media-progress';
 
 // ---------------------------------------------------------------------------
@@ -145,29 +146,9 @@ export function sourcesForType(type: TrackerType): MediaSource[] {
   }
 }
 
-const READING: TrackerType[] = ['Manga', 'Manhwa', 'Manhua'];
-const LIVE: TrackerType[] = ['Series', 'KDrama', 'JDrama', 'Movie'];
-
-/** Fit of a candidate (by medium/format/country) to the requested tracker type. */
-export function typeFit(c: Pick<Candidate, 'medium' | 'format' | 'country'>, type: TrackerType): TypeFit {
-  if (READING.includes(type)) {
-    if (c.medium !== 'comic') return 'mismatch';
-    const want = type === 'Manhwa' ? ['KR'] : type === 'Manhua' ? ['CN', 'TW', 'HK'] : ['JP'];
-    const fmt = (c.format || '').toLowerCase();
-    if (fmt === type.toLowerCase()) return 'exact';
-    if (c.country && want.includes(c.country.toUpperCase())) return 'exact';
-    return 'family';
-  }
-  if (type === 'Anime') return c.medium === 'anime' ? 'exact' : 'mismatch';
-  if (LIVE.includes(type)) {
-    if (c.medium !== 'screen') return 'mismatch';
-    if (type === 'Movie') return (c.format || '').toLowerCase() === 'movie' ? 'exact' : 'family';
-    if (type === 'KDrama') return c.country === 'KR' ? 'exact' : 'family';
-    if (type === 'JDrama') return c.country === 'JP' ? 'exact' : 'family';
-    return 'exact';
-  }
-  return 'family';
-}
+// typeFit lives in media-match.ts (pure, Vitest-covered); re-exported here so
+// UI code can keep importing it from media-sources.
+export { typeFit };
 
 // ---------------------------------------------------------------------------
 // Network (edge actions)
@@ -231,11 +212,18 @@ export async function resolveBatch(
   if (items.length === 0) return [];
   const batch = items.slice(0, 10).map((i) => ({ ...i, type: i.type.toLowerCase() }));
   const data = await mediaSearchPost({ action: 'resolve', items: batch }, opts.signal) as
-    { action?: string; results?: Array<{ id: number; candidates: Array<Omit<Candidate, 'fit'> & { match: number }> }> } | null;
+    { action?: string; results?: Array<{ id: number; candidates: Array<Omit<Candidate, 'fit'>> }> } | null;
   if (!data || data.action !== 'resolve' || !Array.isArray(data.results)) return [];
-  const typeById = new Map(items.map((i) => [i.id, i.type]));
-  return data.results.map((r) => ({
-    id: r.id,
-    candidates: r.candidates.map((c) => ({ ...c, fit: typeFit(c, typeById.get(r.id) ?? 'Manga') })),
-  }));
+  // Scored HERE, not on the edge, so the confidence rules live in one tested
+  // place (media-match.ts). Top 3 per item, best first.
+  const byId = new Map(items.map((i) => [i.id, i]));
+  return data.results.map((r) => {
+    const item = byId.get(r.id);
+    const type = item?.type ?? 'Manga';
+    const withFit = r.candidates.map((c) => ({ ...c, fit: typeFit(c, type) }));
+    const ranked = item
+      ? rankCandidates({ title: item.title, type, progress: item.progress ?? null }, withFit)
+      : withFit.map((c) => ({ ...c, match: 0 }));
+    return { id: r.id, candidates: ranked.slice(0, 3) };
+  });
 }
