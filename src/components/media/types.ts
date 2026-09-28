@@ -85,6 +85,11 @@ export const VALID_TYPES = ['Movie', 'Series', 'Anime', 'Manga', 'Manhwa', 'Manh
 export const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 'Completed'] as const;
 
 /** Coerce legacy rows into the valid type/status set. */
+/** Placeholder initials: letters/digits only, so "[audit] Solo" reads "AS", not "[S". */
+export const initialsOf = (title: string, max = 2) =>
+  title.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean).slice(0, max)
+    .map((w) => w[0].toUpperCase()).join('') || '?';
+
 export const normalizeMediaItem = (item: MediaItem): MediaItem => {
   const type = VALID_TYPES.includes(item.type as typeof VALID_TYPES[number]) ? item.type : 'Movie';
   const status = VALID_STATUSES.includes(item.status as typeof VALID_STATUSES[number]) ? item.status : 'Plan to Watch';

@@ -3,7 +3,7 @@ import { useInView } from 'react-intersection-observer';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MediaMeta } from '@/lib/media-metadata';
-import { type MediaItem, getStatusCategory, progressFieldOf } from './types';
+import { type MediaItem, getStatusCategory, initialsOf, progressFieldOf } from './types';
 import { LogNumberButton, type LogTarget } from './LogSheet';
 import { behindCount } from './progress-view';
 import { GRID_COLS, type GridSize } from './grid-size';
@@ -22,9 +22,6 @@ interface CardProps {
   onVisibleChange: (id: number, visible: boolean) => void;
   log: { popover: boolean; onOpenSheet: (t: LogTarget) => void; onCommit: (item: MediaItem, value: number) => Promise<boolean> };
 }
-
-const initialsOf = (title: string) =>
-  title.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '?';
 
 /**
  * A Mihon-style library tile: the cover opens the title; the number under it
@@ -90,7 +87,11 @@ const LibraryCard = memo(function LibraryCard({
           selected && 'ring-2 ring-primary',
         )}
       >
-        {showCover ? (
+        {/* The letter tile sits underneath, so a loading, failed or blank cover never leaves an empty box. */}
+        <span aria-hidden="true" className="absolute inset-0 grid place-items-center bg-gradient-brand-soft text-2xl font-extrabold text-primary">
+          {initialsOf(item.title)}
+        </span>
+        {showCover && (
           <img
             src={cover!}
             alt=""
@@ -99,12 +100,9 @@ const LibraryCard = memo(function LibraryCard({
             referrerPolicy="no-referrer"
             draggable={false}
             onError={() => setImgFailed(true)}
-            className={cn('h-full w-full object-cover transition-opacity', selected && 'opacity-70')}
+            onLoad={(e) => { if (e.currentTarget.naturalWidth < 2) setImgFailed(true); }}
+            className={cn('relative h-full w-full object-cover transition-opacity', selected && 'opacity-70')}
           />
-        ) : (
-          <span className="grid h-full w-full place-items-center bg-gradient-brand-soft text-2xl font-extrabold text-primary">
-            {initialsOf(item.title)}
-          </span>
         )}
 
         {/* Mihon's unread spot: how far behind the latest, or done. */}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -467,6 +467,20 @@ const MediaTracker = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Media v2 sections. History and Browse join once they work (NO HOLES rule 2).
   const [section, setSection] = useState<MediaSectionId>('library');
+  // Each section keeps its own scroll position: the page scrolls the window, and
+  // a short section (More) clamps it, so Library would otherwise come back at the top.
+  const sectionScroll = useRef<Partial<Record<MediaSectionId, number>>>({});
+  const scrollOwner = useRef<MediaSectionId>('library');
+  useEffect(() => {
+    const onScroll = () => { sectionScroll.current[scrollOwner.current] = window.scrollY; };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  useLayoutEffect(() => {
+    if (scrollOwner.current === section) return;
+    scrollOwner.current = section;
+    window.scrollTo(0, sectionScroll.current[section] ?? 0);
+  }, [section]);
   // History only exists once migration 28 has run (hidden, not empty, before that).
   const [v2Schema, setV2Schema] = useState({ sourceLinks: false, progressLog: false });
   useEffect(() => { void detectMediaV2Schema().then(setV2Schema); }, []);

@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Play, Sparkles, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { QueueEntry } from '@/lib/media-insights';
-import { isReadable } from './types';
+import { initialsOf, isReadable } from './types';
 
 interface ContinueShelfProps {
   entries: QueueEntry[];
@@ -78,18 +78,19 @@ export function ContinueShelf({ entries, covers, onAdvance, onOpen, busyIds }: C
                 aria-label={`Open ${item.title}`}
               >
                 <div className="relative aspect-[2/3] w-full overflow-hidden bg-muted">
-                  {cover ? (
+                  <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center bg-gradient-brand-soft text-4xl font-black text-primary/70">
+                    {initialsOf(item.title, 1)}
+                  </span>
+                  {cover && (
                     <img
+                      key={cover}
                       src={cover}
                       alt=""
                       loading="lazy"
                       referrerPolicy="no-referrer"
-                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+                      onError={(e) => { e.currentTarget.hidden = true; }}
+                      className="relative h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                     />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center bg-gradient-brand-soft text-4xl font-black text-primary/70">
-                      {item.title.charAt(0).toUpperCase()}
-                    </span>
                   )}
 
                   {isNew && (
