@@ -55,8 +55,15 @@ is about 30 per 154. Movies can't link locally because there's no TMDB key; prod
 - A1 gate FAILs fixed (scroll kept per section, clean initials, letter-tile cover fallback). These need a
   browser re-check at 390 / 1440.
 
+- **A2 finished** (43c97dc): MediaDetailPanel as a phone full-screen sheet, iPad side sheet, and Mac 420px
+  pane with ‹ › / ←/→ / Esc; no footer Close; linked titles use source metadata; Library-only controls
+  hidden on other sections. Media chunk 46.18 KiB gz. Cold load 236.68 KiB (gzip -9) / **237.29 (default
+  gzip)**, which is right at the 237 gate. Pick ONE measurement method and trim if needed.
+
 ## First fixes when resuming
-1. Finish A2 (the NOT DONE list above), then A3 declutter.
+1. **Hole to fix before shipping:** clicking another grid card while editing in the Mac pane silently
+   drops unsaved edits. Confirm first, or keep the edit.
+2. A3 declutter.
 2. Run the full Phase 1 browser gate, including the A1 checks that weren't run and the re-check of the
    three fixes above.
 
