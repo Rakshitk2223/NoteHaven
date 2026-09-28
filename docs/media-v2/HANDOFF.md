@@ -48,13 +48,17 @@ is about 30 per 154. Movies can't link locally because there's no TMDB key; prod
 - **Seen:** a one-off HMR hook-order crash in dev (gone after reload; not a shipping bug). A movie got its
   sequel's poster (a title-match edge case; add it as a media-match test).
 
+## Done since freeze (2026-09-28, late)
+- Perf gate fixed: cold-load 236.6 KiB gz (gate 237). media-link is lazy now.
+- Dry-run near-tie fixed (the same work on two sources isn't a rival). Rescored **435 / 1,259 → 342 auto ·
+  76 review · 17 unlinked** (review 66% → 17%). Movies stay unlinked locally (no TMDB key).
+- A1 gate FAILs fixed (scroll kept per section, clean initials, letter-tile cover fallback). These need a
+  browser re-check at 390 / 1440.
+
 ## First fixes when resuming
-1. **Perf gate is failing:** cold-load JS is 239.9 KiB gz against a gate of 237. `src/lib/media-metadata.ts` statically imports
-   `refreshLinked` from `./media-link`, and `RefreshActivityContext` (loaded at app entry) imports
-   media-metadata, so media-link and media-sources ship on first paint. Fix: `await import('./media-link')`
-   at the refreshLinked call site. Media chunk: 44.55 KiB gz.
-2. Fix the dry-run near-tie rule (same work on two sources ≠ rivals), then `--rescore`.
-3. The A1 gate FAILs listed above. Then finish A2 and do A3.
+1. Finish A2 (the NOT DONE list above), then A3 declutter.
+2. Run the full Phase 1 browser gate, including the A1 checks that weren't run and the re-check of the
+   three fixes above.
 
 ## Local dev
 ```
