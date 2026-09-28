@@ -1,230 +1,241 @@
-# NoteHaven — Backend Context
+# NoteHaven — backend map
 
-> NoteHaven has **no traditional backend server**. The "backend" is Supabase: PostgreSQL (with Row Level Security), Supabase Auth, Realtime, Postgres RPC functions, and a single Edge Function for media search. The React client talks to Supabase directly via `@supabase/supabase-js`.
-
----
-
-## 1. Architecture
+There is no application server. The backend is one Supabase project: Postgres with row-level security,
+Auth (email + password), Storage (two buckets), Realtime (Notes), RPC functions, and one Deno edge
+function, `media-search`. The client reaches everything through the single supabase-js client in
+`src/integrations/supabase/client.ts`. Conventions and gotchas are in `CLAUDE.md`; the frontend side is
+in `context/frontend.md`.
 
 ```
-React SPA  ──(supabase-js: auth, from(), rpc(), realtime)──►  Supabase
-   │                                                            ├─ PostgreSQL + RLS
-   │                                                            ├─ Auth (email/password)
-   │                                                            ├─ Realtime (notes sync, shared notes)
-   │                                                            └─ RPC functions
-   └──(fetch / axios)──►  Edge Function: media-search  ──►  External APIs
-                                                            (AniList, Jikan, Kitsu,
-                                                             MangaUpdates, TMDB, OMDB)
+React SPA ──supabase-js──► Supabase: Postgres + RLS · Auth · Storage (vault, avatars) · Realtime (notes) · RPC
+    │
+    ├──fetch + user JWT──► edge function media-search ──► AniList, Jikan, MangaDex, MangaUpdates,
+    │                          (service role)                TVmaze, TMDB, Wikidata/Commons, Fanart.tv
+    │                          └──upsert──► media_metadata
+    └──direct from the browser──► AniList, Kitsu, Jikan, TVmaze (cover refresh) · TheMealDB · Openverse
 ```
 
-There is also a Node script (`scripts/backfill-cover-images.ts`) run locally with the service-role key to backfill `media_tracker.cover_image`.
+Sources of truth: `supabase/migrations/*.sql` applied in filename order, and
+`src/integrations/supabase/types.ts` (generated, then hand-edited).
 
-> The backend source lives in the git-tracked `supabase/` folder: `supabase/config.toml`, `supabase/functions/media-search/index.ts`, and five SQL migrations under `supabase/migrations/`. The schema below reflects those migrations and matches the generated client types in `src/integrations/supabase/types.ts`. (`supabase/.temp/` is CLI cache and is untracked.)
+## Tables
 
-### Migration files (`supabase/migrations/`)
-1. `01_create_base_schema.sql` — core tables (`tasks`, `notes`, `prompts`, `media_tracker`), RLS policies (separate per-operation policies), `handle_updated_at` trigger, base indexes.
-2. `02_add_all_features.sql` — tags + junctions (+ usage-count triggers), money ledger (+ default-categories trigger on signup, monthly-summary fn), subscriptions (+ default categories, **auto-ledger-entry trigger**, upcoming-renewals fn), birthdays, countdowns, shared notes (+ share-based note read/update policies using `current_setting('app.share_id')`), code snippets, and the `get_calendar_events` function.
-3. `03_create_media_metadata.sql` — public `media_metadata` cache (public read; insert/update open to service role).
-4. `04_create_user_preferences.sql` — `user_preferences` (dashboard layout etc.).
-5. `05_add_cover_image_and_search_index.sql` — adds `media_tracker.cover_image`, enables `pg_trgm`, backfills covers from `media_metadata`, adds GIN trigram indexes on titles.
-6. `06_add_ledger_buckets.sql` — adds `ledger_buckets` (+ RLS, `updated_at` trigger), `bucket_id`/`from_bucket_id` on `ledger_entries`, and relaxes the `type` CHECK to allow `'transfer'`.
+Conventions: `user_id` is `UUID NOT NULL → auth.users ON DELETE CASCADE`; "upd" means a `BEFORE UPDATE`
+trigger stamps `updated_at`. RLS styles: **ALL** = one `FOR ALL` policy with
+`USING / WITH CHECK (auth.uid() = user_id)`; **per-op** = separate SELECT / INSERT / UPDATE / DELETE
+policies; **EXISTS** = junction policies that check ownership of the parent row. The "file" column is
+where the table is created (`00` = the baseline).
 
----
+### Core content
 
-## 2. Supabase Client (`src/integrations/supabase/client.ts`)
+| Table | Columns worth knowing | RLS | File | Used by |
+|---|---|---|---|---|
+| `tasks` | `task_text`, `is_completed`, `is_pinned`, `due_date` · upd | per-op | 00 | `Tasks`, `Dashboard`, calendar quick-add |
+| `notes` | `title`, `content` (HTML), `is_pinned`, `calendar_date`, `background_color` (category key) · upd | per-op, owner only | 00 | `Notes` (+ realtime), `Dashboard`; share RPCs |
+| `prompts` | `title`, `prompt_text`, `category`, `is_favorited`, `is_pinned` · **no `updated_at`** | per-op | 00 | `Library`, `Dashboard`, `CommandsTab` |
+| `media_tracker` | `title`, `type` CHECK (Movie, Series, Anime, Manga, Manhwa, Manhua, KDrama, JDrama), `status` CHECK (Watching, Reading, Plan to Watch, Plan to Read, Completed), `rating` 1–10, `current_season/episode/chapter`, `cover_image`, `release_date`, `last_known_total_episodes/seasons`, `has_new_content`, `last_activity_at` · trigram GIN on `title` · upd + activity trigger | per-op | 00 | `MediaTracker`, `lib/media-*`, `simple-image-fetcher`, scripts |
+| `code_snippets` | `title`, `code`, `language`, `category`, `folder_id` → `snippet_folders` (SET NULL), `filename`, `description`, `is_favorited`, `is_pinned` · upd | per-op | 00 | `lib/codeSnippets.ts` |
+| `snippet_folders` | `name` (unique per user), `color`, `sort_order` · upd. **Also the project list for `commands`** | ALL | 00 | `lib/codeSnippets.ts`, `lib/commands.ts` |
+| `commands` | `folder_id` → `snippet_folders` (SET NULL), `category` (free text), `label`, `command`, `description`, `is_favorited`, `is_pinned`, `sort_order` · upd | ALL | 21 | `lib/commands.ts` |
+| `user_preferences` | `preference_key`, `preference_value` JSONB; unique `(user_id, preference_key)`. Keys: `dashboard_widgets`, `app_preferences`, `ledger_categories_v2_seeded` · upd | ALL | 00 | `lib/dashboard.ts`, `lib/preferences.ts`, `lib/category-init.ts` |
 
-```ts
-createClient<Database>(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, {
-  auth: { storage: localStorage, persistSession: true, autoRefreshToken: true }
-});
-```
+### Tags
 
-- Reads `import.meta.env.VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`. Dev-only warning if missing; in prod it constructs with empty strings (calls then fail at runtime).
-- Single shared client instance imported everywhere as `supabase`.
-- Typed against the generated `Database` type in `types.ts`.
-
-Project ref seen in `deploy-edge-function.sh`: `ylefihvjlyzabhvgdnoe`.
-
----
-
-## 3. Database Schema (from `types.ts`)
-
-All user tables key off `auth.uid()` via a `user_id` column and are expected to use RLS (`auth.uid() = user_id`). `media_metadata` is the public/shared exception.
-
-### Core content tables
-
-**`notes`**
-- `id` (bigint PK), `user_id`, `title`, `content` (HTML), `is_pinned` (bool), `background_color` (category color string, nullable), `calendar_date` (nullable), `created_at`, `updated_at`.
-
-**`tasks`**
-- `id`, `user_id`, `task_text`, `is_completed`, `is_pinned`, `due_date` (nullable), `created_at`, `updated_at`.
-
-**`prompts`**
-- `id`, `user_id`, `title` (nullable), `prompt_text`, `category` (nullable), `is_favorited`, `is_pinned`, `created_at`.
-
-**`code_snippets`**
-- `id`, `user_id`, `title`, `code`, `language`, `category` (nullable), `is_favorited`, `is_pinned`, `created_at`, `updated_at`.
-
-**`media_tracker`**
-- `id`, `user_id`, `title`, `type` (Movie/Series/Anime/Manga/Manhwa/Manhua/KDrama/JDrama), `status` (Watching/Reading/Plan to Watch/Plan to Read/Completed), `rating`, `current_season`, `current_episode`, `current_chapter`, `cover_image` (nullable), `release_date`, `created_at`, `updated_at`.
-
-### Tagging (many-to-many)
-
-**`tags`**: `id`, `user_id`, `name` (normalized lowercase), `color` (hex), `usage_count`, `created_at`.
-
-Junction tables (composite PK `(<entity>_id, tag_id)`, FKs to entity + `tags`):
-- `note_tags` (note_id, tag_id)
-- `task_tags` (task_id, tag_id)
-- `media_tags` (media_id, tag_id)
-- `prompt_tags` (prompt_id, tag_id)
-- `code_snippet_tags` (snippet_id, tag_id)
-
-`usage_count` is maintained server-side (the client relies on it for sorting and `canDeleteTag`); a `cleanup_empty_tags` function exists. Comments in `tags.ts` mention tags auto-cleanup via trigger.
-
-### Finance
-
-**`ledger_categories`**: `id`, `user_id`, `name`, `type` ('income'|'expense'), `color`, `description`, `created_at`.
-
-**`ledger_entries`**: `id`, `user_id`, `category_id` (FK), `type` ('income'|'expense'|'transfer'), `amount` (numeric), `description`, `notes`, `transaction_date` (date), `is_recurring`, `recurring_interval`, `bucket_id` (FK→ledger_buckets), `from_bucket_id` (FK→ledger_buckets, transfers only), `created_at`, `updated_at`.
-
-**`ledger_buckets`** (migration 06 — envelope budgeting): `id`, `user_id`, `name`, `kind` ('spending'|'saving'|'obligation'|'liability'), `color`, `target_amount` (nullable goal), `notes`, `sort_order`, `created_at`, `updated_at`. Income allocated to / expenses drawn from a bucket; `transfer` entries move between `from_bucket_id`→`bucket_id`. Balances computed client-side in `lib/buckets.ts`.
-
-**`subscription_categories`**: `id`, `user_id`, `name`, `color`, `created_at`.
-
-**`subscriptions`**: `id`, `user_id`, `name`, `amount`, `billing_cycle` ('monthly'|'yearly'), `category_id` (FK), `start_date`, `end_date`, `next_renewal_date`, `status` (active/renew/cancel/cancelled), `notes`, `ledger_category_id` (FK), `ledger_entry_id` (FK to the auto-created ledger row), `created_at`, `updated_at`.
-- A DB trigger keeps a linked `ledger_entries` row in sync (create/update/delete) — documented in `lib/subscriptions.ts`.
-
-### Time-based / misc
-
-**`birthdays`**: `id`, `user_id`, `name`, `date_of_birth` (date), `created_at`.
-
-**`countdowns`**: `id`, `user_id`, `event_name`, `event_date`, `created_at`.
-
-**`shared_notes`**: `id` (uuid PK), `note_id` (FK → notes), `owner_id`, `allow_edit` (bool), `created_at`. Powers public `/notes/share/:id`.
-
-**`user_preferences`**: `id` (uuid), `user_id`, `preference_key`, `preference_value` (jsonb), timestamps. Unique on `(user_id, preference_key)`. Currently stores `dashboard_widgets`.
-
-### Public metadata (shared, read-only to all)
-
-**`media_metadata`**: `id`, `title`, `type`, `cover_image` (required), `banner_image`, `description`, `rating`, `episodes`, `chapters`, `status`, `anilist_id`, `mal_id`, `tmdb_id`, `created_at`, `last_updated`. Upserts conflict on `(title, type)`. README notes ~653 pre-cached items. Read policy is public; this is the cover-image cache shared across users.
-
----
-
-## 4. Postgres RPC Functions (callable via `supabase.rpc`)
-
-| Function | Args | Returns | Used by |
+| Table | Notes | RLS | File |
 |---|---|---|---|
-| `get_calendar_events` | `p_user_id`, `p_start_date`, `p_end_date` | rows `{event_id, event_type, title, event_date, color, data}` | `hooks/useCalendar.ts` (unified calendar) |
-| `get_monthly_ledger_summary` | `p_user_id`, `p_year`, `p_month` | `{total_income, total_expense, net_balance}` | `lib/ledger.ts → getLedgerSummary` |
-| `get_upcoming_renewals` | `p_user_id`, `p_days?` | renewal rows incl. `days_until` | `lib/subscriptions.ts → getUpcomingRenewals` |
-| `cleanup_empty_tags` | — | void | tag maintenance (placeholder client call) |
-| `normalize_tag_name` | `tag_name` | text | tag normalization (server side) |
-| `show_limit`, `show_trgm` | — | trigram helpers (pg_trgm) | search support |
+| `tags` | `name` (unique per user, normalised client-side by `validateTagName`), `color`, `usage_count` | ALL | 00 |
+| `note_tags`, `task_tags`, `media_tags`, `prompt_tags` | composite PK `(<entity>_id, tag_id)`, cascades; a trigger maintains `tags.usage_count` | EXISTS (`FOR ALL`) | 00 |
+| `code_snippet_tags` (`snippet_id`, `tag_id`) | composite PK, cascades; **no usage-count trigger** | EXISTS (per-op) | 00 |
+| `work_project_tags` (`project_id`, `tag_id`) | composite PK, cascades; **no usage-count trigger** | EXISTS (per-op) | 23 |
 
-`get_calendar_events` is the backbone of the Calendar page — it merges all time-based entities server-side and returns a typed, colored event stream.
+All tag reads and writes go through `lib/tags.ts` (`set<Entity>Tags`, `searchByTag`).
 
----
+### Money
 
-## 5. Row Level Security (from migrations)
+| Table | Columns worth knowing | RLS | File | Used by |
+|---|---|---|---|---|
+| `ledger_accounts` | `name`, `kind` CHECK (bank, cash, card), `opening_balance`, `color`, `sort_order`, `archived` · upd | ALL | 00 | `lib/accounts.ts` |
+| `ledger_categories` | `name`, `type` CHECK (income, expense), `color`, `description`; unique `(user_id, name, type)` | ALL | 00 | `lib/category-init.ts`, `lib/ledger.ts` |
+| `ledger_entries` | `amount` ≥ 0, `type` CHECK (income, expense, transfer), `category_id` → categories, `account_id` / `to_account_id` → accounts (all SET NULL), `transaction_date`, `description`, `notes`, `is_recurring`, `recurring_interval` · upd | ALL | 00 | `lib/ledger.ts` |
+| `subscription_categories` | `name` (unique per user), `color` | ALL | 00 | `lib/subscriptions.ts`, `lib/category-init.ts` |
+| `subscriptions` | `name`, `amount`, `billing_cycle` CHECK (monthly, yearly), `category_id`, `start_date`, `next_renewal_date`, `end_date`, `status` CHECK (active, renew, cancel, cancelled), `notes`, `ledger_category_id`, `ledger_entry_id` (**legacy, always NULL**) · upd | ALL | 00 | `lib/subscriptions.ts`, `lib/ledger.ts` |
 
-Every user table enables RLS and scopes by `auth.uid() = user_id`. Two policy styles are used:
-- **Base tables** (`tasks`, `notes`, `prompts`, `media_tracker`, `code_snippets`): separate per-operation policies (`SELECT`/`INSERT`/`UPDATE`/`DELETE`).
-- **Feature tables** (`tags`, `ledger_*`, `subscription_*`, `countdowns`, `birthdays`, `user_preferences`): a single `FOR ALL` policy with `USING` + `WITH CHECK`.
-- **Junction tables** (`note_tags`, etc.): policies check ownership of the parent row via an `EXISTS` subquery.
+Subscriptions write nothing to the ledger. `deriveSubscriptionCharges` (`lib/ledger.ts`) computes the
+charges at read time, and `getLedgerSummary` adds them to the RPC totals so the Dashboard and Money
+Ledger agree. Money in hand = opening balances + income − expenses − subscription charges
+(`lib/accounts.ts`).
 
-```sql
--- typical FOR ALL policy
-CREATE POLICY "Users can manage their own data"
-  ON <table> FOR ALL
-  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+### Time-based
 
--- public read (media_metadata) — insert/update intentionally open (service role / edge fn)
-CREATE POLICY "Allow public read access" ON media_metadata FOR SELECT USING (true);
-```
+| Table | Columns | RLS | File |
+|---|---|---|---|
+| `birthdays` | `name`, `date_of_birth`; unique `(user_id, name, date_of_birth)`; `user_id` is nullable here | per-op | 00 |
+| `countdowns` | `event_name`, `event_date` | ALL | 00 |
 
-**Shared notes** use a session-variable mechanism: `shared_notes` has owner-full-access + public `SELECT`. `notes` then gets `notes_select_via_share` / `notes_update_via_share` policies that match when `shared_notes.id = current_setting('app.share_id')::uuid` (and `allow_edit` for updates). Note: the `SharedNote.tsx` client reads via the anon key relying on `shared_notes_public_read` + the share-scoped note policies.
+### Sharing and the shared media cache
 
----
+| Table | Notes | RLS | File |
+|---|---|---|---|
+| `shared_notes` | `id` UUID (**the share secret**), `note_id` → notes (cascade), `owner_id`, `allow_edit` | owner only, on `owner_id` | 00 |
+| `media_metadata` | **no `user_id` — cross-tenant.** `title` + `type` (unique together; lowercase type CHECK), `cover_image` (nullable), `banner_image`, `description`, `rating`, `status`, `episodes`, `chapters`, `anilist_id`, `mal_id`, `tmdb_id`, `total_seasons`, `seasons`, `genres`, `episodes_detail`, `cast_members`, `runtime`, `last_updated` · trigram GIN on `title` | SELECT for everyone; INSERT / UPDATE `TO authenticated` `WITH CHECK (true)` | 00 |
 
-## 6. Edge Function: `media-search`
+Share recipients never touch these tables: they use the `get_shared_note` / `update_shared_note` RPCs
+below. Every writer of `media_metadata` upserts on `(title, type)`; the edge function writes with the
+service role.
 
-Deployed at `${VITE_SUPABASE_URL}/functions/v1/media-search`. Deployed with `--no-verify-jwt` (anonymous access).
+### Vault, lifestyle, work
 
-**Query params (GET)**: `q` (required), `type` (anime/manga/movie/series/kdrama/jdrama/…), `limit` (default 10).
-**Also supports POST** with `{ items: [{id, title, type}] }` for batch lookups (used by the backfill script).
+| Table | Columns worth knowing | RLS | File | Used by |
+|---|---|---|---|---|
+| `vault_folders` | `parent_id` → self (cascade; NULL = root), `name`, `color`, `sort_order`; `UNIQUE NULLS NOT DISTINCT (user_id, parent_id, name)` (PG15+) · upd | ALL | 00 | `lib/vault.ts` |
+| `vault_files` | `folder_id` → folders (cascade), `name`, `storage_path`, `mime_type`, `size_bytes`, `is_starred` · upd. Metadata only; bytes live in Storage | ALL | 00 | `lib/vault.ts`, Settings → Data |
+| `bucket_list` | `title`, `description`, `category`, `status` CHECK (dreaming, planned, achieved), `image_url`, `target_date`, `achieved_at`, `sort_order` · upd | ALL | 00 | `lib/bucket-list.ts` |
+| `recipe_folders` | `name`, `sort_order` | ALL | 00 | `lib/recipes.ts` |
+| `recipes` | `folder_id` (SET NULL), `title`, `description`, `image_url`, `cuisine`, `category`, `ingredients` JSONB (string array), `instructions`, `prep_minutes`, `cook_minutes`, `servings`, `difficulty` CHECK (easy, medium, hard), `source_url`, `is_favorite`, `sort_order` · upd | ALL | 00 | `lib/recipes.ts` |
+| `wishlist_items` | `user_id` DEFAULT `auth.uid()`, `name`, `url`, `current_price`, `target_price`, `notes`, `status` CHECK (active, purchased, archived), `price_history` JSONB array, `price_drop_notified_at` · upd | ALL | 22_wishlist | `lib/wishlist.ts` |
+| `work_projects` | `user_id` DEFAULT `auth.uid()`, `name`, `helped` **TEXT[]** (GIN), `description`, `month` (first of month), `duration_value` > 0 + `duration_unit` CHECK (days, weeks, months), `hours` ≥ 0, `team`, `link`, `status` CHECK (active, delivered, on_hold) · upd | ALL | 23 | `lib/work.ts` |
 
-**Response shape** (consumed by the client):
-```ts
-{ success: boolean, query, type, count, results: ExternalMedia[], source?: 'database'|'api'|'none' }
-```
+Not tables: the recipe pantry (`localStorage.recipesPantry`) and command "projects" (they reuse
+`snippet_folders`). `ledger_buckets` was dropped by migration 20.
 
-**Cover-image cascade** (per README + client logic):
-1. Supabase `media_metadata` lookup (fast).
-2. AniList / Jikan (anime/manga).
-3. MangaUpdates (manhwa/manhua/manga) — proxied through the edge function (no CORS).
-4. TMDB (movies/series, needs `TMDB_API_KEY`).
-Newly fetched covers are written back to `media_metadata`.
+## RPC functions
 
-**Secrets**: `TMDB_API_KEY` set via `supabase secrets set` (a key value is hard-coded in `deploy-edge-function.sh` — see audit; it should be rotated and removed from VCS).
+| Function | Returns | Security | Called by |
+|---|---|---|---|
+| `get_shared_note(p_share_id uuid)` | the note's `id`, `title`, `content`, `updated_at`, `allow_edit` | DEFINER, pinned `search_path`; no user check — the share UUID is the credential; granted to anon + authenticated | `SharedNote.tsx` |
+| `update_shared_note(p_share_id, p_title?, p_content?)` | rows written (0 when the share is missing or read-only) | same as above | `SharedNote.tsx` |
+| `get_calendar_events(p_user_id, p_start_date, p_end_date)` | `event_id, event_type, title, event_date, color, data` across tasks, birthdays (29 Feb handled), subscriptions, countdowns, notes and media release dates | DEFINER, pinned; **raises 42501 unless `p_user_id = auth.uid()`**; authenticated only | `hooks/useCalendar.ts` |
+| `get_upcoming_renewals(p_user_id, p_days = 30)` | `id, name, amount, billing_cycle, next_renewal_date, days_until, status`; overdue renewals come back with a negative `days_until` | DEFINER, pinned; same `auth.uid()` check; authenticated only | `lib/subscriptions.ts` `getUpcomingRenewals` ← Dashboard only |
+| `get_monthly_ledger_summary(p_user_id, p_year, p_month)` | `total_income, total_expense, net_balance` | INVOKER (RLS scopes it), pinned | `lib/ledger.ts` `getLedgerSummary` |
+| `normalize_tag_name(text)`, `cleanup_empty_tags()` | — | INVOKER | nothing calls them |
 
----
+`show_limit` / `show_trgm` in `types.ts` are pg_trgm internals, not app functions.
 
-## 7. How the Client Reaches Each Concern
+## Triggers
 
-- **Auth**: `supabase.auth.*` (sign in/up/out, getUser, getSession, onAuthStateChange, updateUser for display name & password).
-- **CRUD**: direct `supabase.from('<table>').select/insert/update/delete` — both inside `lib/*` modules and inline in pages.
-- **Aggregations**: `supabase.rpc(...)` (calendar, ledger summary, renewals).
-- **Realtime**: `supabase.channel(...).on('postgres_changes', …)` in `Notes.tsx` (multi-tab note sync) and `SharedNote.tsx` (collaborative editing).
-- **Media search/cover**: edge function via `fetch`/axios, plus direct external API calls from the browser in `media-refresh.ts` (AniList, Jikan, Kitsu, TMDB, OMDB).
-- **Preferences**: `user_preferences` table (dashboard layout).
+| Function | On | Does |
+|---|---|---|
+| `handle_updated_at` | most tables (every "upd" above) | stamps `updated_at` |
+| `update_ledger_entry_timestamp`, `update_subscription_timestamp` | `ledger_entries`, `subscriptions` | stamp `updated_at` |
+| `update_tag_usage_count` | `note_tags`, `task_tags`, `media_tags`, `prompt_tags` (insert / delete) | keeps `tags.usage_count` |
+| `media_tracker_touch_activity` | `media_tracker` update | bumps `last_activity_at` only when progress, rating or status changes |
+| `create_default_ledger_categories`, `create_default_subscription_categories` | `auth.users` insert | seed default categories (DEFINER; EXECUTE revoked from clients). The client seeds its own newer ledger set once, behind the `ledger_categories_v2_seeded` flag |
 
----
+## Storage
 
-## 8. Cover-Image Subsystem (detailed)
+| Bucket | Access | Limits | Path | Used by |
+|---|---|---|---|---|
+| `vault` | **private**; one owner-only policy on `storage.objects` (`(storage.foldername(name))[1] = auth.uid()::text`) | 25 MB per file | `{user_id}/{uuid}.{ext}` | `lib/vault.ts` |
+| `avatars` | **public** URLs; owner INSERT / UPDATE / DELETE (the public-read policy was dropped by `22_security_lint`) | 5 MB; png, jpeg, webp, gif | `{user_id}/avatar.{ext}` | `settings/AccountSection.tsx` (URL saved in the auth user's `avatar_url` metadata) |
 
-`lib/simple-image-fetcher.ts` — `fetchImagesFromSupabase(items)`:
-1. localStorage cache (`media_images_v1`, sources in `media_image_sources_v1`).
-2. `media_tracker.cover_image` (one `IN` query — fastest, no cross-table).
-3. `media_metadata` matched by `(title,type)` (one `IN` query on title).
-4. Edge function for still-missing items, in parallel batches of 10 with a 100ms inter-batch delay.
-Results merged and re-cached. Returns `{found, notFound, fetchedFromAPI, results[]}`.
+Vault rules: the folder tree lives in the database, so moving a file is a one-row `UPDATE` and the
+storage path never changes. There are no share links — preview and download mint short-lived signed
+URLs (10 min preview, 2 min download). `deleteFolder` collects the subtree's storage paths, deletes the
+folder row (cascading the file rows), then removes the objects.
 
-`lib/media-refresh.ts` — `refreshCoverImage(title,type,currentApiSource,mediaId)`:
-- Per-type API priority list; cycles to the **next** API after the current source so repeated clicks rotate through sources.
-- Writes the new cover to both `media_tracker` (by id, scoped to user) and `media_metadata` (upsert on `title,type`), then invalidates the localStorage cache entry.
-- Browser-side TMDB/OMDB calls read `import.meta.env.TMDB_API_KEY` / `OMDB_API_KEY` (non-`VITE_` → undefined in the browser; those branches no-op). MangaUpdates is proxied through the edge function.
+## Realtime
 
-`scripts/backfill-cover-images.ts` — local Node script:
-- Loads `.env` manually, prefers `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS).
-- Finds `media_tracker` rows with null `cover_image`, POSTs batches to the edge function with exponential backoff on 429/503, updates rows.
+One subscriber: `Notes.tsx` opens `channel('notes-changes')` for `postgres_changes` on `public.notes`,
+filtered by `user_id`, and removes it on unmount. `SharedNote` has no realtime. No migration adds
+`notes` to the `supabase_realtime` publication — on a new project, enable it in the dashboard.
 
----
+## Edge function `media-search`
 
-## 9. Deployment / Ops
+`supabase/functions/media-search/index.ts`; the client helper is `src/lib/edge-function.ts`.
 
-- **Edge function**: `deploy-edge-function.sh` (or README's manual steps) — `supabase link --project-ref …`, `supabase functions deploy media-search --no-verify-jwt`, `supabase secrets set TMDB_API_KEY=…`.
-- **DB**: run the migration files in `supabase/migrations/` (01→10) in order, via the Supabase SQL editor or `supabase db push`. Migration `10` (Vault) creates a Storage bucket + `storage.objects` policies, so it must be run in the **SQL Editor** (elevated role), not `db push` alone.
-- **Hosting**: static SPA (Netlify-style `_redirects` present in `public/`), PWA enabled.
+- **Auth:** `verify_jwt = true` in `supabase/config.toml` (sticky server-side, hence declared there),
+  and the function also requires the JWT `role` to be `authenticated`, so both the anon key and the
+  service-role key get 401. `mediaSearchGet` sends `apikey: <anon key>` and
+  `Authorization: Bearer <session access token>`; it returns `null` when there's no session, on a non-2xx
+  response or on a network error, and callers treat that as "no cover".
+- **CORS:** `ALLOWED_ORIGINS` (comma-separated secret); unset means `*`. A request from an origin that
+  isn't listed gets the first allowed origin echoed back.
+- **GET** `?q=` (required, truncated to 200 characters) `&type=` `&limit=` (default 10, clamped 1–50)
+  `&source=` `&refresh=1`:
+  - *search mode* (default): check `media_metadata` (`ilike`, skipped when `refresh` is set), then query
+    the sources for the type **in parallel** — anime or untyped: AniList + Jikan + TMDB (tv);
+    manga / manhwa / manhua: AniList + Jikan + MangaDex + MangaUpdates; movie / series / kdrama /
+    jdrama: TMDB + TVmaze + Wikidata; anything else: AniList + TMDB. Results are de-duplicated and
+    ranked by type match, with per-source pacing and one retry on 429.
+  - *source mode* (`source=anilist|jikan|mangadex|mangaupdates|tvmaze|tmdb|wikidata|fanart`): one
+    source, cache skipped. `media-refresh.ts` uses it for TMDB, Wikidata and Fanart so those keys stay
+    server-side.
+  - Response: `{ success, source, query, type, count, results[], duration? }`, where `source` is
+    `database`, the named source, a comma-joined list of sources, or `none`.
+- **POST** `{ items: [{ id, title, type }] }` (no `q`): batch cover lookup, at most 50 items, of which the
+  first 20 cache misses are fetched; returns `{ success, results: [{ id, cover_image }] }`. Nothing in
+  the repo calls it today.
+- **Writes:** fire-and-forget upserts into `media_metadata` on `(title, type)` with the service role —
+  the top 10 results in search and source modes, and cover-only rows in batch mode.
+- **Errors:** `{ error }` with 400, 401 or 500; internal details are never returned.
+- **Secrets:** `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS`; `SUPABASE_URL` and
+  `SUPABASE_SERVICE_ROLE_KEY` come from the runtime.
+- **Deploy:** `deploy-edge-function.sh` checks the CLI and login, runs
+  `supabase link --project-ref ylefihvjlyzabhvgdnoe` and `supabase functions deploy media-search` (JWT
+  verification comes from `config.toml`), then sets `TMDB_API_KEY`, `FANART_API_KEY` and
+  `ALLOWED_ORIGINS` from the environment when they're present. CI parses the function with esbuild on
+  every push.
 
----
+## Cover images in the client
 
-## 10. Security Notes (see audit for severity)
+- `lib/simple-image-fetcher.ts` `fetchImagesFromSupabase(items)`: localStorage cache
+  (`lib/image-cache.ts`, 24 h TTL) → `media_tracker.cover_image` → `media_metadata` by `(title, type)`
+  (both as `IN` queries chunked at 100) → the edge function for what's still missing, 10 at a time with
+  100 ms between batches. Returns `{ found, notFound, fetchedFromAPI, results[] }`.
+- `lib/media-refresh.ts` `refreshCoverImage(title, type, currentApiSource, mediaId)`: each type has a
+  source priority list and each click moves on to the next source. It writes the new cover to
+  `media_tracker` (by id) and `media_metadata` (upsert), then invalidates the cache entry. MangaDex and
+  MangaUpdates are deliberately left out (no browser CORS).
+- `lib/media-metadata.ts` `refreshLibrary`: the Refresh Library sweep, run through
+  `RefreshActivityContext`. It fills missing covers and metadata only, and never writes personal progress.
 
-- Anon key + project URL are public by design (client app); security depends entirely on correct RLS.
-- `SUPABASE_SERVICE_ROLE_KEY` is for the backfill script / edge function **only** — must never reach client bundles. `.env` is gitignored.
-- ⚠️ `deploy-edge-function.sh` contains a hard-coded `TMDB_API_KEY` value committed to the repo — should be removed/rotated.
-- Edge function is intentionally unauthenticated (`--no-verify-jwt`) for public cover search; it should not expose user data (it only reads `media_metadata` and external APIs).
-- Note content is HTML; the client sanitizes with DOMPurify on render (`sanitizePreview`). `SharedNote` renders into `contentEditable` via `innerHTML` of stored content — sanitization there should be verified (see audit).
+## Migrations
 
----
+Applied by hand in the Supabase SQL editor, in filename order. There is no runner: `supabase db push`
+would trip over the two `22_` files, and `00` inserts into `storage.buckets`, which needs the editor's
+privileges.
 
-## 11. Vault & Supabase Storage (`vault_folders`, `vault_files`, `vault` bucket)
+| File | What it does | Safe to re-run? |
+|---|---|---|
+| `00_baseline_schema.sql` | the former migrations 01–19 concatenated verbatim, in their original order (see the section list below). Ends with two verification SELECTs | **no** — re-creates `media_metadata_*` policies without dropping them first ("policy already exists"); **can't bootstrap an empty project today** (section 15 reads `subscriptions.ledger_entry_id` before section 18 adds it) |
+| `20_data_cleanup.sql` | blank prompt categories → NULL; delete orphan tags; null out malformed cover URLs; drop `ledger_buckets`, `bucket_id`, `from_bucket_id`, `create_default_ledger_buckets()`; review-only SELECTs for leftover subscription ledger rows and orphan vault objects | **no** — its orphan-tag DELETE predates `work_project_tags` and would delete work-only tags |
+| `21_commands.sql` | `commands` table, policy, trigger, indexes | yes |
+| `22_security_lint.sql` | pins `get_monthly_ledger_summary`'s `search_path`; revokes EXECUTE on the signup trigger functions; revokes anon on the calendar / renewals RPCs; drops "Avatar public read". Its footer lists the linter warnings accepted by design and two dashboard-only steps | yes |
+| `22_wishlist.sql` | `wishlist_items` | yes |
+| `23_work_projects.sql` | `work_projects` (GIN on `helped`) and `work_project_tags` | yes |
 
-The Vault (`/vault`, `src/pages/Vault.tsx`) is the **only feature that uses Supabase Storage**; everything else stores text in Postgres. Data access lives in `src/lib/vault.ts`. Schema: `supabase/migrations/10_create_vault.sql`.
+`00` sections: 01 core tables · 02 tags, ledger, subscriptions, birthdays, countdowns, shared notes,
+snippets, calendar RPC · 03 `media_metadata` · 04 `user_preferences` · 05 `cover_image` + pg_trgm ·
+06 ledger buckets (dropped by 20) · 07 snippet folders · 08 metadata seasons / genres + new-content
+columns · 09 episode detail, cast, runtime · 10 Vault tables + bucket · 11a `last_activity_at` · 11b
+avatars bucket · 12 signup triggers as DEFINER · 13 ledger accounts · 14 nullable `cover_image` · 15 drop
+the subscription → ledger triggers · 16 bucket list · 17 recipes · 18 drift reconcile · 19 security
+hardening (share RPCs, `auth.uid()` checks, pinned `search_path`s, authenticated-only `media_metadata`
+writes).
 
-- **`vault_folders`** — self-referencing tree: `parent_id` NULL = root, `ON DELETE CASCADE` removes sub-folders. `UNIQUE NULLS NOT DISTINCT (user_id, parent_id, name)` (PG15+) blocks duplicate names per parent, root included.
-- **`vault_files`** — metadata only (`name`, `storage_path`, `mime_type`, `size_bytes`, `is_starred`, `folder_id`). The folder hierarchy lives in the DB, so moving a file between folders is a one-row `UPDATE` — the storage path never changes.
-- **`vault` Storage bucket** — **private** (`public = false`), 25 MB/file (`MAX_FILE_BYTES`). Objects are stored at `{user_id}/{uuid}.{ext}`. Storage RLS on `storage.objects` scopes access to the owner via `(storage.foldername(name))[1] = auth.uid()::text`; the tables use the usual `auth.uid() = user_id` policy.
-- **No share links.** Preview/download mint short-lived **signed URLs** (`createSignedUrl`, 2–10 min) on demand for the current session only — never surfaced as shareable links. Whole-folder download is zipped client-side via `jszip` (lazy-imported), preserving sub-folder structure.
-- **Folder delete** (`lib/vault.ts → deleteFolder`) gathers descendant files and removes their Storage objects first (the DB cascade only clears rows, not bytes), then deletes the folder.
-- ⚠️ Migration `10` creates `storage.buckets` / `storage.objects` policies, so it **must be run in the Supabase SQL Editor** (elevated role). Alternatively create the bucket via Dashboard → Storage (uncheck Public) and run only the policy statements.
+**Accepted by design** (`22_security_lint.sql` footer): anon may call the two share RPCs;
+`media_metadata` writes are `WITH CHECK (true)` for authenticated users; pg_trgm stays in `public`.
+**Dashboard-only steps:** leaked-password protection, and the pending Postgres security patch.
+
+## Maintenance scripts (`scripts/`)
+
+All are run with `tsx` and read `./.env` themselves; everything that touches the database wants
+`SUPABASE_SERVICE_ROLE_KEY`, because with the anon key RLS returns no rows. Commands and flags are
+listed in `README.md`.
+
+| Script | Talks to |
+|---|---|
+| `backfill-cover-images.ts` | the upstream APIs **directly**, one item at a time (AniList, Kitsu, Jikan, MangaDex, MangaUpdates, TVmaze, TMDB, OMDB), then `media_tracker.cover_image` |
+| `backfill-media-metadata.ts` | the deployed edge function (source mode) → `media_metadata` and `media_tracker.last_known_total_*`. **Fails with 401 today** — it sends no auth header |
+| `backfill-release-dates.ts` | cached `media_metadata.episodes_detail` → `media_tracker.release_date` (no network) |
+| `backup-media.ts` | `media_tracker`, `media_metadata`, `media_tags` → `./backups/<timestamp>/` |
+| `audit-metadata-coverage.ts` | read-only coverage report |
+| `smoke-media-apis.ts` | the upstream APIs, to check the fields the edge function relies on |
+
+## Live-database health check
+
+`docs/audit/AUDIT_ONE_SHOT.sql` is a single read-only statement (the SQL editor shows only the last
+result set) with 20 sections: row counts, RLS gaps, SECURITY DEFINER hygiene, share policies, tag drift,
+vault orphans, ledger integrity, cover hosts, unmasked secrets, unused indexes, auth. **Its section 13
+still queries the dropped `ledger_buckets`, so the whole statement fails until that section is removed**,
+and its tag checks don't know about `work_project_tags`.

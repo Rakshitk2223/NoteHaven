@@ -1,103 +1,46 @@
-# NoteHaven — Improvement Backlog
+# NoteHaven — open items
 
-A running list of proposed enhancements and known-issue fixes, grouped by feature section.
-Status legend: 🔲 planned · 🚧 in progress · ✅ done.
+Kept as small as the truth allows: what's open, what's known to be broken, and what was deliberately
+declined. Finished work lives in git history, not here.
 
----
+## Declined — don't re-propose (owner triage, 2026-08-20)
 
-## 🏠 Dashboard
-- ✅ **Ledger widget fixed** — `fetchLedgerSummary` now uses the RPC-backed `getLedgerSummary(year, month)` helper from `lib/ledger.ts` instead of an inline query, eliminating the `toISOString()` UTC-drift that mis-bounded the month in IST.
-- 🔲 Income/expense sparkline + "spend vs. last month" delta on the ledger widget.
-- 🔲 Drag-resize grid (react-grid-layout) instead of the 1/4–full size menu.
-- 🔲 "Today" focus widget unifying tasks due, birthdays, renewals, countdowns.
-- 🔲 Multiple dashboard presets ("Work" / "Personal"), keyed per-preset in `user_preferences`.
-- 🔲 Global quick-add / command palette (⌘K).
-- 🔲 Greeting + activity streak / tasks-completed-this-week ring.
+Every proposal in the old backlog was reviewed and dropped except the Vitest item below. That covers
+the dashboard drag-resize grid and presets, prompt versioning and sharing, media recommendations and
+notifications, Tiptap upgrades, Kanban, calendar export, ledger budgets / recurring transactions /
+receipts, subscription and birthday reminders, tag nesting, PWA push, full-text search, task priorities
+and bulk actions, and reconciling the two theming paths (`index.css` static tokens vs `lib/themes.ts`).
+They were declined on purpose, not forgotten; the full list is in this file's git history. Small fixes
+and polish to existing features are always in scope.
 
-## 📚 Library (Prompts + Snippets)
-- ✅ Dead `pages/Prompts.tsx` already removed; `/prompts` is a working alias to Library.
-- 🔲 Prompt variables / templating (`{{topic}}` fill-in dialog before copy).
-- 🔲 Snippet run/preview for HTML/CSS/JS + "copy as markdown fenced block".
-- 🔲 Full-text search across both tabs (pg_trgm already enabled).
-- 🔲 Prompt versioning / edit history.
-- 🔲 Shareable public prompt links (reuse `shared_notes` pattern).
+## Open
 
-## 🎬 Media Tracker
-- ✅ **Cover refresh fixed** — TMDB/Fanart now proxy through the edge function (keys server-side via `?source=&refresh=1`). Added keyless **Wikidata/Commons** fallback for live-action; added **Fanart.tv** (optional `FANART_API_KEY`, no-ops until set). Removed OMDB (poster endpoint is patron-gated). _Requires edge-function redeploy to take effect._
-- 🔲 Cover sources for anime/manga: anilist → kitsu → jikan → tvmaze → tmdb. Live-action: tmdb/tvmaze → wikidata → fanart.
-- 🔲 Recommendations / "what's next" (next episode/chapter, airing schedule via AniList).
-- 🔲 Ratings analytics (distribution chart, average by type, year-in-review).
-- 🔲 Auto-status transitions (episode == total → prompt Complete).
-- 🔲 New episode/chapter notifications (AniList airing schedule → calendar).
-- 🔲 Collapse 8 media types into the custom-group system for a cleaner tab bar.
+- 🔲 **Vitest smoke tests for the `lib/*` data layer.** The only test today is `npm run test:insights`,
+  which covers pure media helpers. The data modules have none, and past drift (RLS policies, type errors)
+  was caught only by manual audits. There's no runner yet — set one up explicitly.
+- 🔲 **Extract Notes autosave** (`src/pages/Notes.tsx`, deferred on purpose). Saving is spread across
+  refs (`hasLocalChangesRef`, `lastSavedUpdatedAtRef`, `lastLoadedNoteIdRef`, pending title/content
+  refs), per-field debounced saves and realtime echo suppression — a likely home for subtle "my edit
+  reverted" bugs. Move it into a `useNoteAutosave` hook with clear conflict semantics and tests.
+- 🔲 **One server-state strategy** (deferred on purpose). MediaTracker, Library and the Commands tab use
+  React Query; the other pages use hand-rolled `useState` / `useEffect` loading. Migrate list pages
+  incrementally for instant cached back-navigation.
+- 🔲 **Work "People" tab.** A disabled "People — later" tab is already visible on `/work`; it isn't built.
+  Intended as a rollup of `work_projects.helped` (an `unnest` + `GROUP BY`).
+- 🔲 **Two dashboard-only security steps** (from the footer of `22_security_lint.sql`; SQL can't do
+  them): turn on leaked-password protection (Authentication → Sign In / Providers → Passwords) and apply
+  the pending Postgres security patch (Settings → Infrastructure). Not confirmed done.
 
-## 📝 Notes
-- 🔲 Extract the ~1300-line page into editor/list/toolbar components.
-- 🔲 Tiptap upgrades: slash commands, tables, task-lists, image upload, code blocks.
-- 🔲 Backlinks / `[[note]]` linking.
-- 🔲 Full-text search across note bodies.
-- 🔲 Note → Task extraction from checkbox lines.
-- 🔲 Verify `SharedNote` sanitizes stored HTML before `innerHTML` into contentEditable.
+## Known limitations
 
-## ✅ Tasks
-- 🔲 Subtasks / checklists and recurring tasks.
-- 🔲 Priority levels + sort/filter by priority.
-- 🔲 Reminders/notifications (PWA push) for due/overdue tasks.
-- 🔲 Kanban / "Today · Upcoming · Someday" alternate view.
-- 🔲 Bulk actions (complete/delete/tag multiple).
-
-## 📅 Calendar
-- ✅ Mobile hamburger header present (verified on Calendar, Ledger, Subscriptions — docs rough-edge #3 was stale).
-- 🔲 Day/Agenda view + drag-to-reschedule tasks (`updateTaskDueDate` exists).
-- 🔲 iCal / Google Calendar export of `get_calendar_events`.
-- 🔲 Create events inline from `QuickAddDialog` writing back to the right entity.
-
-## 💰 Money Ledger
-- ✅ Mobile sidebar header present (verified).
-- ✅ Charts added — spend-by-category pie (selected month) + monthly income/expense trend bars (selected year), in `components/ledger/LedgerCharts.tsx` using recharts. Theme-aware tooltips, responsive.
-- ✅ **Buckets / envelope budgeting** — new `ledger_buckets` table + `bucket_id`/`from_bucket_id` on `ledger_entries` + `transfer` entry type (migration `06_add_ledger_buckets.sql`). Buckets have a kind (spending/saving/obligation/liability), color, optional goal. UI: `BucketsSection` (balances + goal progress + manage dialog), bucket allocation + transfers in `LedgerEntryForm`, transfers shown in the table. Data layer `lib/buckets.ts`. _Requires running migration 06._
-- ✅ **Export UI** — CSV/JSON moved into a single "Export" dropdown menu (was two open buttons).
-- 🔲 Auto-seed buckets (Personal/Stocks/Emergency/Credit Card/Mom) happens on first load — tune the defaults if desired.
-- 🔲 Per-bucket recurring allocations (e.g. "Mom ₹10k monthly") — pairs with recurring auto-post.
-- 🔲 (tech debt) Type-check isn't wired into any npm script; `tsc -p tsconfig.app.json` reports ~16 pre-existing errors (missing `Tag`/`Subscription`/`*WithTags` aliases in `types.ts`, plus `RejectExcessProperties` in Notes/Media/Subscriptions). Worth a cleanup pass.
-- 🔲 Per-category budgets with progress bars + over-budget alerts.
-- 🔲 Recurring transactions auto-post (`is_recurring`/`recurring_interval` unused).
-- 🔲 Receipt attachments (Supabase Storage) + search/filter by description.
-
-## 🔁 Subscriptions
-- ✅ Duplicate 4th summary card already removed (cards: Monthly Cost / Yearly Cost / Active / Renews Soon).
-- ✅ Mobile sidebar header present (verified).
-- 🔲 Renewal reminders (push/email N days before).
-- 🔲 Price-change history + annual-vs-monthly savings suggestions.
-- 🔲 Cost-per-category breakdown chart.
-
-## 🎂 Birthdays
-- ✅ Add/edit Dialog already a single shared `<Dialog>` (both headers call `openAddModal`).
-- 🔲 Reminders N days before + gift-idea notes per person.
-- 🔲 Import from contacts / CSV; zodiac / age-milestone highlights.
-
-## 🏷️ Tags (cross-cutting)
-- ✅ Dead `TagInput.tsx`, `QuickTagButtons.tsx`, and AppSidebar `iconMap` already removed.
-- 🔲 Tag management page (rename, merge, recolor, bulk-delete).
-- 🔲 Tag hierarchy / nesting.
-
-## 📱 Responsive / Mobile (cross-cutting)
-- ✅ **Horizontal-overflow fix (the big one)** — every page's `flex-1` content column lacked `min-w-0`, so the default `min-width:auto` let wide inner grids push the column past the viewport (content bled off-screen, sideways scroll). Added `min-w-0` to all top-level content columns. Also made Dashboard widget `sizeClasses` col-spans responsive (`col-span-1 md:col-span-2 …`) — a `col-span-2` on the mobile `grid-cols-1` was forcing an implicit extra column.
-- ✅ **Mobile-safe dialogs** — `ui/dialog.tsx` now `w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto p-4 sm:p-6` (was full-bleed `w-full p-6` with no vertical scroll). Fixes every dialog at once.
-- ✅ **Mobile-safe sheets** — `ui/sheet.tsx` now scrolls (`overflow-y-auto`) with `p-4 sm:p-6`.
-- ✅ **Bigger touch targets** — MediaTracker list-view +/- buttons `h-7 w-7` on mobile (`touch-manipulation`).
-- ✅ **Responsive padding/text** — empty-states & page containers `p-4 sm:p-…`; auth/util headings `text-2xl sm:text-3xl`; CheckEmail/NotFound card margins on mobile.
-- ✅ Verified on iPhone 14 Pro Max viewport (Media + Dashboard): no horizontal overflow, cards/stats reflow correctly.
-- 🔲 MediaTracker is large; further mobile polish of the edit dialog/quick-add flow may be worth a dedicated pass.
-- 🔲 Consider a bottom tab bar or persistent mobile nav (sidebar is slide-over only).
-
-## ⚙️ Settings & Platform-wide
-- 🔲 Rotate & remove hard-coded `TMDB_API_KEY` in `deploy-edge-function.sh`.
-- ✅ Already one toast system (Sonner removed; only shadcn `Toaster`/`use-toast` mounted).
-- 🔲 Data import (export exists) + scheduled backup.
-- 🔲 Account deletion / data wipe.
-- 🔲 PWA push-notification infrastructure (unlocks reminders app-wide).
-- 🔲 Add Vitest + smoke tests for the `lib/*` data layer.
-- 🔲 Reconcile the two theming paths (`applyTheme` inline vars vs static `:root`/`.dark`).
-</content>
-</invoke>
+- **The baseline can't build an empty project.** Section 15 of `00_baseline_schema.sql` reads
+  `subscriptions.ledger_entry_id` before section 18 adds the column, so a fresh run aborts and rolls back.
+- **`00` and `20` aren't safe to re-run.** `00` fails on existing policies; `20`'s orphan-tag cleanup
+  would delete tags used only by work projects.
+- **No SQL enables realtime on `notes`.** A new project needs it switched on in the dashboard.
+- **JSON restore is broken** (Settings → Data) for ledger entries (`to_account_id` isn't remapped),
+  subscriptions (`category_id` isn't remapped) and categories (they collide with the signup-seeded
+  defaults). The export itself is complete.
+- **`npm run backfill:metadata` gets 401s.** It calls the edge function without a user token.
+- **`docs/audit/AUDIT_ONE_SHOT.sql` fails as a whole**: its section 13 queries the dropped
+  `ledger_buckets`. Its tag checks also ignore `work_project_tags`.

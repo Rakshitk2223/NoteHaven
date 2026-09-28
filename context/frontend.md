@@ -1,296 +1,310 @@
-# NoteHaven — Frontend Context
+# NoteHaven — frontend map
 
-> Personal productivity & media companion. Single-page React app (Vite + TypeScript) backed by Supabase. This document captures the full frontend picture: stack, structure, routing, state, styling, every feature page, shared components, and the data-access layer the UI relies on.
+How the React app is put together: providers, routes, what each page talks to, the `lib/*` data layer,
+components, theming and preferences, storage keys, and the build. Conventions and gotchas are in
+`CLAUDE.md`; the database side is in `context/backend.md`.
 
----
-
-## 1. Tech Stack
-
-| Concern | Choice |
-|---|---|
-| Framework | React 18 (function components + hooks) |
-| Language | TypeScript 5.8 |
-| Build tool | Vite 5 (`@vitejs/plugin-react-swc`) |
-| Styling | Tailwind CSS 3 + **"Aurora"** design tokens (HSL CSS vars): charcoal canvas, indigo→cyan gradient accents, glass + glow |
-| UI primitives | shadcn/ui (Radix UI under the hood) — ~50 components in `src/components/ui` |
-| Icons | lucide-react |
-| Server state | TanStack React Query v5 w/ app-wide caching defaults (staleTime 5m, gcTime 30m, no refetch-on-focus); heavy use only in MediaTracker, most pages still manual `useState`+`useEffect` |
-| Code-splitting | All authenticated routes are `React.lazy` (Suspense + `RouteFallback`); vite `manualChunks` groups vendors; route chunks prefetched on nav hover |
-| Routing | react-router-dom v6 |
-| Animation | framer-motion + hand-written CSS keyframes in `index.css` |
-| Rich text | Tiptap v2 (StarterKit + Underline) for Notes |
-| Code editor | CodeMirror 6 for Code Snippets |
-| Forms/validation | react-hook-form + zod (libs present; most forms are manual `useState`) |
-| HTML sanitization | DOMPurify (`sanitizeHtml`, `sanitizePreview` in `lib/utils.ts`) |
-| Dates | date-fns + custom IST-safe helpers in `lib/date-utils.ts` |
-| PWA | vite-plugin-pwa (autoUpdate, Workbox runtime caching) |
-| Charts | recharts (only via `ui/chart.tsx`; not actively used by features) |
-| Package manager | npm (`package-lock.json`) — standardized across all devices |
-
-Path alias: `@/` → `src/`.
-
----
-
-## 2. Application Entry & Providers
-
-`src/main.tsx` → renders `<App/>` into `#root`.
-
-`src/App.tsx` composes the provider tree (outer → inner):
+## Providers (`src/App.tsx`, outer → inner)
 
 ```
-QueryClientProvider          (caching defaults: staleTime 5m, gcTime 30m, no refetch-on-focus)
-  └ AuthProvider              (src/hooks/useAuth.tsx)
-     └ SidebarProvider        (src/contexts/SidebarContext.tsx)
-        └ TooltipProvider
-           ├ Toaster          (shadcn toast)
-           ├ AuroraBackdrop   (ambient indigo/cyan orbs, fixed z-0)
-           └ BrowserRouter
-                ├ CommandPalette        (⌘K launcher)
-                └ AppInner → Suspense(RouteFallback) → lazy Routes
+QueryClientProvider        staleTime 5 min · gcTime 30 min · no refetch on focus · retry 1
+ └ AuthProvider            hooks/useAuth.tsx
+    └ PreferencesProvider  hooks/usePreferences.tsx (lib/preferences.ts)
+       └ SidebarProvider   contexts/SidebarContext.tsx
+          └ RefreshActivityProvider   contexts/RefreshActivityContext.tsx
+             └ TooltipProvider (delay 200 ms)
+                └ AppShell
+                   └ MotionConfig (reducedMotion from prefs)
+                      ├ Toaster                 shadcn toast (the only toast system)
+                      ├ AuroraBackdrop          only while prefs.backgroundEffects is on
+                      └ BrowserRouter
+                         ├ CommandPalette       ⌘K, mounted on every route
+                         └ AppInner → <div key={pathname} class="animate-route"> → Suspense(RouteFallback) → Routes
 ```
 
-`AppInner` also applies the saved theme on mount (reads `localStorage.theme` for light/dark and `app-theme` for the color theme, then calls `applyTheme`). All authenticated route components are `React.lazy`-imported (code-split); only auth/landing routes load eagerly.
+- `AppShell` exists so it can read preferences (motion, backdrop) from inside `PreferencesProvider`.
+- `AppInner` applies the theme on mount — resolve mode (`getStoredMode` → `resolveMode`), toggle `.dark`,
+  `applyTheme(getCurrentTheme(), mode)`, then `applyPreferencesToDOM(getCachedPrefs())` — and follows the
+  OS colour scheme while mode is `system`. Keying the wrapper on the pathname remounts and fades every route.
+- `Index`, `Login`, `SignUp`, `CheckEmail`, `ResetPassword` and `NotFound` load eagerly; every other page
+  (including the public `SharedNote`) is `React.lazy`.
+- `RefreshActivityProvider` sits above the router so a media "Refresh Library" sweep keeps running
+  across navigation.
 
-> Note: only the shadcn `Toaster` (`use-toast`) is mounted; the previously-mounted Sonner toaster has been removed.
+## Routes
 
----
+Shell: **PS** = renders through `PageShell`; **B** = bespoke full-height layout (own `AppSidebar` +
+`lg:hidden` hamburger); **—** = standalone screen. Every page marked 🔒 is wrapped in `<ProtectedRoute>`,
+which shows a pulse card while auth loads, then redirects to `/login` when there's no user.
 
-## 3. Routing Map
+| Path | Page | | Shell | `lib/*` (page + its components) | Supabase (direct + via lib) |
+|---|---|---|---|---|---|
+| `/` | `Index` | | — | — | none; redirects to `/login` |
+| `/login` | `Login` | | — | preferences | `signInWithPassword`; a signed-in user goes to `prefs.defaultLanding` |
+| `/signup` | `SignUp` | | — | — | `auth.signUp` |
+| `/check-email` | `CheckEmail` | | — | — | `auth.getUser` |
+| `/reset-password` | `ResetPassword` | | — | — | `resetPasswordForEmail`, then `updateUser({password})` on `PASSWORD_RECOVERY` |
+| `/notes/share/:shareId` | `SharedNote` | | — | utils | RPCs `get_shared_note`, `update_shared_note` only |
+| `/dashboard` | `Dashboard` | 🔒 | PS | dashboard, tags, subscriptions, ledger | inline `tasks`, `notes`, `media_tracker`, `prompts`, `countdowns`, `birthdays`; `user_preferences`; RPCs `get_upcoming_renewals`, `get_monthly_ledger_summary` |
+| `/library` (alias `/prompts`) | `Library` | 🔒 | PS | tags, codeSnippets, commands | `prompts`, `prompt_tags` inline; `code_snippets`, `snippet_folders`, `commands`, tag junctions |
+| `/media` | `MediaTracker` | 🔒 | B | edge-function, simple-image-fetcher, media-refresh, media-metadata, media-insights, tags | `media_tracker` (inline), `media_metadata`, `media_tags`; edge function |
+| `/tasks` | `Tasks` | 🔒 | PS | tags, date-utils | `tasks`, `task_tags` inline |
+| `/notes` | `Notes` | 🔒 | B | tags | `notes`, `note_tags`, `shared_notes` inline; realtime on `notes` |
+| `/calendar` | `Calendar` | 🔒 | B | calendar, date-utils (`hooks/useCalendar`) | RPC `get_calendar_events`; quick-add inserts `tasks` / `birthdays` / `countdowns` |
+| `/work` | `Work` | 🔒 | PS | work, tags | `work_projects`, `work_project_tags` |
+| `/ledger` | `MoneyLedger` | 🔒 | PS | ledger, accounts, category-init, subscriptions | `ledger_entries`, `ledger_accounts`, `ledger_categories`, `subscriptions` |
+| `/subscriptions` | `Subscriptions` | 🔒 | PS | subscriptions, category-init, ledger | `subscriptions`, `subscription_categories` |
+| `/wishlist` | `Wishlist` | 🔒 | PS | wishlist | `wishlist_items` |
+| `/vault` | `Vault` | 🔒 | PS | vault | `vault_folders`, `vault_files`; Storage bucket `vault` |
+| `/recipes` | `Recipes` | 🔒 | PS | recipes, recipe-parse, pantry-match | `recipes`, `recipe_folders`; TheMealDB; Openverse |
+| `/birthdays` | `Birthdays` | 🔒 | PS | date-utils | `birthdays` inline |
+| `/bucket-list` | `BucketList` | 🔒 | PS | bucket-list | `bucket_list`; Openverse |
+| `/tags` | `TagsIndex` | 🔒 | PS | tags | `tags` |
+| `/tags/:tagName` | `TagView` | 🔒 | PS | tags | `tags` + `searchByTag` across all six junctions |
+| `/settings` | `Settings` | 🔒 | PS | preferences, themes, dashboard, image-cache, media-metadata | `auth.updateUser`, Storage bucket `avatars`, every user table (backup), `user_preferences` |
+| `*` | `NotFound` | | — | — | links to `/dashboard` when signed in, otherwise `/login` |
 
-All app routes are wrapped in `<ProtectedRoute>` except auth/public ones.
+**Deep links:** `/notes?new=1`, `/tasks?new=1`, `/tasks?task=ID`, `/media?new=1`, `/work?new=1`,
+`/library?tab=prompts|snippets|commands`, `/library?prompt=ID`, `/library?snippet=ID`,
+`/settings?section=<id>`. The command palette uses the `?new=1` and `?tab=` forms.
 
-| Path | Component | Notes |
+**Navigation lists are kept by hand in four places** — `AppSidebar` `defaultMainNavigation` (14 items;
+`/tags` is palette-only), `settings/SidebarSection` `DEFAULT_ORDER`, `lib/route-prefetch.ts` loaders, and
+`CommandPalette` items. A new route needs all four plus `App.tsx`. Saved sidebar orders get new default
+items appended automatically.
+
+## Pages — what's worth knowing
+
+- **Dashboard:** a responsive 1 / 2 / 4-column grid of 13 widget types (`today`, `stats`, `tasks`,
+  `notes`, `media`, `prompts`, `pinned`, `tags`, `countdowns`, `birthdays`, `subscriptions`,
+  `calendar-mini`, `ledger`). The layout (type, visible, position, size quarter/half/three-quarters/full)
+  lives in `user_preferences` key `dashboard_widgets` via `lib/dashboard.ts`; the loader drops unknown
+  types and appends new defaults. Data is one `Promise.allSettled` wave, so a failing table empties only
+  its own widget. Calendar-mini events are synthesized client-side. `WidgetManager` shows/hides, drag
+  reorders and resizes widgets, and toggles "fill space" (masonry via `MasonryItem`, per device in
+  `localStorage.dashboard_fill_space`). The saved layout loads before first paint, so `DEFAULT_WIDGETS`
+  never flashes.
+- **Notes:** a master/detail layout (single pane with a toggle on mobile) with a Tiptap editor. Autosave
+  debounces title and content separately (800 ms) and flushes on note switch, `visibilitychange` and
+  `beforeunload`. A realtime channel (`notes-changes`, filtered by `user_id`) syncs other tabs; echoes of
+  your own saves are skipped by comparing the server `updated_at` (`lastSavedUpdatedAtRef`). An "Inbox"
+  note is auto-created and pinned to the top. `background_color` holds a sticky-note category key.
+  Sharing creates or reuses a `shared_notes` row (`/notes/share/:id`, optional `allow_edit`). The list
+  paginates client-side, 50 per page.
+- **SharedNote:** loads through `get_shared_note`, saves through `update_shared_note` (800 ms debounce)
+  into a `contentEditable`; HTML is sanitized on load and on save. No realtime.
+- **Tasks:** add form (text + `DatePicker` + tags), To-Do and Completed sections with pinned first;
+  overdue is red and due-today amber, with relative labels. Complete and pin write to the database first,
+  then update state. AND tag filtering; tags appear on hover on pointer devices and always on touch.
+- **Library:** three tabs (tab persisted in `library-active-tab`), all on React Query.
+  *Prompts:* cards, a category filter, a tag filter, copy with a `{{variable}}` fill-in dialog, optimistic
+  favourite/pin with rollback, and "Move to Commands" (which deletes the prompt).
+  *Snippets:* grouped by project folder (`snippet_folders`) plus "Unfiled", a CodeMirror viewer/editor,
+  and secret masking for any language (`lib/secret-mask.ts`).
+  *Commands* (`components/library/CommandsTab.tsx`): grouped by project folder, then by free-text
+  category; reordered within a category via `reorderCommands`.
+- **MediaTracker:** `useInfiniteQuery` over `media_tracker` (200 per page, intersection-observer scroll,
+  key `['mediaItems', …]`) plus `['mediaRails']` and `['groupCounts']` queries. Types: Movie, Series,
+  Anime, Manga, Manhwa, Manhua, KDrama, JDrama; statuses: Watching, Reading, Plan to Watch, Plan to Read,
+  Completed. Grid (grouped Active / Planned / Completed) or list view; custom type groups
+  (`CustomGroupBuilder`); rails (`ContinueShelf`, `AiringSoon`, `GenreRail`, toggled by `mediaShowRails`);
+  genre, progress (all / behind / new) and needs-cover filters; debounced search; sort. Quick add is a
+  Dialog; the right-hand Sheet is the details/edit panel. Optimistic episode/chapter increments and
+  status changes; bulk status, delete and cover refresh; JSON import; JSON / CSV / TXT export.
+  `LibraryStatsDialog` shows breakdowns; `RefreshLibraryDialog` starts a background metadata sweep
+  (`RefreshActivityContext`) that fills missing covers and metadata but never overwrites. The tag
+  *filter* is gone (genres replaced it); the edit form still has a tag selector.
+- **Calendar:** Month, Week and Agenda (rolling 30 days, phone-first) views over `get_calendar_events`,
+  filtered client-side (filters in `localStorage.calendar_filters`). `DayDetailModal` → `DayDetail` deep
+  links to the source rows; `QuickAddDialog` creates tasks, birthdays or countdowns.
+- **MoneyLedger:** accounts (bank / cash / card, with opening balances) and a cumulative "money in hand";
+  transfers between accounts; per-account balance tiles; `AccountsManager`, `LedgerCharts` (recharts),
+  `LedgerEntryForm` (Enter to save). Month, year and last-used account are remembered. Subscription
+  charges are derived, not stored (`deriveSubscriptionCharges`). Categories are seeded once per account
+  (`ensureLedgerCategoriesExist`). CSV/JSON export. Currency and locale come from preferences (default
+  INR / en-IN).
+- **Subscriptions:** Monthly Cost / Yearly Cost / Active / Renews Soon cards, then a list with status and
+  renewal countdown. Categories are seeded on first use; deletes are confirmed.
+- **Wishlist:** items with a current price and a "buy at" target; every price check is appended to
+  `price_history`; items at or under target show as deals (toasted once, then `markDealsNotified`).
+- **Vault:** a nested folder tree with files in the private `vault` bucket. Uploads resolve name clashes
+  with `DuplicateResolveDialog` (replace / keep both / skip); previews and downloads use short-lived
+  signed URLs (`FilePreviewModal`); folders and multi-selections download as zips (jszip, lazily
+  imported); `MoveToFolderDialog` excludes the folder's own subtree. No share links.
+- **Recipes:** folders, favourites, a cook mode, TheMealDB search and import, Openverse image
+  suggestions, dictate-or-paste parsing (`DictateParse` → `lib/recipe-parse.ts`), and a pantry matcher
+  (`PantryPanel` → `lib/pantry-match.ts`; the pantry lives in `localStorage.recipesPantry`, not in a table).
+- **Work:** a projects log (card or table view) with people helped (`PeopleInput` → `helped TEXT[]`),
+  month, duration, hours, team, link and status; summary tiles. The "People" tab is a disabled placeholder.
+- **Birthdays:** hero "next birthday", This month, and All (soonest first); cards show turning-age,
+  days-until and zodiac. One shared add/edit dialog with cascading year → month → day selects.
+- **Bucket List:** items with a category and a status (dreaming / planned / achieved), a target date and
+  Openverse image suggestions.
+- **Tags:** `/tags` lists every tag; `/tags/:name` shows notes, tasks, media, prompts, snippets and work
+  projects carrying it. Tag badges link there.
+- **Settings:** a searchable rail (`?section=`, default `account`) over twelve section files in
+  `src/pages/settings/`, built from `components/settings/primitives.tsx`:
+
+  | Section | Does |
+  |---|---|
+  | Account | avatar (public `avatars` bucket), display name, email change, per-feature item counts |
+  | Appearance | theme family, mode light / dark / system, accent colour, text size, corner radius, reduce motion, background effects |
+  | Accessibility | high contrast, underlined links, always-visible focus rings, readable font, reduce motion |
+  | Behavior | start page after login, Media default view and sort, Vault default view, Library default tab |
+  | Language & region | currency and locale (drive `formatCurrency`) |
+  | Dashboard | the WidgetManager, embedded |
+  | Sidebar | collapse, drag-reorder the nav |
+  | Keyboard | shortcut list; opens the palette |
+  | Security | change password (re-authenticates with the current one first) |
+  | Data | JSON backup of every user table + tag junctions (paged past PostgREST's 1000-row cap); restore (**known-broken** for ledger entries, subscriptions and categories — `docs/BACKLOG.md`); Vault usage; clear the cover cache |
+  | Sync activity | live view of the media refresh sweep: progress, per-item results, retry |
+  | About | version, environment, external link |
+
+## `src/lib/*`
+
+| Module | Responsibility | Talks to |
 |---|---|---|
-| `/` | `Index` | Immediately redirects to `/login` |
-| `/login` | `Login` | Email/password, animated glass card |
-| `/signup` | `SignUp` | |
-| `/check-email` | `CheckEmail` | Post-signup info screen |
-| `/dashboard` | `Dashboard` | Widget grid |
-| `/prompts` | **`Library`** | ⚠️ routes to Library, not Prompts |
-| `/library` | `Library` | Prompts + Code Snippets tabs |
-| `/media` | `MediaTracker` | |
-| `/tasks` | `Tasks` | |
-| `/notes` | `Notes` | |
-| `/notes/share/:shareId` | `SharedNote` | Public, **not** protected |
-| `/settings` | `Settings` | |
-| `/birthdays` | `Birthdays` | |
-| `/tags/:tagName` | `TagView` | Cross-feature tag search |
-| `/ledger` | `MoneyLedger` | |
-| `/subscriptions` | `Subscriptions` | |
-| `/calendar` | `Calendar` | |
-| `*` | `NotFound` | Links back to `/login` |
+| `accounts.ts` | ledger accounts; money-in-hand maths (`computeMoneyInHand`, `computeAccountBalances`) | `ledger_accounts` |
+| `bucket-list.ts` | bucket-list CRUD, categories and status metadata, image suggestions | `bucket_list`; Openverse |
+| `calendar.ts` | event colour / label / icon maps, grouping by date | — |
+| `category-init.ts` | seed default ledger and subscription categories once per account | `ledger_categories`, `subscription_categories`, `user_preferences` (seed flag) |
+| `codeSnippets.ts` | snippets and project folders, supported languages, tag wiring; re-exports the secret masking | `code_snippets`, `code_snippet_tags`, `snippet_folders` |
+| `commands.ts` | Commands tab CRUD and reorder (projects = `snippet_folders`) | `commands` |
+| `dashboard.ts` | widget types, metadata, default layout, load / save / reset | `user_preferences` (`dashboard_widgets`) |
+| `date-utils.ts` | local `YYYY-MM-DD` helpers: `dateToYMD`, `parseYMD`, `formatDateForDisplay`, `formatDateDDMMYYYY`, `isToday`, `addDays` | — |
+| `edge-function.ts` | `mediaSearchGet` / `mediaSearchUrl`: authenticated GET to `media-search`; `null` on no session, non-2xx or network error | edge function |
+| `image-cache.ts` | localStorage cover cache with a 24 h TTL, merge-on-write | — |
+| `ledger.ts` | entries CRUD, monthly summary (RPC + derived subscription charges), CSV/JSON export, `formatCurrency` | `ledger_entries`, `subscriptions`; RPC `get_monthly_ledger_summary` |
+| `logger.ts` | `devLog` (dev-only logging) | — |
+| `media-insights.ts` | pure derivations: continue queue, airing soon, genres, library stats, duplicates (unit-tested) | — |
+| `media-metadata.ts` | reads the metadata cache, runs the Refresh Library sweep, acknowledges new content | `media_metadata`, `media_tracker`; edge function |
+| `media-progress.ts` | pure progress types + `computeProgress` (kept apart so tests don't import the client) | — |
+| `media-refresh.ts` | per-item cover cycling through sources by type | AniList, Kitsu, Jikan, TVmaze direct; TMDB, Wikidata, Fanart via the edge function; writes `media_tracker.cover_image` + `media_metadata` |
+| `pantry-match.ts` | "cook with what I have" scoring (pure) | — |
+| `preferences.ts` | the `AppPreferences` blob, light/dark/system mode, `applyPreferencesToDOM` | localStorage + `user_preferences` (`app_preferences`) |
+| `recipe-parse.ts` | free-text → recipe parser (pure) | — |
+| `recipes.ts` | recipes and folders, TheMealDB search / import, image suggestions | `recipes`, `recipe_folders`; TheMealDB; Openverse |
+| `route-prefetch.ts` | `prefetchRoute`: warm a lazy route chunk on nav hover / focus | — |
+| `secret-mask.ts` | pure secret masking for the snippet viewer | — |
+| `simple-image-fetcher.ts` | batched cover lookup: cache → `media_tracker.cover_image` → `media_metadata` → edge function (10 at a time, chunked `IN`) | `media_tracker`, `media_metadata`; edge function |
+| `subscriptions.ts` | subscriptions and categories, renewal maths, summary, status labels; `getUpcomingRenewals` (Dashboard) | `subscriptions`, `subscription_categories`; RPC `get_upcoming_renewals` |
+| `tags.ts` | tag CRUD, validation, palette, per-entity `set*Tags`, `searchByTag` | `tags` + the six junctions |
+| `themes.ts` | theme families and `applyTheme` / `getCurrentTheme` / `saveTheme` | — |
+| `utils.ts` | `cn`, `sanitizeHtml`, `sanitizePreview`, `getContrastTextColor` | — |
+| `vault.ts` | folder tree, uploads, rename / move / star / delete, signed URLs, zip downloads; `MAX_FILE_BYTES` 25 MB | `vault_folders`, `vault_files`; Storage `vault` |
+| `wishlist.ts` | wishlist CRUD, price history, deal detection, `isMissingTableError` | `wishlist_items` |
+| `work.ts` | work projects, stats and people rollups, duration helpers, `isMissingTableError` | `work_projects` |
 
-`ProtectedRoute` shows a pulse skeleton while `useAuth().loading`, then redirects to `/login` if no user.
+Outside `lib/`: `integrations/supabase/client.ts` (the only client; session in localStorage, auto
+refresh), `integrations/supabase/types.ts` (schema types), `types/calendar.ts`.
 
-`/prompts` is a working alias that renders `Library` (same as `/library`); the old dead `src/pages/Prompts.tsx` has been removed.
+## Hooks and contexts
 
----
-
-## 4. Authentication (`src/hooks/useAuth.tsx`)
-
-- Context exposes `{ user, loading, signIn, signUp, signOut }`.
-- On mount: `supabase.auth.getSession()` + `onAuthStateChange` subscription; `loading` resolves on whichever fires first (`resolveInitial`).
-- `signIn` → `signInWithPassword`, then re-fetches user so `display_name` metadata is fresh; toasts success/error.
-- `signUp` → `supabase.auth.signUp`; redirect handled in `SignUp.tsx` (no toast).
-- `signOut` → `supabase.auth.signOut`.
-- Session persisted in `localStorage` (configured in the Supabase client).
-
----
-
-## 5. Layout & Navigation
-
-### Sidebar (`src/components/AppSidebar.tsx`)
-- Fixed left nav, `lg:sticky`. Collapsible on desktop, slide-over on mobile (overlay + `X`).
-- Collapsed state lives in `SidebarContext` (persisted to `localStorage` key `notehaven_sidebar_collapsed`, synced across tabs via `storage` event; defaults collapsed under 1024px).
-- Nav order is user-customizable via Settings (drag-and-drop), persisted to `localStorage` key `sidebar-order`, and broadcast through a custom `sidebar-order-changed` window event that the sidebar listens for.
-- Main items: Dashboard, Calendar, Library, Media, Tasks, Notes, Birthdays, Money Ledger, Subscriptions. Bottom: Settings + Logout.
-- Collapsed items show a hover tooltip implemented with `group-hover` utility classes (not the Radix Tooltip).
-
-
-- **Aurora redesign**: glass rail (`bg-sidebar/85 backdrop-blur-xl`), gradient brand mark, gradient active indicator + glow, a `⌘K` Search trigger. Hovering/focusing a nav link **prefetches that route's code chunk** via `lib/route-prefetch.ts` (instant navigation).
-
-### Page shell (`src/components/PageShell.tsx`)
-Most content pages render through **`<PageShell title icon actions subtitle>`** — it supplies the sidebar, a glassy header with a gradient title, a transparent padded content region (so the ambient backdrop shows), the `lg:hidden` mobile hamburger, and an entrance transition. Bespoke full-height pages (Notes, MediaTracker, Calendar) keep their own layout with a transparent root instead of PageShell.
-
-### Command palette (`src/components/CommandPalette.tsx`)
-`⌘K` / `Ctrl+K` (or `window.dispatchEvent(new Event('open-command-palette'))`, e.g. the sidebar Search button) opens a cmdk launcher to jump to any screen or run quick actions.
-
----
-
-## 6. Styling System — "Aurora" (`src/index.css` + `tailwind.config.ts` + `lib/themes.ts`)
-
-- **Aesthetic**: premium-SaaS. Deep charcoal canvas, electric **indigo (`--primary`) → cyan (`--accent-2`) gradient** accents, glassy surfaces with soft glow, gradient headlines, crisp spring motion.
-- **Design tokens**: HSL CSS variables on `:root` (light) and `.dark`. Tailwind colors map to `hsl(var(--token))`. Aurora adds `--accent-2`/`--accent-2-hover`, `--glow`, and gradient/glow vars (`--gradient-brand[-soft]`, `--glow-sm/md/lg`).
-- **Fonts**: Inter for both `font-heading` and `font-body`.
-- **Color themes**: 3 families in `lib/themes.ts` — `aurora` (default, dark-first), `netflix`, `prime` — each a full light+dark palette. `applyTheme(name, mode)` writes every token to `document.documentElement` inline styles (transitions briefly disabled to avoid flash). Persisted to `localStorage` `app-theme`; light/dark under `theme`. The static `:root`/`.dark` blocks in `index.css` are the Aurora first-paint fallback.
-- **Signature utilities**: `.gradient-text`/`.gradient-text-soft` (headlines), `.bg-gradient-brand[-soft]`, `.zen-card` (workhorse card — lit border + glow hover), `.aurora-card` (gradient-bordered hero/stat tile), `.glass`/`.glass-strong` (modals/sidebar/floating), `.glow` + `shadow-glow*`, `.chip-tint`, hover-lift/scale, `.loading-shimmer`, `.animate-glow-pulse`/`.animate-float`, `.stagger-item`.
-- **Ambient backdrop**: `<AuroraBackdrop/>` (rendered once in `App.tsx`) paints two drifting indigo/cyan orbs fixed behind the app at `z-0`; page roots are transparent so it glows through behind cards.
-- **Motion**: shared framer-motion helpers in `components/ui/motion.tsx` — `PageTransition`, `Stagger`/`StaggerItem`, `FadeIn`.
-- **Editor styles**: global `.ProseMirror` (Tiptap) and `#rich-editor`/`.note-preview` list styling.
-- **Accessibility**: `prefers-reduced-motion` neutralizes animations (incl. the backdrop); focus-visible outlines defined globally.
-
----
-
-## 7. Feature Pages
-
-### Dashboard (`pages/Dashboard.tsx`)
-- Customizable **widget grid** (4-col responsive). Widget config (type, visible, position, size) loaded/saved via `lib/dashboard.ts` to the `user_preferences` table (key `dashboard_widgets`); falls back to `DEFAULT_WIDGETS`.
-- Widgets: stats, tasks, notes, media, prompts, pinned, tags, countdowns, birthdays, subscriptions, calendar-mini, ledger. Each is a component in `components/dashboard/widgets`.
-- `WidgetManager` modal: toggle visibility, drag to reorder (HTML5 drag), set width (1/4–full). Layout reset available.
-- Data is fetched with a big `Promise.all` of inline Supabase queries (tasks, notes, media, prompts, pinned, countdowns, birthdays), plus tags, renewals, ledger summary, and synthesized calendar events.
-- ⚠️ `fetchLedgerSummary` queries the `ledger_entries` table filtering on a **`date`** column that does not exist (schema column is `transaction_date`). This query errors and is swallowed by a try/catch, so the ledger widget silently shows nothing. See audit.
-
-### Notes (`pages/Notes.tsx`) — ~1300 lines
-- Two-pane master/detail (list + Tiptap editor); single-pane with toggle on mobile.
-- **Auto-save** with 2s debounce per field (title/content), conflict detection against `updated_at`, optimistic local state, and Supabase **realtime** subscription for multi-tab sync (guards against overwriting unsaved local edits via `hasLocalChangesRef`/`localEditTimestampRef`).
-- An "Inbox" note is auto-created and pinned to the top of the list.
-- Rich text via Tiptap; HTML persisted directly. Toolbar: bold/italic/underline, lists, undo/redo, color/category palette.
-- **Note categories** = colored sticky-note styling stored in `background_color` (yellow/green/blue/... with light/dark bg + left border). Word/line counts computed by stripping HTML.
-- **Sharing**: creates a row in `shared_notes`, builds `/notes/share/:id` link, optional `allow_edit`.
-- Tagging via `CompactTagSelector`; filter via `TagFilter`. Pagination constant (50) exists.
-
-### Tasks (`pages/Tasks.tsx`)
-- Add form (text + `DatePicker` due date + tags). To-Do and Completed sections, pinned-first sorting, overdue highlighting (red).
-- Toggle complete (optimistic), pin/unpin, edit (Dialog), delete (`ConfirmDialog`).
-- Tag filtering with AND semantics. Supports `?task=ID` deep link (scrolls + ring highlight).
-- Tags shown only on hover (`opacity-0 group-hover:opacity-100`).
-
-### Library (`pages/Library.tsx`) — Prompts + Code Snippets tabs
-- Active tab persisted to `localStorage` (`library-active-tab`).
-- **PromptsTab**: card grid, category filter buttons (derived from data), tag filter, copy-to-clipboard, favorite (star), pin, edit/create via Dialog, delete via `ConfirmDialog`.
-- **SnippetsTab**: list grouped by language (collapsible groups), search, CodeMirror viewer/editor (`CodeEditor`), favorite, pin, copy, create/edit/delete. Data layer in `lib/codeSnippets.ts`.
-
-### MediaTracker (`pages/MediaTracker.tsx`) — ~1900 lines, the most complex page
-- Uses React Query `useInfiniteQuery` (page size 200, intersection-observer infinite scroll) for `media_tracker`.
-- Types: Movie, Series, Anime, Manga, Manhwa, Manhua, KDrama, JDrama. Statuses: Watching, Reading, Plan to Watch, Plan to Read, Completed. Runtime normalization defaults invalid values.
-- **Views**: grid (cards grouped by status category Active/Planned/Completed) and list (table). View mode + active tab + visible type tabs all persisted to `localStorage`.
-- **Custom groups**: user-defined type groupings via `CustomGroupBuilder`, persisted to `localStorage`.
-- **Cover images**: lazy-loaded per visible item through `lib/simple-image-fetcher.ts` (localStorage cache → `media_tracker.cover_image` → `media_metadata` → edge function/external APIs). Per-card "refresh cover" cycles APIs via `lib/media-refresh.ts`.
-- Quick add (Sheet), full create/edit, quick episode/chapter increment (optimistic cache update), quick status change, bulk select + bulk cover refresh, import, JSON export, TXT export (with type filter), "needs cover only" filter, search (debounced), sort asc/desc.
-
-### MoneyLedger (`pages/MoneyLedger.tsx`)
-- Month/year + type filters, summary cards (income/expense/net), transactions table.
-- Add/Edit via Dialogs. Categories auto-seeded via `ensureLedgerCategoriesExist` (`lib/category-init.ts`). CSV/JSON export. Currency formatted as INR.
-- ⚠️ No mobile hamburger header (no sidebar access on mobile). The two Dialogs are both always mounted in the header area.
-
-### Subscriptions (`pages/Subscriptions.tsx`)
-- Summary cards: Monthly Cost, Yearly Cost, Active count, Renews Soon. List with status dots, renewal countdown, edit/delete.
-- A DB trigger auto-creates a linked `ledger_entries` row (per `lib/subscriptions.ts` comments). Categories auto-seeded.
-- ⚠️ No mobile hamburger header.
-
-### Calendar (`pages/Calendar.tsx` + `components/calendar/*` + `hooks/useCalendar.ts`)
-- Month/Week views. Events fetched via the `get_calendar_events` Postgres RPC (unified across tasks, birthdays, subscriptions, countdowns, media, notes), filtered client-side by `CalendarFilters`.
-- `MonthView`: 7-col grid, weekend tinting, today highlight, up to 4 events/day + "+N more", HoverCard preview. `WeekView`, `CalendarHeader` (nav + filter legend), `DayDetailModal`, `QuickAddDialog`, `CalendarFilters`.
-- ⚠️ No mobile hamburger header.
-
-### Birthdays (`pages/Birthdays.tsx`)
-- Sections: Upcoming (next 5), Recent (past 3), All (sorted by month/day). Cards show age + days-until with a pulse on the actual day.
-- Add/Edit modal uses 3 cascading Selects (year → month → day). Search by name. Delete via `ConfirmDialog`. A single shared add/edit `<Dialog>` is opened by both the mobile and desktop header buttons (`openAddModal`).
-
-### Settings (`pages/Settings.tsx`)
-- Appearance (color theme Select + light/dark Switch), Sidebar order (drag-and-drop, collapsible section), Profile (display name → user metadata), Security (password update), Data Management (JSON export of prompts/notes/tasks/media), External Links (hard-coded WeebsList link).
-
-### TagView (`pages/TagView.tsx`)
-- Renders all items (notes/tasks/media/prompts/snippets) carrying a given tag (`searchByTag` in `lib/tags.ts`).
-
-### Auth/util pages
-- `Login`, `SignUp`, `CheckEmail`, `Index` (redirect), `NotFound`, `SharedNote` (public collaborative note via `contentEditable` + realtime).
-
----
-
-## 8. Shared Components
-
-| Component | Purpose |
+| File | What |
 |---|---|
-| `AppSidebar` | Main navigation — Aurora glass rail, ⌘K trigger, hover route-prefetch (see §5) |
-| `PageShell` | Shared page frame: sidebar + glassy gradient-title header + transparent content + entrance transition |
-| `CommandPalette` | ⌘K / Ctrl+K launcher (cmdk) — jump to any screen / quick actions |
-| `AuroraBackdrop` | Ambient drifting indigo/cyan orbs (rendered once in `App.tsx`) |
-| `RouteFallback` | Suspense fallback shown while a lazy route chunk loads |
-| `ui/motion` | Shared framer-motion helpers — `PageTransition`, `Stagger`/`StaggerItem`, `FadeIn` |
-| `ProtectedRoute` | Auth gate |
-| `ConfirmDialog` | Reusable destructive-action confirm (AlertDialog) |
-| `CodeEditor` | CodeMirror 6 wrapper (lang extensions, one-dark in dark mode, read-only support) |
-| `TagBadge` | Colored pill with contrast-aware text, optional remove |
-| `CompactTagSelector` | Inline tag add/create dropdown (used by Notes/Tasks/Library forms) |
-| `TagFilter` | Dropdown multi-select tag filter (AND semantics) |
-| `TagCloud` | Usage-weighted tag cloud (used by Dashboard TagsWidget) |
-| `dashboard/WidgetManager` | Customize dashboard modal |
-| `dashboard/WidgetWrapper` | Widget chrome (title, size menu, loading skeleton) — note Dashboard renders widgets directly and does not use this wrapper's editing UI |
-| `dashboard/CircularProgress` | Task-completion ring |
-| `dashboard/widgets/*` | 12 widget components |
-| `media/MediaCard` | Poster card w/ hover actions, lazy `useInView`, cover refresh |
-| `media/CustomGroupBuilder` | Build/manage custom media type groups |
-| `calendar/*` | Calendar views, header, modals, filters |
-| `ui/*` | shadcn primitives (~50) |
+| `hooks/useAuth.tsx` | `{ user, loading, signIn, signUp, signOut }`; `getSession` + `onAuthStateChange`; sign-in/out toasts |
+| `hooks/usePreferences.tsx` | `{ prefs, loading, update(patch), resetAppearance() }`; applies cached prefs at mount, hydrates from Supabase; `update` applies to the DOM and saves |
+| `hooks/useCalendar.ts` | `get_calendar_events` for the visible range (stale responses ignored), client-side filters; `{ events, loading, error, filters, setFilters, refetch }` |
+| `hooks/use-document-title.ts` | sets `"<title> · NoteHaven"` (PageShell and the bespoke pages) |
+| `hooks/use-media-query.ts`, `hooks/use-mobile.tsx` | `matchMedia` boolean; `useIsMobile()` = max-width 767 px |
+| `hooks/use-toast.ts` | shadcn toast store (features import `@/components/ui/use-toast`) |
+| `contexts/SidebarContext.tsx` | collapse state in `notehaven_sidebar_collapsed`, synced across tabs; collapsed by default under 1024 px |
+| `contexts/RefreshActivityContext.tsx` | the global media sweep runner (`start`, `retry`, `clear`, progress, items); one sweep at a time; invalidates `['groupCounts']` and `['mediaItems']` when done |
+| `pages/settings/useProfile.ts` | display name, email and avatar from the auth user's metadata |
 
-### Tag-selection components
-`CompactTagSelector` (inline add/create, used in forms) plus `TagFilter` and `TagCloud` are the wired-in tag components. (The earlier unused `TagInput` and `QuickTagButtons` have been removed.)
+## Components
 
----
+- **Top level:** `AppSidebar` (glass nav rail, ⌘K button, hover prefetch, drag-orderable, collapsible,
+  slide-over on mobile), `PageShell` (props `title`, `subtitle`, `icon`, `actions`, `mobileActions`,
+  `fullHeight`, `noPadding`, `maxWidth`, `contentClassName`, `documentTitle`), `CommandPalette` (cmdk:
+  navigate, four "create" actions, light/dark toggle), `AuroraBackdrop`, `RouteFallback`,
+  `ProtectedRoute`, `ConfirmDialog` (every destructive action), `CodeEditor` (CodeMirror 6, languages
+  loaded lazily, one-dark in dark mode), `TagBadge`, `CompactTagSelector` (Library, Media, Notes, Tasks,
+  Work), `TagFilter` (Library, Notes, Tasks; AND semantics), `TagCloud` (TagsWidget).
+- **`calendar/`:** `MonthView`, `WeekView`, `AgendaView`, `CalendarHeader`, `DayDetailModal` + `DayDetail`, `QuickAddDialog`.
+- **`dashboard/`:** `WidgetManager`, `WidgetWrapper` (card chrome for 12 of the 13 widgets; Stats renders
+  its own), `MasonryItem`, `CircularProgress`, `widgets/*`.
+- **`ledger/`:** `AccountsManager`, `LedgerCharts`, `LedgerEntryForm`.
+- **`library/`:** `CommandsTab` (+ `MoveToCommandsDialog`).
+- **`media/`:** `MediaCard`, `CustomGroupBuilder`, `ContinueShelf`, `AiringSoon`, `GenreRail`,
+  `LibraryStatsDialog`, `RefreshLibraryDialog`, `media-style.ts`.
+- **`recipes/`:** `DictateParse`, `PantryPanel`. **`settings/`:** `primitives.tsx`.
+- **`vault/`:** `VaultFileCard`, `VaultFolderCard`, `FilePreviewModal`, `MoveToFolderDialog`, `DuplicateResolveDialog`.
+- **`work/`:** `ProjectCard`, `ProjectTable`, `PeopleInput`.
+- **`ui/`:** a trimmed shadcn set (alert-dialog, badge, button, card, checkbox, command, dialog,
+  dropdown-menu, hover-card, input, label, popover, progress, select, separator, sheet, skeleton, switch,
+  tabs, textarea, toast, toaster, tooltip) plus custom `DatePicker`, `empty-state`, `filter-pill.ts`
+  (`filterPill(active)` class helper) and `motion.tsx`. `button` adds `variant="gradient"`. There is no
+  chart, form or sonner primitive.
 
-## 9. Hooks & Contexts
+## Styling, themes and preferences
 
-- `useAuth` — auth context (§4).
-- `SidebarContext` / `useSidebar` — collapse state + persistence + cross-tab sync.
-- `useCalendar` — fetches calendar events via RPC, holds filters, exposes `refetch` and `updateTaskDueDate`.
-- `use-media-query` — generic `matchMedia` hook.
-- `use-mobile` — `useIsMobile()` (max-width 767). Note: several pages also implement their own ad-hoc `window.innerWidth` checks instead of using this hook.
-- `use-toast` — shadcn toast store.
+- **Tokens:** HSL CSS variables on `:root` and `.dark` in `src/index.css`, mapped in `tailwind.config.ts`
+  (`hsl(var(--x))`, plus `shadow-glow*`). Aurora adds `--accent-2[-hover]`, `--glow`,
+  `--gradient-brand[-soft]`, `--glow-sm/md/lg`. Font: Inter (Google Fonts).
+- **Utilities** (`index.css`): `.gradient-text[-soft]`, `.bg-gradient-brand[-soft]`, `.zen-card`,
+  `.aurora-card`, `.glass` / `.glass-strong`, `.glow`, `.chip-tint`, `.hover-lift`, `.loading-shimmer`,
+  `.animate-fade-in`, `.animate-glow-pulse`, `.animate-float`, `.stagger-item`, `.animate-route`; Tiptap
+  styles under `.ProseMirror`, `#rich-editor`, `.note-preview`.
+- **Theme families** (`lib/themes.ts`): `aurora` (default), `netflix`, `prime`, each with a light and a
+  dark palette. `applyTheme(name, mode)` disables transitions, writes every token inline on `<html>`,
+  reskins `--sidebar-*`, and sets `data-theme="<name>-<mode>"`. Legacy names migrate to aurora.
+- **Mode:** `localStorage.theme` = `light` | `dark` | `system` (unset = dark). An inline script in
+  `index.html` adds `.dark` before first paint; the full palette arrives on mount. The command palette's
+  toggle writes only `light` / `dark`.
+- **Preferences** (`lib/preferences.ts`): one `AppPreferences` object (accent, font size, radius, reduced
+  motion, background effects, high contrast, underlined links, focus rings, readable font, start page,
+  currency, locale), stored in `localStorage.app_preferences` for first paint and in `user_preferences`
+  (`app_preferences`) across devices; the remote copy wins on load. `applyPreferencesToDOM` overrides
+  `--primary` / `--ring` / `--glow` from the accent, rescales `--radius*`, sets the root font size and
+  toggles `.reduce-motion`, `.high-contrast`, `.underline-links`, `.always-focus`, `.dyslexia-font`.
+- **Motion:** framer-motion via `components/ui/motion.tsx` (`PageTransition`, `FadeIn`, `Stagger`,
+  `StaggerItem`, `staggerItem` variants). `prefers-reduced-motion` and the reduce-motion preference both
+  neutralise animation, including the backdrop.
 
----
+## localStorage keys
 
-## 10. Client Data-Access Layer (`src/lib/*`)
+No `sessionStorage` is used.
 
-The UI talks to Supabase almost entirely through these modules (and inline `supabase.from(...)` calls in pages). See `backend.md` for table/column detail.
-
-| Module | Responsibility |
+| Key | Owner |
 |---|---|
-| `tags.ts` | Tag CRUD, validation/normalization, per-entity assignment (note/task/media/prompt/snippet), `searchByTag`, color palette |
-| `ledger.ts` | Ledger categories + entries CRUD, monthly summary (RPC + client calc), CSV/JSON export, INR formatting |
-| `subscriptions.ts` | Subscription + category CRUD, next-renewal calc, summary, status labels/colors, upcoming-renewals RPC |
-| `dashboard.ts` | Widget definitions/metadata, default layout, load/save/reset to `user_preferences` |
-| `codeSnippets.ts` | Code snippet CRUD + tag wiring, supported languages |
-| `category-init.ts` | Seed default ledger/subscription categories on first use |
-| `calendar.ts` | Event color/label/icon maps, grouping helpers |
-| `media-api.ts` | Search via edge function with Jikan fallback (uses axios + fetch) |
-| `media-refresh.ts` | Multi-API cover cycling (AniList, Jikan, Kitsu, MangaUpdates-via-proxy, TMDB, OMDB) + cache invalidation |
-| `simple-image-fetcher.ts` | Batched cover loading w/ localStorage cache and DB-first strategy |
-| `date-utils.ts` | IST-safe `YYYY-MM-DD` parse/format helpers (avoid `toISOString` UTC drift) |
-| `error-utils.ts` | `getErrorMessage`, `isError` |
-| `themes.ts` | 3 Aurora theme families (`aurora`/`netflix`/`prime`) + `applyTheme`/`getCurrentTheme`/`saveTheme` |
-| `route-prefetch.ts` | Prefetch a route's lazy code chunk on nav hover (instant transitions) |
-| `utils.ts` | `cn`, DOMPurify sanitizers, contrast-color helper |
+| `theme`, `app-theme` | `lib/preferences.ts`, `lib/themes.ts`, `index.html`, `CommandPalette` |
+| `app_preferences` | `lib/preferences.ts` |
+| `notehaven_sidebar_collapsed` | `contexts/SidebarContext.tsx` |
+| `sidebar-order` | `AppSidebar`, `settings/SidebarSection` |
+| `dashboard_fill_space` | `Dashboard`, `settings/DashboardSection` |
+| `calendar_filters` | `hooks/useCalendar.ts` |
+| `library-active-tab` | `Library`, `settings/BehaviorSection` |
+| `mediaTrackerViewMode`, `mediaTrackerActiveCategory`, `mediaTrackerVisibleTypeTabs`, `mediaTrackerCustomGroups`, `mediaTrackerSortBy`, `mediaTrackerSortOrder`, `mediaShowRails`, `media_meta_light_v1` | `MediaTracker` (view mode and sort also set from Behavior) |
+| `media_refresh_options_v1` | `media/RefreshLibraryDialog` |
+| `media_images_v2`, `media_image_sources_v2`, `media_images_stamp_v2` | `lib/image-cache.ts` |
+| `ledgerLastAccountId`, `ledgerSelectedMonth`, `ledgerSelectedYear` | `MoneyLedger` |
+| `recipesPantry` | `Recipes` |
+| `vault-view` | `Vault`, `settings/BehaviorSection` |
+| `work-projects-view` | `Work` |
+| `sb-<project-ref>-auth-token` | the Supabase client (session) |
 
----
+## Window events
 
-## 11. localStorage Keys (UI persistence)
+| Event | Dispatched by | Heard by |
+|---|---|---|
+| `open-command-palette` | `AppSidebar` search button, `settings/KeyboardSection` | `CommandPalette` |
+| `sidebar-order-changed` | `settings/SidebarSection` (save / reset) | `AppSidebar` |
 
-| Key | Used by |
-|---|---|
-| `theme` | light/dark mode |
-| `app-theme` | active color theme |
-| `notehaven_sidebar_collapsed` | sidebar collapse |
-| `sidebar-order` | sidebar nav order |
-| `library-active-tab` | Library tab |
-| `mediaTrackerViewMode`, `mediaTrackerActiveTypeTab`, `mediaTrackerVisibleTypeTabs`, `mediaTrackerCustomGroups` | MediaTracker |
-| `media_images_v1`, `media_image_sources_v1` | cover image cache |
+## Build and tooling
 
----
-
-## 12. Build / Run
-
-```bash
-npm install
-npm run dev        # Vite dev server (configured host "::", port 8080)
-npm run build      # production build
-npm run build:dev  # development-mode build
-npm run lint       # eslint
-npm run preview    # preview built app
-```
-
-Required env (Vite, `VITE_` prefixed are public/client): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SUPABASE_PROJECT_ID`. Optional: `TMDB_API_KEY`, `OMDB_API_KEY` (note these are read in client code via `import.meta.env` in `media-refresh.ts` but are not `VITE_`-prefixed, so they're effectively undefined at runtime — see audit).
-
-PWA: service worker auto-update; caches Google Fonts (CacheFirst) and Supabase API (NetworkFirst, 5min).
-
-Production build is **code-split**: every authenticated route is `React.lazy` and `vite.config.ts` `manualChunks` groups shared vendors, so heavy libraries (Tiptap, CodeMirror, recharts) download only when their page is opened — no single-bundle chunk-size warning. Nav links warm the next route's chunk on hover (`lib/route-prefetch.ts`).
+- **Vite** (`vite.config.ts`): dev server on host `::`, port 8080; `@vitejs/plugin-react-swc`;
+  `lovable-tagger` in development mode only; alias `@` → `./src`. `manualChunks` splits `editor` (Tiptap +
+  ProseMirror), `codemirror` (core only — each language grammar is its own lazy chunk), `charts`
+  (recharts / d3), `motion`, `icons`, `supabase`, `query` and `react-vendor`.
+- **PWA** (`vite-plugin-pwa`): `autoUpdate`; dark `#141414` theme and background colours; Workbox
+  precaches the build and runtime-caches Google Fonts (CacheFirst, 1 year) and `*.supabase.co`
+  (NetworkFirst, 10 s timeout, 5 min / 50 entries).
+- **TypeScript:** `tsconfig.app.json` covers `src/` and is loose (`strict: false`). The root
+  `tsconfig.json` only holds references (`files: []`), so run `npm run typecheck`, not bare `tsc`.
+- **ESLint** (`eslint.config.js`, flat config): JS + typescript-eslint recommended, react-hooks
+  recommended, `react-refresh/only-export-components` as a warning, `@typescript-eslint/no-unused-vars` off.
+- **Tests:** `scripts/__tests__/media-insights.test.ts` (`npm run test:insights`) — plain `tsx` with
+  hand-rolled assertions over `lib/media-insights` and `lib/media-progress`. No test framework.
+- **CI:** `.github/workflows/ci.yml` (GitHub Actions, Node 20): `npm ci` → lint → `test:insights` →
+  build → esbuild parse of the edge function.

@@ -1,149 +1,205 @@
 # CLAUDE.md
 
-Guidance for AI assistants (and humans) working in the NoteHaven codebase. For deep detail see `context/frontend.md` and `context/backend.md`.
+What an agent must know before changing NoteHaven. Deeper maps: `context/frontend.md` (routes, lib
+modules, components, storage keys) and `context/backend.md` (schema, RPCs, RLS, edge function,
+migrations). Human setup and deploy: `README.md`. Open items and declined ideas: `docs/BACKLOG.md`.
 
----
+## Who it's for, and what to optimise
 
-## What this project is
+NoteHaven is **Rakshit's personal daily driver**. He is the one real user; one or two trusted people
+occasionally use the Vault; production has 7 accounts, nearly all inactive. Usage is **Media** (by far
+the most) ≫ **Library** (copying per-project commands) > **Notes** > **Vault**; the rest are secondary.
 
-NoteHaven is a personal productivity & media companion: a React 18 + TypeScript + Vite single-page app backed entirely by Supabase (PostgreSQL + RLS, Auth, Storage, Realtime, RPC, one Edge Function). There is **no custom server** — the client talks to Supabase directly.
+- **Optimise for** fast loads (first paint, route switches), easy access (few clicks, ⌘K, daily mobile
+  use) and responsive feedback (loading states, optimistic updates, toasts, nothing that feels dead).
+- **Don't propose enterprise-scale work** (rate limiting, audit trails, multi-tenant admin, heavy
+  abstractions). Grade security by real exposure — a handful of trusted accounts — except anything a
+  stranger can reach (`/signup`, `/notes/share/:id`, the edge function).
 
-Features: Notes (rich text, auto-save, share links), Tasks, AI Prompt library, Code Snippets, a per-project Commands bank (shares the snippet project folders), Media Tracker (anime/manga/movies/series with auto cover images), Money Ledger (accounts + cumulative "money in hand"), Subscriptions, Birthdays, Countdowns, a unified Calendar, a private file **Vault** (nested folders + files in Supabase Storage), a **Bucket List**, a **Recipes** cookbook, a **Work** log (office projects + who you helped), a cross-cutting Tags system, and a customizable widget Dashboard.
+## What it is
 
----
+A React SPA backed entirely by Supabase (Postgres + RLS, Auth, Storage, Realtime, RPC, one Deno edge
+function). There is no custom server; the client talks to Supabase directly.
 
-## Tech stack (quick reference)
+Pages: Dashboard (widget grid) · Calendar · Tasks · Notes (rich text, autosave, share links) · Library
+(Prompts, Code Snippets, Commands tabs) · Media tracker · Work log · Money Ledger · Subscriptions ·
+Wishlist · Vault (private files) · Recipes · Birthdays · Bucket List · Tags · Settings. Countdowns have
+no page — they live in a dashboard widget and the calendar's quick-add. Route table: `context/frontend.md`.
 
-- React 18, TypeScript 5.8, Vite 5
-- Package manager: **npm** (standardized; lockfile is `package-lock.json`)
-- Node 18+ (LTS recommended; pinned in `.nvmrc`)
-- Tailwind CSS 3 + shadcn/ui (Radix) + lucide-react icons
-- react-router-dom v6, TanStack React Query v5 (mainly MediaTracker)
-- Tiptap (Notes rich text), CodeMirror 6 (snippets)
-- framer-motion, date-fns, DOMPurify, recharts
-- Supabase JS client; Supabase Edge Function (Deno) for media search
-- PWA via vite-plugin-pwa
+## Stack
 
-Path alias: `@/` → `src/`.
-
----
+- React 18, TypeScript 5.8, Vite 5 (SWC). Path alias `@/` → `src/`.
+- Tailwind 3 + shadcn/ui (Radix; a trimmed set in `components/ui`) + lucide-react + framer-motion.
+- react-router-dom 6; TanStack Query 5 (MediaTracker, Library, CommandsTab, RefreshActivityContext —
+  most other pages use manual `useState` + `useEffect`).
+- Tiptap 2 (Notes), CodeMirror 6 (snippets), recharts (ledger charts), cmdk (⌘K), date-fns, DOMPurify,
+  jszip (vault downloads).
+- supabase-js 2; vite-plugin-pwa (autoUpdate).
+- **npm only** (`package-lock.json`; no bun/yarn/pnpm). Node 20 in `.nvmrc` and CI; `engines` requires
+  Node ≥18 / npm ≥9, enforced by `.npmrc` `engine-strict=true`.
 
 ## Commands
 
-This project standardizes on **npm**. Do not use bun/yarn/pnpm (they create conflicting lockfiles; only `package-lock.json` is committed).
-
 ```bash
 npm install
-npm run dev          # dev server (host "::", port 8080)
-npm run build        # production build  ← run after changes to verify
-npm run build:dev    # dev-mode build
-npm run lint         # eslint
-npm run preview      # preview build
-npm run backfill:covers   # one-off: backfill media cover images (needs SUPABASE_SERVICE_ROLE_KEY)
+npm run dev            # http://localhost:8080 (host "::")
+npm run typecheck      # tsc --noEmit -p tsconfig.app.json
+npm run build          # typecheck, then vite build → dist/
+npm run lint           # eslint
+npm run test:insights  # assertion script for lib/media-insights + lib/media-progress
+npm run preview        # serve dist/
 ```
 
-If you use nvm/fnm, run `nvm use` to match `.nvmrc`. Node 18+ / npm 9+ is enforced via `package.json` "engines" + `.npmrc` (`engine-strict=true`).
+Maintenance scripts (`backfill:*`, `backup:media`, `audit:coverage`, `smoke:apis`) are described in `README.md`.
 
-There is **no test setup** in this repo. Do not assume a test runner exists; if adding tests, set one up explicitly and mention it.
+**Done means** `npm run build`, `npm run lint` (zero errors) and `npm run test:insights` all pass —
+what CI runs (`.github/workflows/ci.yml`, GitHub Actions, on push to `main` and on PRs), plus an esbuild
+parse of the edge function.
+- The existing lint warnings are known: `react-hooks/exhaustive-deps` on deliberate mount-only effects
+  and `react-refresh/only-export-components`. Don't add new ones, and don't "fix" a mount-only effect by
+  adding deps (that's how refetch loops happen).
+- Bare `tsc --noEmit` is a **false green**: root `tsconfig.json` has `files: []`. Use `npm run typecheck`.
+  `tsconfig.app.json` is loose (`strict: false`).
+- There is no test framework. The test script is plain `tsx` with hand-rolled asserts. Vitest for the
+  `lib/*` data layer is the one open backlog item; set it up explicitly if you add it.
 
-Env vars (`.env`, gitignored): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_SUPABASE_PROJECT_ID` (public client). `SUPABASE_SERVICE_ROLE_KEY`, `TMDB_API_KEY`, `OMDB_API_KEY` are for scripts/edge function only — never import service-role into client code.
+## Environment
 
----
+| Where | Variables | Notes |
+|---|---|---|
+| `.env` — client (copy `.env.example`) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | public by design; Vite inlines them at build time. `VITE_SUPABASE_PROJECT_ID` is in the template but no code reads it |
+| `.env` — local scripts only | `SUPABASE_SERVICE_ROLE_KEY`, `TMDB_API_KEY`, `OMDB_API_KEY` | the service-role key bypasses RLS: **never import it into `src/`**. OMDB is used only by `backfill:covers` |
+| edge-function secrets (`supabase secrets set`) | `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS` (CORS; unset means `*`) | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are injected by the Supabase runtime |
 
-## Project structure
+## Layout
 
 ```
 src/
-  App.tsx                 # providers + routes
-  main.tsx                # entry
-  index.css               # Aurora design tokens + utilities + animations
-  pages/                  # one file per route (some are 1000–1900 lines)
-  components/
-    ui/                   # shadcn primitives (~50) + motion.tsx (shared motion), command.tsx
-    dashboard/widgets/    # 12 dashboard widgets
-    calendar/             # calendar views/modals
-    media/                # MediaCard, CustomGroupBuilder
-    work/                 # ProjectCard, ProjectTable, PeopleInput
-    PageShell.tsx         # shared page frame (sidebar + gradient header + transition)
-    AppSidebar.tsx        # Aurora glass rail (⌘K trigger, hover route-prefetch)
-    CommandPalette.tsx    # ⌘K launcher  · AuroraBackdrop.tsx · RouteFallback.tsx
-    Tag*.tsx              # tag UI components
-  contexts/SidebarContext.tsx
-  hooks/                  # useAuth, useCalendar, use-mobile, use-media-query, use-toast
-  lib/                    # data-access + utilities (talk to Supabase here)
-  integrations/supabase/  # client.ts + generated types.ts
-scripts/backfill-cover-images.ts
-deploy-edge-function.sh
-context/                  # frontend.md, backend.md (architecture docs)
+  App.tsx                 providers + route table (auth pages eager, everything else React.lazy)
+  index.css               Aurora tokens, utilities, animations
+  pages/                  one file per route; pages/settings/ holds the Settings sections
+  components/             app-level pieces (AppSidebar, PageShell, CommandPalette, Tag*, ConfirmDialog, CodeEditor…)
+    ui/                   shadcn primitives + DatePicker, empty-state, filter-pill, motion
+    calendar/ dashboard/ ledger/ library/ media/ recipes/ settings/ vault/ work/   feature components
+  hooks/, contexts/       auth, preferences, calendar, sidebar, refresh activity, toast…
+  lib/                    data access (one module per feature) + pure helpers
+  integrations/supabase/  client.ts (the only client) + types.ts
+supabase/                 config.toml, functions/media-search/, migrations/
+scripts/                  tsx maintenance scripts; __tests__/ holds the insights test
+deploy-edge-function.sh   links the project, deploys media-search, sets its secrets
 ```
 
-The `supabase/` folder is git-tracked: `config.toml`, the `media-search` edge function, and the SQL migrations. (`supabase/.temp/` is CLI cache — untracked.)
+## Database and migrations
 
-**Migrations were consolidated on 2026-08-14.** The former `01`→`19` files are now a single `00_baseline_schema.sql`, assembled verbatim in application order — every SQL line is byte-identical to the originals, which remain in git history. Running that one file top-to-bottom on a fresh Supabase project reproduces production. `20_data_cleanup.sql` follows it, then `21_commands.sql` (the Library Commands tab's `commands` table) and `22_security_lint.sql` (dashboard-linter fixes; also documents which warnings are accepted by design). New changes go in their own numbered file (`24_*.sql` next — note `22` was used twice, by `22_security_lint.sql` and `22_wishlist.sql`).
+- The schema is `supabase/migrations/*.sql`, applied **by hand in the Supabase SQL editor**, in filename
+  order: `00_baseline_schema` (the former 01–19, consolidated 2026-08-14), `20_data_cleanup`,
+  `21_commands`, `22_security_lint`, `22_wishlist`, `23_work_projects`. There is no migration runner;
+  don't use `supabase db push` (two files share the `22_` prefix). **Next new file: `24_*.sql`.**
+- All six are live on production (confirmed by the owner, 2026-08-20).
+- **Re-run safety:** `21`, `22_security_lint`, `22_wishlist` and `23` are idempotent. **Don't re-run
+  `00` or `20`**: `00` fails with "policy already exists", and `20`'s orphan-tag cleanup predates
+  `work_project_tags`, so it would delete tags used only by work projects.
+- **Known limitation:** `00` can't currently bootstrap an empty project, and no SQL adds `notes` to the
+  realtime publication (see `docs/BACKLOG.md`).
+- `src/integrations/supabase/types.ts` is generated, then hand-edited; update it with every schema change.
+- Every user table is RLS-scoped to `auth.uid() = user_id`; client queries filter by the signed-in user
+  where the existing code does.
 
-Migrations are applied **by hand in the Supabase SQL editor**, in filename order — there is no migration runner. `00`, `20`, `21`, `22_wishlist.sql` and `23` must be run explicitly on a new project. `00` is already live on the production database; the rest are not (see below — the Commands tab errors on fetch until `21` is run, and `/work` shows a setup panel until `23` is run). Each is idempotent, so a re-run is safe.
+## Conventions
 
-`00_baseline_schema.sql` plus `src/integrations/supabase/types.ts` are the schema source of truth.
+- **Data access:** prefer the `lib/*` module for the feature (every newer feature has one). Older pages
+  (MediaTracker, Dashboard, Notes, Library, Tasks, Birthdays) also call `supabase.from()` inline — match
+  the file you're editing. One Supabase client only (`integrations/supabase/client.ts`).
+- **Auth:** wrap protected routes in `<ProtectedRoute>`; get the user from `useAuth()`. For "who am I"
+  in data code use `supabase.auth.getSession()`, not `getUser()` (a network round-trip per call).
+- **Server state:** the app `QueryClient` (`App.tsx`) defaults to `staleTime` 5 min, `gcTime` 30 min,
+  no refetch on focus, `retry: 1`. Keep one strategy per page.
+- **Dates:** `dateToYMD` / `parseYMD` from `lib/date-utils.ts`; compare `YYYY-MM-DD` strings. Never
+  `new Date('YYYY-MM-DD')` or `toISOString().split('T')[0]` for local dates (UTC drift in IST).
+- **Toasts:** `useToast()` from `@/components/ui/use-toast` — the only toast system mounted.
+- **Stored HTML:** sanitize with `sanitizeHtml` / `sanitizePreview` (`lib/utils.ts`) before rendering.
+- **Styling:** design tokens only (`bg-background`, `text-foreground`, `border-border`, `text-primary`,
+  `text-accent-2`, `text-success`, `text-warning`, …); no raw colours when a token exists. Tailwind
+  classes must appear literally in source — building `md:${x}` strings produces classes that don't exist.
+- **Aurora design system:** charcoal canvas, indigo (`--primary`) → cyan (`--accent-2`) gradient
+  accents, glass surfaces with soft glow. Utilities in `index.css`: `.gradient-text[-soft]`,
+  `.bg-gradient-brand[-soft]`, `.zen-card` (workhorse card), `.aurora-card` (hero/stat tile), `.glass`
+  / `.glass-strong`, `.glow` + `shadow-glow*`, `.chip-tint`, `.loading-shimmer` (skeletons).
+  `<Button variant="gradient">` is the one hero CTA per screen; `default` is solid indigo + glow.
+- **Themes and preferences:** theme families `aurora` (default), `netflix`, `prime` (`lib/themes.ts`);
+  mode is light / dark / system. `applyTheme` rewrites `--primary`, so follow it with
+  `applyPreferencesToDOM(getCachedPrefs())` or a custom accent reverts. User preferences go through
+  `usePreferences().update()` (stored in localStorage and in `user_preferences`).
+- **Page shell:** content pages render through `<PageShell title icon actions subtitle …>` (sidebar,
+  gradient header, `lg:hidden` mobile hamburger, entrance transition); Notes, MediaTracker and Calendar
+  are bespoke full-height pages. Page roots stay transparent so `<AuroraBackdrop/>` shows through.
+  `ui/dialog.tsx` and `ui/sheet.tsx` are already mobile-safe — no per-dialog width hacks.
+- **Motion:** the shared helpers in `components/ui/motion.tsx` (`PageTransition`, `Stagger`/`StaggerItem`,
+  `FadeIn`). **⌘K** opens `<CommandPalette/>`; programmatically:
+  `window.dispatchEvent(new Event('open-command-palette'))`.
+- **Adding a route** means touching five hand-kept lists: `App.tsx`, `AppSidebar` `defaultMainNavigation`,
+  `settings/SidebarSection` `DEFAULT_ORDER`, `lib/route-prefetch.ts` loaders, and `CommandPalette` items.
+- **Tags:** negative tag ids are unsaved placeholders — persist with `createTag`, then the entity's
+  `set<Entity>Tags` helper (note, task, media, prompt, snippet, work project).
+- **Adding a user table** means adding it to the backup list in `settings/DataSection.tsx`
+  (`EXPORT_TABLES`, plus its FK remaps).
+- **Pure modules** (`media-insights`, `media-progress`, `secret-mask`, `recipe-parse`, `pantry-match`)
+  must not import the Supabase client — it pulls in `import.meta.env` and breaks the `tsx` test.
+- **localStorage** holds UI preferences; guard every access in try/catch. Key list: `context/frontend.md`.
+- **Big pages** (MediaTracker, Library, Notes) mix fetching, state and JSX: extract when making
+  substantial changes, but keep diffs scoped.
 
----
+## By design — don't "fix" these
 
-## Architecture conventions
+1. **Note sharing goes through RPCs.** `SharedNote.tsx` calls `get_shared_note(p_share_id)` /
+   `update_shared_note(...)` (SECURITY DEFINER; the share UUID is the credential, so anon may call
+   them). `shared_notes` is owner-only and recipients can't read `notes`. Don't turn it back into a table query.
+2. **The edge function verifies JWTs** (`verify_jwt = true` in `supabase/config.toml`; the setting is
+   sticky server-side, which is why it lives there) and rejects any role but `authenticated`. Call it
+   through `mediaSearchGet` in `lib/edge-function.ts`; a bare `fetch()` gets a 401. TMDB, Wikidata and
+   Fanart lookups go through it so their keys stay server-side.
+3. **`media_metadata` is a shared, cross-tenant cache** (no `user_id`; upsert on `title,type`). Any
+   signed-in user may write it — accepted at this scale (`22_security_lint.sql`). Treat what you read
+   from it as untrusted third-party data, and never write personal progress to it.
+4. **Subscriptions don't create ledger rows.** Charges are derived at read time
+   (`deriveSubscriptionCharges`, `lib/ledger.ts`), and `getLedgerSummary` adds them so Dashboard and
+   Money Ledger agree. Money in hand = opening balances + income − expenses − subscription charges
+   (`lib/accounts.ts`). `subscriptions.ledger_entry_id` is a legacy, always-null column.
+5. **`get_calendar_events` and `get_upcoming_renewals`** are SECURITY DEFINER and raise unless
+   `p_user_id = auth.uid()` — always pass the session user's id.
+6. **Commands reuse `snippet_folders`** as their projects; there is no separate projects table.
+7. **`/work`**: if its tables are missing, the page shows a "tables not set up" panel with Retry
+   (`isMissingTableError` in `lib/work.ts` detects PostgREST `PGRST205` / Postgres `42P01`; Wishlist
+   does the same). `helped` is a real `TEXT[]` so "people helped" is an `unnest` + `GROUP BY` — don't
+   flatten it. Duration is two columns (`duration_value` + `duration_unit`) so it can sort, and `hours`
+   is separate from duration (a six-week project can be forty hours). The "People" tab is a disabled
+   placeholder.
+8. **`/prompts`** is a working alias that renders Library, same as `/library`.
+9. **`ledger_buckets` is gone** (dropped by migration 20). Nothing references it; don't bring it back.
+10. **Media tags:** the tag filter was removed because `media_tags` never held a row and genres cover the
+    same ground. The tag selector on the edit form remains.
+11. **The PWA caches Supabase responses** (NetworkFirst, 5 min), so stale reads while offline are expected.
+12. **Notes autosave**: 800 ms debounce, flushed on note switch, `visibilitychange` and `beforeunload`;
+    a realtime channel on `notes` (filtered by `user_id`) syncs tabs and must be removed on unmount.
+13. **Backup and restore** (Settings → Data): the JSON export covers every user table, paged past the
+    1000-row cap. **Restore is known-broken** for ledger entries, subscriptions and categories (see
+    `docs/BACKLOG.md`); Vault and `user_preferences` are deliberately never restored.
 
-- **Data access**: prefer the `lib/*` modules. Many pages also call `supabase.from(...)` inline — match the local pattern of the file you're editing.
-- **Auth gating**: wrap protected routes in `<ProtectedRoute>`; get the user from `useAuth()`.
-- **Server state**: MediaTracker uses React Query (`useInfiniteQuery`, optimistic cache updates). Most other pages use manual `useState` + `useEffect` + `Promise.all`. Keep consistency within a page. The app-wide `QueryClient` (in `App.tsx`) now has caching defaults: `staleTime` 5m, `gcTime` 30m, `refetchOnWindowFocus: false`. (Migrating high-traffic pages to React Query for instant cross-navigation caching is a worthwhile follow-up.)
-- **Dates**: use `lib/date-utils.ts` (`dateToYMD`, `parseYMD`) to avoid UTC drift. Avoid `new Date(isoString)` / `toISOString().split('T')[0]` for local dates.
-- **Toasts**: use `useToast()` from `@/components/ui/use-toast` (the Sonner instance is mounted but unused by features).
-- **HTML content**: sanitize with `sanitizeHtml`/`sanitizePreview` (`lib/utils.ts`) before rendering stored note HTML.
-- **Styling**: use design tokens (`bg-background`, `text-foreground`, `border-border`, `text-primary`, `text-accent-2`, `text-success`, `text-warning`, etc.) and the utility classes in `index.css`. Don't hard-code raw colors when a token exists. Themes are applied by writing CSS vars in `lib/themes.ts`.
-- **Design system = "Aurora"** (premium-SaaS): deep charcoal canvas, electric **indigo (`--primary`) → cyan (`--accent-2`) gradient** accents, glassy surfaces with soft glow. Default theme is `aurora` (dark-first); `netflix` + `prime` remain selectable in Settings. Key utilities in `src/index.css`: `.gradient-text` / `.gradient-text-soft` (headlines), `.bg-gradient-brand[-soft]`, `.zen-card` (workhorse card — lit border + glow hover), `.aurora-card` (hero/stat tile w/ gradient border), `.glass` (modals/sidebar/floating), `.glow` + `shadow-glow*`, `.chip-tint`. The ambient drifting orbs come from `<AuroraBackdrop/>` (rendered once in `App.tsx`); **page roots must be transparent** (no `bg-background`) for them to show through.
-- **Page shell**: most content pages render through `<PageShell title icon actions subtitle ...>` (`src/components/PageShell.tsx`) — it supplies the sidebar, a glassy gradient-title header, transparent padded content, and an entrance transition. Bespoke full-height pages (Notes, MediaTracker, Calendar) keep their own layout but use a transparent root. Don't reintroduce per-page sidebar/hamburger markup.
-- **Motion**: use the shared helpers in `src/components/ui/motion.tsx` — `<PageTransition>`, `<Stagger>`+`<StaggerItem>`, `<FadeIn>` (one springy language). CSS classes `.animate-fade-in`, `.stagger-item`, `.hover-lift`, `.animate-glow-pulse`, `.animate-float` are also available.
-- **Command palette**: `⌘K` / `Ctrl+K` opens `<CommandPalette/>` (cmdk; mounted in `App.tsx`). Open it programmatically with `window.dispatchEvent(new Event('open-command-palette'))`.
-- **Buttons**: `<Button variant="gradient">` is the brand-gradient hero CTA (one per screen); `default` is solid indigo + glow.
-- **Performance**: authenticated routes are `React.lazy` code-split in `App.tsx` (heavy libs — tiptap / codemirror / recharts — download only with their page); `vite.config.ts` `manualChunks` groups shared vendors (no more single 2.4 MB bundle / chunk-size warning). Nav links prefetch their route chunk on hover via `lib/route-prefetch.ts`. Skeletons use `.loading-shimmer`.
-- **Tags**: tag IDs that are negative are unsaved/temporary; persist via `createTag` then the entity-specific `set<Entity>Tags` helpers.
-- **localStorage** is used widely for UI prefs (see frontend.md §11). Guard access in try/catch (existing code does).
+## Decided — don't re-litigate
 
----
+- **2026-08-20 backlog triage:** every proposal was declined except Vitest smoke tests for `lib/*`. The
+  declined list is in `docs/BACKLOG.md` — don't re-propose those items.
+- **2026-08-20 TMDB key:** `381f2d0e…`, committed in `aea34a8`, stays readable in git history. The owner
+  chose not to rotate it (worst case: someone burns free-tier TMDB quota). `deploy-edge-function.sh`
+  reads `TMDB_API_KEY` from the environment, and `ALLOWED_ORIGINS` is set on the deployed function.
+- **2026-08 security hardening** (share-link policies, unchecked `p_user_id` in the definer RPCs) was
+  confirmed closed on production on 2026-08-14. `docs/audit/AUDIT_ONE_SHOT.sql` re-checks the live
+  database as one statement (the SQL editor shows only the last result set). **Caveat: its section 13
+  still queries the dropped `ledger_buckets`, so the whole query fails until that section is removed.**
 
-## Things to be careful about (known rough edges)
+## Docs
 
-These are real, current, and worth knowing before you touch related code.
-
-1. **The 2026-08 security drift is fixed and verified.** The live database had drifted in two dangerous ways: the share-link policies on `notes` had lost their share-id predicate (making any shared note world-readable), and `get_calendar_events` / `get_upcoming_renewals` were `SECURITY DEFINER` with an unchecked `p_user_id` (cross-tenant reads). Both are closed — confirmed against production on 2026-08-14: `notes` now carries only `auth.uid() = user_id` policies, and both RPCs check `auth.uid()`. Re-verify any time with `docs/audit/AUDIT_ONE_SHOT.sql` (one statement, 20 sections — the Supabase editor only renders the *last* result set, so multi-statement audit scripts silently discard everything above). Background: `docs/audit/audit-report.html`.
-2. **Note sharing goes through RPCs, not tables.** `SharedNote.tsx` calls `get_shared_note(share_id)` / `update_shared_note(...)`. Recipients cannot read `shared_notes` or `notes` directly, by design — don't "simplify" it back to a table query.
-3. **The edge function verifies JWTs.** Call it via `lib/edge-function.ts` (`mediaSearchGet`), which attaches the session token. A bare `fetch()` will 401.
-4. **`media_metadata` is a shared, cross-tenant cache** with no `user_id`. Writes are limited to `authenticated`. Treat anything read from it as untrusted third-party data.
-5. **`ledger_buckets` is retired.** The envelope-budgeting UI was removed long ago. `20_data_cleanup.sql` drops the table and the two `ledger_entries` columns; the code and `types.ts` no longer reference them. Confirmed safe first — zero entries referenced a bucket. **Run migration 20 before deploying**, or leave the dead table in place; do not half-apply.
-6. **`/work` needs migration `23_work_projects.sql`.** Until it's run in the SQL editor the page renders a "tables not set up" panel with a Retry button instead of erroring — `lib/work.ts` `isMissingTableError()` detects the missing table via PostgREST's `PGRST205` / Postgres `42P01`. `helped` is a real `TEXT[]`, not a comma-separated string: that's what makes the "people helped" stat and a future People tab an `unnest` + `GROUP BY` rather than a text re-parse, so don't flatten it. Duration is deliberately two columns (`duration_value` + `duration_unit`) so "longest first" can sort, and `hours` is deliberately separate from duration (a six-week project can be forty hours).
-7. **`/prompts` is a working alias** that renders `Library` (same as `/library`).
-8. **Responsive/mobile**: `PageShell` renders the `lg:hidden` hamburger header for migrated content pages (bespoke full-height pages — Notes/MediaTracker/Calendar — keep their own). Mobile sizing is handled at the primitive level — `ui/dialog.tsx` and `ui/sheet.tsx` are mobile-safe, so prefer those defaults over per-dialog width hacks.
-9. **Tag selectors**: `CompactTagSelector`/`TagFilter`/`TagCloud` are the wired-in components.
-10. **Toasts**: only the shadcn `Toaster` (`use-toast`) is mounted.
-11. **Rotate the TMDB key.** `381f2d0e…` was committed in `aea34a8` and is still readable in git history. `deploy-edge-function.sh` no longer contains it, but removing it from HEAD does not un-leak it.
-12. **Use `getSession()`, not `getUser()`**, for "who am I" reads in the data layer — `getUser()` is a network round-trip per call.
-13. **Large page files** (Notes ~1300, MediaTracker ~1900 lines) mix data fetching, state, and JSX. Prefer extracting when making substantial changes, but keep diffs scoped.
-
----
-
-## When making changes
-
-- Read the file (and its `lib/*` data module) before editing; match existing patterns and the design-token styling.
-- After edits, run `npm run build` (which now typechecks first) and `npm run lint` to verify — there are no automated tests.
-- `eslint` reports ~21 `react-hooks/exhaustive-deps` warnings on deliberate mount-only effects. Zero **errors** is the bar; don't add new ones.
-- Keep RLS in mind: every user table is scoped by `user_id = auth.uid()`. Client queries should filter by the authenticated user where the existing code does.
-- Don't introduce a second Supabase client instance (auth/session relies on the single shared one).
-- Be cautious with anything touching auth, RLS expectations, the edge function, or service-role usage — flag risky/destructive changes before applying.
-
----
-
-## Key reference docs
-
-- `context/frontend.md` — full frontend map (routing, pages, components, styling, state, data layer).
-- `context/backend.md` — Supabase schema, RPCs, RLS, edge function, cover-image subsystem.
-- `README.md` — setup, deployment, troubleshooting.
-- `docs/BACKLOG.md` — proposed enhancements per feature area.
-- `docs/PENDING_FIXES.md` — known open items.
-- `docs/audit/AUDIT_ONE_SHOT.sql` — single-statement live-database health check.
-- `docs/archive/` — completed trackers and superseded dumps, kept for reference.
+- `README.md` — setup, run, deploy, maintenance scripts, troubleshooting.
+- `context/frontend.md` — routes → pages → lib → tables, components, hooks, theming, storage keys, build.
+- `context/backend.md` — tables, RPCs, triggers, Storage, realtime, edge function, migrations, scripts.
+- `docs/BACKLOG.md` — open items, known limitations, declined ideas.
