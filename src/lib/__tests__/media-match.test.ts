@@ -77,6 +77,16 @@ describe('media-match: the known traps', () => {
     expect(scoreCandidate({ ...q, progress: 300 }, bookEaterMKR)).toBeLessThan(scoreCandidate({ ...q, progress: 50 }, bookEaterMKR));
   });
 
+  it('the same work on two sources is not a rival (auto), but two works with one title are (review)', () => {
+    const al = { ...mu('Solo Leveling', ['Na Honjaman Level Up'], 'Manhwa', 'comic', 'KR', { year: 2018 }), source: 'anilist' };
+    const muHit = { ...mu('Solo Leveling', [], 'Manhwa', 'comic', 'KR', { year: 2018 }), source: 'mangaupdates' };
+    expect(pickLink({ title: 'Solo Leveling', type: 'Manhwa' }, [al, muHit]).band).toBe('auto');
+    const us = { title: 'Suits', alt_titles: [], medium: 'screen' as const, format: 'TV', country: 'US', chapters: null, latest_chapter: null, year: 2011, source: 'tvmaze' };
+    const kr = { ...us, country: 'KR', year: 2018 };
+    expect(pickLink({ title: 'Suits', type: 'Series' }, [us, kr]).band).toBe('review');       // same source
+    expect(pickLink({ title: 'Suits', type: 'Series' }, [us, { ...kr, source: 'tmdb' }]).band).toBe('review'); // years differ
+  });
+
   it('a near tie is review, not auto', () => {
     const a = mu('Solo Leveling', [], 'Manhwa', 'comic', 'KR');
     const b = mu('Solo Leveling', [], 'Manhwa', 'comic', 'KR');

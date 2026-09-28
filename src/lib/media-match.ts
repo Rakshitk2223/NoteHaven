@@ -26,7 +26,8 @@ export const REVIEW_MIN = 0.6;
 
 /** The parts of a candidate the scorer reads (so tests can use plain objects). */
 export type MatchCandidate = Pick<Candidate,
-  'title' | 'alt_titles' | 'medium' | 'format' | 'country' | 'chapters' | 'latest_chapter' | 'year'>;
+  'title' | 'alt_titles' | 'medium' | 'format' | 'country' | 'chapters' | 'latest_chapter' | 'year'>
+  & { source?: string };
 
 export interface MatchQuery {
   title: string;
@@ -174,6 +175,21 @@ export function scoreCandidate(q: MatchQuery, c: MatchCandidate): number {
   return Math.max(0, Math.min(1, Math.round(s * 1000) / 1000));
 }
 
+/**
+ * Same work listed by two different sources: different source, near-identical
+ * title (either way, over alt titles), same medium, and years within 1 (when
+ * both known). Two same-titled entries on ONE source are different works
+ * ("Suits" US vs "Suits" KR on TVmaze) and stay rivals.
+ */
+export function sameWork(a: MatchCandidate, b: MatchCandidate): boolean {
+  if (!a.source || !b.source || a.source === b.source) return false;
+  if (a.medium !== b.medium) return false;
+  if (a.year != null && b.year != null && Math.abs(a.year - b.year) > 1) return false;
+  const aTitles = [a.title, ...(a.alt_titles || [])];
+  const bTitles = [b.title, ...(b.alt_titles || [])];
+  return Math.max(...aTitles.map((t) => titleScore(t, bTitles))) >= 0.95;
+}
+
 export function matchBand(score: number): MatchBand {
   return score >= AUTO_LINK_MIN ? 'auto' : score >= REVIEW_MIN ? 'review' : 'none';
 }
@@ -198,7 +214,10 @@ export function pickLink<C extends MatchCandidate>(
   const best = ranked[0] ?? null;
   if (!best) return { band: 'none', best: null, ranked };
   let band = matchBand(best.match);
-  const runnerUp = ranked[1];
-  if (band === 'auto' && runnerUp && best.match - runnerUp.match < 0.05) band = 'review';
+  // The runner-up that matters is the best DIFFERENT work: the same series on
+  // AniList and MangaUpdates is one work seen twice, not a rival (the dry run
+  // found 73 of 103 "near ties" were exactly that).
+  const rival = ranked.slice(1).find((c) => !sameWork(best, c));
+  if (band === 'auto' && rival && best.match - rival.match < 0.05) band = 'review';
   return { band, best, ranked };
 }

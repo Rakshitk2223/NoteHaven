@@ -14,7 +14,6 @@ import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import { invalidateImageCache } from './image-cache';
 import { isUsableCover } from './cover-medium';
 import { hitMatchesTitle } from './title-match';
-import { refreshLinked } from './media-link';
 
 // Pure progress helpers + metadata shapes live in their own module so they can
 // be tested without the Supabase client. Re-exported here for existing callers.
@@ -411,6 +410,8 @@ async function refreshOne(
   // Media v2: a LINKED entry refreshes by its source id — no title search, no
   // cover or user-field change, and the same answer every time (media-link.ts).
   if (item.link_status === 'linked' && item.source && item.source_id) {
+    // Lazy: media-link (+ media-sources) must stay out of first paint (perf gate).
+    const { refreshLinked } = await import('./media-link');
     const r = await refreshLinked(item.id);
     if (r.ok === false) return r.reason === 'not-linked' ? 'skipped' : 'failed';
     return r.latestChanged ? 'updated' : 'skipped';
