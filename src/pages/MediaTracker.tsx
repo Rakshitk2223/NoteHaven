@@ -1777,6 +1777,13 @@ const MediaTracker = () => {
   const closeDetails = useCallback(() => {
     guardEdits(() => { setDetailsOpen(false); setDetailsMode('view'); });
   }, [guardEdits]);
+  // Reload / closing the tab with unsaved edits gets the browser's own "Leave site?".
+  useEffect(() => {
+    if (!editDirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [editDirty]);
 
   // Resolve the FULL set of items for a Refresh Library sweep by querying the DB
   // with the active type/status/search filters (paginated past the 1000-row cap)

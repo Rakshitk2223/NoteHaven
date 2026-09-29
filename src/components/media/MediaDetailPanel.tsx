@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
@@ -33,17 +33,25 @@ const OWNS_KEYS = 'input, textarea, select, [contenteditable="true"], [role="dia
  */
 export function MediaDetailPanel({ open, onOpenChange, layout, title, subtitle, actions, footer, onStep, canStep, children }: MediaDetailPanelProps) {
   const pane = layout === 'pane';
+  const paneRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!pane || !open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      // A dialog or popover opened from the pane (Fix match, Log, Discard changes?) owns the keyboard.
+      if (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')) return;
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.(OWNS_KEYS)) return;
-      // A dialog or popover opened from the pane (Fix match, Log) owns the keyboard.
-      if (document.querySelector('[role="dialog"][data-state="open"]')) return;
-      if (e.key === 'Escape') { onOpenChange(false); return; }
-      if (!onStep) return;
+      const inWidget = !!t?.closest?.(OWNS_KEYS);
+      if (e.key === 'Escape') {
+        // Esc from a plain field in the pane (Edit focuses one) closes it like the sheets do,
+        // so it reaches the page's "Discard changes?" guard. Widgets keep their own Esc.
+        const paneField = !!t && !!paneRef.current?.contains(t) && t.matches('input, textarea') && t.getAttribute('aria-expanded') !== 'true';
+        if (inWidget && !paneField) return;
+        onOpenChange(false);
+        return;
+      }
+      if (inWidget || !onStep) return;
       if (e.key === 'ArrowLeft' && canStep?.prev) { e.preventDefault(); onStep(-1); }
       if (e.key === 'ArrowRight' && canStep?.next) { e.preventDefault(); onStep(1); }
     };
@@ -92,6 +100,7 @@ export function MediaDetailPanel({ open, onOpenChange, layout, title, subtitle, 
     if (!open) return null;
     return (
       <aside
+        ref={paneRef}
         aria-label={`${title} details`}
         className="sticky top-0 flex h-dvh w-[420px] flex-shrink-0 flex-col self-start border-l border-border/60 bg-card/80 backdrop-blur-xl animate-fade-in"
       >
