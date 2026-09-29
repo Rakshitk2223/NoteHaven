@@ -30,8 +30,10 @@ interface PickPreviewProps {
   /** Fix match: offer "Use this cover" (the current one is fine / pinned otherwise). */
   offerCover?: boolean;
   busy?: boolean;
-  /** Migration 29 is live: On Hold / Dropped, plus Platform and Resume link on add. */
-  v29?: boolean;
+  /** Migration 29 is live (importLink): On Hold / Dropped. */
+  parked?: boolean;
+  /** Migration 28 is live (sourceLinks): Platform and Resume link on add. */
+  fields?: boolean;
   onConfirm: (choice: PickChoice) => void;
 }
 
@@ -39,8 +41,8 @@ interface PickPreviewProps {
  * The confirm step after picking a search result: what it is, then how you're
  * tracking it. Nothing is written until Add / Link.
  */
-export function PickPreview({ open, onOpenChange, mode, type, candidate, title, offerCover, busy, v29 = false, onConfirm }: PickPreviewProps) {
-  const statuses = statusOptionsFor(READING_TRACKER_TYPES.has(type), v29);
+export function PickPreview({ open, onOpenChange, mode, type, candidate, title, offerCover, busy, parked = false, fields = false, onConfirm }: PickPreviewProps) {
+  const statuses = statusOptionsFor(READING_TRACKER_TYPES.has(type), parked);
   const [platform, setPlatform] = useState('');
   const [resumeRaw, setResumeRaw] = useState('');
   const urlBad = resumeRaw.trim() !== '' && !cleanResumeUrl(resumeRaw);
@@ -76,7 +78,7 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
     status,
     progress: hasProgress && raw !== '' ? parseInt(raw, 10) : null,
     useNewCover,
-    ...(v29 && mode === 'add' ? { platform: platform.trim() || null, resume_url: cleanResumeUrl(resumeRaw) } : {}),
+    ...(fields && mode === 'add' ? { platform: platform.trim() || null, resume_url: cleanResumeUrl(resumeRaw) } : {}),
   });
 
   return (
@@ -149,7 +151,7 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
                 />
               </label>
             )}
-            {v29 && (
+            {fields && (
               <div className="grid gap-2 sm:grid-cols-2">
                 <input
                   list="pick-platform-suggestions" value={platform} onChange={(e) => setPlatform(e.target.value.slice(0, 60))}

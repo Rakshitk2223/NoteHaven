@@ -228,7 +228,10 @@ console.log('\nbuildLibraryStats');
   ]);
   const s = buildLibraryStats(items, m);
   eq('total', s.total, 4);
-  eq('status split', s.byStatus, { inProgress: 2, planned: 1, completed: 1 });
+  eq('status split', s.byStatus, { inProgress: 2, planned: 1, completed: 1, onHold: 0, dropped: 0 });
+  // Migration 29's parked statuses get their own buckets (they used to count as planned).
+  const parked = buildLibraryStats([...items, item({ id: 5, status: 'On Hold' }), item({ id: 6, status: 'Dropped' }), item({ id: 7, status: 'Dropped' })], m);
+  eq('status split with parked', parked.byStatus, { inProgress: 2, planned: 1, completed: 1, onHold: 1, dropped: 2 });
   eq('episodes watched', s.episodesWatched, 15);
   eq('chapters read', s.chaptersRead, 50);
   eq('minutes watched', s.minutesWatched, 15 * 24);

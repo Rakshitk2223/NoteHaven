@@ -36,13 +36,13 @@ interface MediaDetailViewProps {
   detail?: SourceDetail | null;
   /** Present once migration 28 is live: Fix match / Link source, Pin cover. */
   onFixMatch?: (item: MediaItem) => void;
-  /** Migration 29 is live: On Hold / Dropped join the status chips. */
-  v29?: boolean;
+  /** Migration 29 is live (importLink): On Hold / Dropped join the status chips. */
+  parked?: boolean;
 }
 
 /** The detail drawer's view mode (moved out of MediaTracker.tsx, behaviour unchanged
  *  except the 44px progress control + Log, and no season/episode for movies). */
-export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onSetPosition, onToggleWatched, log, detail, onFixMatch, v29 = false }: MediaDetailViewProps) {
+export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onSetPosition, onToggleWatched, log, detail, onFixMatch, parked = false }: MediaDetailViewProps) {
   const resumeHref = cleanResumeUrl(item.resume_url);
   const [synOpen, setSynOpen] = useState(false);
   const prog = computeProgress(item, meta);
@@ -206,7 +206,7 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
         {(progressFieldOf(item) || !onToggleWatched) && <div className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">Status</span>
           <div className="flex flex-wrap gap-1.5">
-            {statusOptionsFor(isReadableItem, v29).map((s) => (
+            {statusOptionsFor(isReadableItem, parked).map((s) => (
               <button
                 key={s}
                 type="button"

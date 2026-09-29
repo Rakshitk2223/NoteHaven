@@ -13,12 +13,14 @@ interface MediaEditFormProps {
   tags: Tag[];
   availableTags: Tag[];
   onTagsChange: (tags: Tag[]) => void;
-  /** Migration 29 is live: On Hold / Dropped, plus the Platform and Resume link fields. */
-  v29?: boolean;
+  /** Migration 29 is live (importLink): On Hold / Dropped in the status select. */
+  parked?: boolean;
+  /** Migration 28 is live (sourceLinks): the Platform and Resume link fields. */
+  fields?: boolean;
 }
 
 /** The detail drawer's add/edit form (moved out of MediaTracker.tsx unchanged). */
-export function MediaEditForm({ formData, setFormData, onSubmit, tags, availableTags, onTagsChange, v29 = false }: MediaEditFormProps) {
+export function MediaEditForm({ formData, setFormData, onSubmit, tags, availableTags, onTagsChange, parked = false, fields = false }: MediaEditFormProps) {
   const urlBad = formData.resume_url.trim() !== '' && !cleanResumeUrl(formData.resume_url);
   const showSeasonEpisode = WATCHABLE_TYPES.includes(formData.type);
   const showChapter = READABLE_TYPES.includes(formData.type);
@@ -79,9 +81,9 @@ export function MediaEditForm({ formData, setFormData, onSubmit, tags, available
             </SelectTrigger>
             <SelectContent>
               {(READABLE_TYPES.includes(formData.type) || WATCHABLE_TYPES.includes(formData.type) || formData.type === 'Movie'
-                ? statusOptionsFor(READABLE_TYPES.includes(formData.type), v29)
+                ? statusOptionsFor(READABLE_TYPES.includes(formData.type), parked)
                 // No type picked yet: every status.
-                : [...new Set([...statusOptionsFor(false, v29), ...statusOptionsFor(true, v29)])]
+                : [...new Set([...statusOptionsFor(false, parked), ...statusOptionsFor(true, parked)])]
               ).map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -143,7 +145,7 @@ export function MediaEditForm({ formData, setFormData, onSubmit, tags, available
         </div>
       )}
 
-      {v29 && (
+      {fields && (
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="platform">Platform</Label>

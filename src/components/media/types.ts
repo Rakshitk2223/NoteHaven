@@ -118,7 +118,7 @@ export interface MediaFormData {
   current_season: string;
   current_episode: string;
   current_chapter: string;
-  /** Free text; saved (trimmed, or null) only once migration 29 is live. */
+  /** Free text; saved (trimmed, or null) once migration 28 is live. */
   platform: string;
   /** An http(s) link; validated with cleanResumeUrl on save. */
   resume_url: string;

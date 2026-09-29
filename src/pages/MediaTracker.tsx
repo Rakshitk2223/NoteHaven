@@ -1647,8 +1647,8 @@ const MediaTracker = () => {
         platform?: string | null;
         resume_url?: string | null;
       } = { title: mediaData.title, type: mediaData.type, status: mediaData.status, rating: mediaData.rating };
-      // Migration 29 surfaces: the form only shows these fields once it's live.
-      if (v2Schema.importLink) {
+      // Migration 28's fields (with its resume_url CHECK): the form shows them once it's live.
+      if (v2Schema.sourceLinks) {
         const url = cleanResumeUrl(formData.resume_url);
         if (formData.resume_url.trim() && !url) throw new Error('Resume link must be a full http:// or https:// address');
         payload.platform = formData.platform.trim() || null;
@@ -2099,7 +2099,7 @@ const MediaTracker = () => {
         current_episode: watching ? choice.progress : null,
         current_season: watching ? 1 : null,
         cover_image: c?.cover && isUsableCover(c.cover, p.type) ? c.cover : null,
-        // Only present when migration 29 is live (PickPreview shows the fields then).
+        // Only present when migration 28 is live (PickPreview shows the fields then).
         ...(choice.platform !== undefined ? { platform: choice.platform } : {}),
         ...(choice.resume_url !== undefined ? { resume_url: choice.resume_url } : {}),
       }]).select('id').single();
@@ -2512,7 +2512,8 @@ const MediaTracker = () => {
             title={pick?.title ?? ''}
             offerCover={!!pick?.forItem && !pick.forItem.cover_pinned}
             busy={pickBusy}
-            v29={v2Schema.importLink}
+            parked={v2Schema.importLink}
+            fields={v2Schema.sourceLinks}
             onConfirm={(choice) => { if (pick) void confirmPick(pick, choice); }}
           />
           <Dialog open={!!fixFor} onOpenChange={(o) => { if (!o) setFixFor(null); }}>
@@ -3292,7 +3293,7 @@ const MediaTracker = () => {
               onToggleWatched={toggleWatched}
               detail={sourceDetail ?? null}
               onFixMatch={v2Schema.sourceLinks ? (i) => setFixFor(i) : undefined}
-              v29={v2Schema.importLink}
+              parked={v2Schema.importLink}
               log={logProps}
             />
           )}
@@ -3304,7 +3305,8 @@ const MediaTracker = () => {
               tags={editingItemTags}
               availableTags={availableTags}
               onTagsChange={setEditingItemTags}
-              v29={v2Schema.importLink}
+              parked={v2Schema.importLink}
+              fields={v2Schema.sourceLinks}
             />
           )}
         </MediaDetailPanel>

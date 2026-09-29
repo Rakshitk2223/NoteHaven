@@ -416,7 +416,8 @@ export function itemHasGenre(itemId: number, genre: string, metaMap: MetaMap): b
 
 export interface LibraryStats {
   total: number;
-  byStatus: { inProgress: number; planned: number; completed: number };
+  /** On Hold / Dropped (migration 29) get their own buckets; they used to count as planned. */
+  byStatus: { inProgress: number; planned: number; completed: number; onHold: number; dropped: number };
   byType: Array<{ type: string; count: number }>;
   topGenres: Array<{ genre: string; count: number }>;
   /** Episodes + chapters consumed across the library. */
@@ -441,7 +442,7 @@ export interface LibraryStats {
 
 export function buildLibraryStats(items: InsightItem[], metaMap: MetaMap): LibraryStats {
   const byType = new Map<string, number>();
-  let inProgress = 0, planned = 0, completed = 0;
+  let inProgress = 0, planned = 0, completed = 0, onHold = 0, dropped = 0;
   let episodesWatched = 0, chaptersRead = 0, minutesWatched = 0;
   let ratedCount = 0, ratingSum = 0;
   const ratingHistogram = new Array(10).fill(0);
@@ -453,6 +454,8 @@ export function buildLibraryStats(items: InsightItem[], metaMap: MetaMap): Libra
     byType.set(item.type, (byType.get(item.type) ?? 0) + 1);
 
     if (item.status === 'Completed') completed += 1;
+    else if (item.status === 'On Hold') onHold += 1;
+    else if (item.status === 'Dropped') dropped += 1;
     else if (isActive(item.status)) inProgress += 1;
     else planned += 1;
 
@@ -485,7 +488,7 @@ export function buildLibraryStats(items: InsightItem[], metaMap: MetaMap): Libra
 
   return {
     total: items.length,
-    byStatus: { inProgress, planned, completed },
+    byStatus: { inProgress, planned, completed, onHold, dropped },
     byType: [...byType.entries()]
       .map(([type, count]) => ({ type, count }))
       .sort((a, b) => b.count - a.count),

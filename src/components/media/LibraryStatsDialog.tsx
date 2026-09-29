@@ -120,6 +120,8 @@ export function LibraryStatsDialog({
                 ['bg-success', stats.byStatus.inProgress, 'In progress'],
                 ['bg-warning', stats.byStatus.planned, 'Planned'],
                 ['bg-muted-foreground', stats.byStatus.completed, 'Completed'],
+                ['bg-accent-2', stats.byStatus.onHold, 'On Hold'],
+                ['bg-destructive', stats.byStatus.dropped, 'Dropped'],
               ] as const).map(([cls, n, label]) => (
                 n > 0 ? (
                   <div
@@ -135,6 +137,8 @@ export function LibraryStatsDialog({
               <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-success" />In progress {stats.byStatus.inProgress}</span>
               <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-warning" />Planned {stats.byStatus.planned}</span>
               <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-muted-foreground" />Completed {stats.byStatus.completed}</span>
+              {stats.byStatus.onHold > 0 && <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-accent-2" />On Hold {stats.byStatus.onHold}</span>}
+              {stats.byStatus.dropped > 0 && <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-destructive" />Dropped {stats.byStatus.dropped}</span>}
             </div>
           </div>
 
