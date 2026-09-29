@@ -168,9 +168,12 @@ export type PlanMatchVia = 'map' | 'title' | 'alt_title';
 
 export interface CoverProposal {
   url: string;
-  /** Why it's offered: the row has no cover, a wrong-medium cover, or a hotlink-blocked one. */
-  reason: 'missing' | 'wrong_medium' | 'blocked';
-  /** Pre-ticked only for those three reasons; he can untick. Pinned covers never get a proposal. */
+  /**
+   * Why it's offered: the row has no cover, a wrong-medium or a hotlink-blocked
+   * one (all pre-ticked), or a fine cover with the reader's art as an option
+   * ('alternative', unticked). Pinned or linked rows never get a proposal.
+   */
+  reason: 'missing' | 'wrong_medium' | 'blocked' | 'alternative';
   ticked: boolean;
 }
 

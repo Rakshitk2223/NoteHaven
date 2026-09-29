@@ -44,6 +44,9 @@ export default defineConfig(({ mode }) => ({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // The Tachimanga import worker (sql.js + jszip, ~147 KB) runs only when he
+        // imports a backup, so installs don't download it (its .wasm isn't matched above).
+        globIgnores: ['**/parse.worker-*.js'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         runtimeCaching: [
           {
