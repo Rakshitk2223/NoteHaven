@@ -5,6 +5,7 @@ import { RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { CoverArt } from './CoverArt';
+import { originLabel } from './history-labels';
 
 const PAGE = 50;
 
@@ -16,6 +17,8 @@ interface LogRow {
   to_value: number | null;
   season: number | null;
   kind: 'log' | 'undo';
+  /** Migration 29: who wrote it besides him (e.g. 'tachimanga'); absent before 29. */
+  origin?: string | null;
   created_at: string;
   media_tracker: { id: number; title: string; type: string; cover_image: string | null } | null;
 }
@@ -37,11 +40,15 @@ export function HistoryView({ onOpen }: { onOpen: (mediaId: number) => void }) {
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const from = typeof pageParam === 'number' ? pageParam : 0;
-      const { data, error } = await supabase
+      const BASE = 'id, media_id, field, from_value, to_value, season, kind, created_at, media_tracker(id, title, type, cover_image)';
+      const run = (cols: string) => supabase
         .from('media_progress_log' as never)
-        .select('id, media_id, field, from_value, to_value, season, kind, created_at, media_tracker(id, title, type, cover_image)')
+        .select(cols)
         .order('created_at', { ascending: false })
         .range(from, from + PAGE - 1);
+      // origin arrives with migration 29; without it, History still loads (just unlabelled).
+      let { data, error } = await run(`${BASE}, origin`);
+      if (error && ((error as { code?: string }).code === '42703' || (error as { code?: string }).code === 'PGRST204')) ({ data, error } = await run(BASE));
       if (error) throw error;
       return (data ?? []) as unknown as LogRow[];
     },
@@ -109,6 +116,9 @@ export function HistoryView({ onOpen }: { onOpen: (mediaId: number) => void }) {
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         {r.kind === 'undo' && <RotateCcw className="h-3 w-3" aria-label="Undone" />}
                         <span className="tabular-nums">{unit(r, r.from_value)} → {unit(r, r.to_value)}</span>
+                        {originLabel(r.origin) && (
+                          <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-foreground/80">{originLabel(r.origin)}</span>
+                        )}
                         <span aria-hidden="true">·</span>
                         <time dateTime={r.created_at}>{formatDistanceToNowStrict(new Date(r.created_at), { addSuffix: true })}</time>
                       </span>
