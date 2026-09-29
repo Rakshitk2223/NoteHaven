@@ -114,6 +114,10 @@ export async function restoreEntry(e: JournalEntry, kind: BulkKind, userId: stri
   if (!hasGuard(e.after)) return 'skipped';
   if (e.op === 'insert') {
     // The change created this title: remove it, unless it's been touched since.
+    // Tags live in media_tags (deleting would cascade them away): any tag = his now.
+    const { count, error: tagErr } = await supabase.from('media_tags').select('media_id', { count: 'exact', head: true }).eq('media_id', e.media_id);
+    if (tagErr) throw tagErr;
+    if ((count ?? 0) > 0) return 'skipped';
     const q = guardOn(
       supabase.from('media_tracker').delete().eq('id', e.media_id).eq('user_id', userId) as unknown as Guarded,
       e.after,

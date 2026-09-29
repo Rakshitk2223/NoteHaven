@@ -16,7 +16,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { casProgressWrite, ProgressConflictError } from '@/lib/media-progress-write';
 import { hasGuard, newBatchId, restoreEntries, writeJournal, type JournalEntry } from '@/lib/media-bulk';
 import type { ImportMapWrite, ImportPlan, PlanRow, PlanTrackerRow } from '@/lib/tachimanga/types';
-import { type ImportSelection, matchedRows } from './selection';
+import { type ImportSelection, matchedRows, rowApplies } from './selection';
 
 export interface ApplyOutcome {
   batchId: string;
@@ -27,9 +27,13 @@ export interface ApplyOutcome {
   failed: number;
   /** The journal couldn't be written: the last chunk was rolled back and the import stopped. */
   stoppedEarly: boolean;
+  /** Of that chunk, changes the rollback could NOT put back (live, with no Undo). */
+  notPutBack: number;
 }
 
-const CHUNK = 50;
+// Rows written before their journal entry lands: a small crash window (iOS can
+// kill a backgrounded tab mid-chunk).
+const CHUNK = 5;
 
 type Guarded = {
   eq(col: string, v: unknown): Guarded;
@@ -38,15 +42,39 @@ type Guarded = {
 };
 const guardEq = (q: Guarded, col: string, v: unknown) => (v === null || v === undefined ? q.is(col, null) : q.eq(col, v));
 
-/** One matched row: write its ticked parts, return the journal entry for what landed. */
+/** The snapshot also carries cover_origin (selected by loadTrackerRows) so a cover undo restores it. */
+type Snapshot = PlanTrackerRow & { cover_origin?: string | null };
+
+/**
+ * One matched row: write its ticked parts. NEVER throws: whatever landed before
+ * a failure is still returned as the journal entry, so Undo can reach it.
+ */
 async function applyRow(
   r: PlanRow,
-  snap: PlanTrackerRow | undefined,
+  snap: Snapshot | undefined,
   sel: ImportSelection,
   userId: string,
-): Promise<{ entry: JournalEntry | null; skipped: number }> {
+): Promise<{ entry: JournalEntry | null; skipped: number; error?: unknown }> {
   const before: Record<string, unknown> = {};
   const after: Record<string, unknown> = {};
+  let skipped = 0;
+  const entry = (): JournalEntry | null => (Object.keys(after).length ? { media_id: r.media_id, op: 'update', before, after } : null);
+  try {
+    skipped = await applyRowParts(r, snap, sel, userId, before, after);
+    return { entry: entry(), skipped };
+  } catch (error) {
+    return { entry: entry(), skipped, error };
+  }
+}
+
+async function applyRowParts(
+  r: PlanRow,
+  snap: Snapshot | undefined,
+  sel: ImportSelection,
+  userId: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Promise<number> {
   let skipped = 0;
   const auto: Record<string, unknown> = { ...r.auto };
   const wrote = (cols: Record<string, unknown>, was: Record<string, unknown>) => {
@@ -54,10 +82,12 @@ async function applyRow(
   };
   const was: Record<string, unknown> = { ...(snap ?? {}), current_chapter: r.expected.current_chapter, status: r.expected.status };
 
-  // Progress, with the automatic fields in the same guarded update.
+  // Progress, with the reader latest in the same guarded update. platform is NOT
+  // carried here: that update is guarded only on the chapter, and a platform he
+  // typed after the preview must survive (it goes through the guarded path below).
   if (sel.progress.has(r.media_id) && r.progress?.current_chapter != null) {
     const target = r.progress.current_chapter;
-    const { last_activity_at: lastRead, ...extra } = auto;
+    const { last_activity_at: lastRead, platform: _platform, ...extra } = auto;
     // Activity = max(his last activity, the reader's last read): the planner only sets
     // lastRead when it's newer. The exact value written is journaled, so Undo restores it.
     const activityAt = (lastRead as string | undefined) ?? snap?.last_activity_at ?? new Date().toISOString();
@@ -70,7 +100,8 @@ async function applyRow(
       );
       if (out.wrote) {
         wrote({ current_chapter: target, ...extra, last_activity_at: activityAt }, was);
-        for (const k of Object.keys(auto)) delete auto[k]; // written with the progress
+        // Written with the progress; platform (if any) still goes through its guard below.
+        for (const k of Object.keys(auto)) if (k !== 'platform') delete auto[k];
       }
     } catch (e) {
       if (!(e instanceof ProgressConflictError)) throw e;
@@ -94,11 +125,25 @@ async function applyRow(
     q = guardEq(q, 'cover_image', snap?.cover_image ?? null);
     const { data, error } = await q.select('id');
     if (error) throw error;
-    if (data?.length) wrote({ cover_image: r.cover.url, cover_origin: 'reader' }, { ...was, cover_origin: null }); else skipped += 1;
+    if (data?.length) wrote({ cover_image: r.cover.url, cover_origin: 'reader' }, { ...was, cover_origin: snap?.cover_origin ?? null }); else skipped += 1;
   }
 
-  // Automatic fields on their own (no progress write carried them). Only when the
-  // change is undoable: reader latest or platform is a guard; a timestamp alone isn't.
+  // Only timestamps left (reader_checked_at / last_activity_at): they go with a row
+  // that wrote something real, guarded on what it just wrote, so they stay undoable.
+  if (Object.keys(auto).length && !hasGuard(auto)) {
+    const guardCols = Object.keys(after).filter((k) => hasGuard({ [k]: true }));
+    if (guardCols.length) {
+      let q = supabase.from('media_tracker').update(auto as never).eq('id', r.media_id).eq('user_id', userId) as unknown as Guarded;
+      for (const k of guardCols) q = guardEq(q, k, after[k]);
+      const { data, error } = await q.select('id');
+      if (error) throw error;
+      if (data?.length) wrote(auto, was);
+    }
+    return skipped;
+  }
+
+  // Automatic fields on their own (no progress write carried them): reader latest
+  // and/or platform are real changes, so they guard their own undo.
   if (Object.keys(auto).length && hasGuard(auto)) {
     let q = supabase.from('media_tracker').update(auto as never).eq('id', r.media_id).eq('user_id', userId) as unknown as Guarded;
     // platform is only ever filled when empty: never over one he typed meanwhile.
@@ -108,7 +153,7 @@ async function applyRow(
     if (data?.length) wrote(auto, was); else skipped += 1;
   }
 
-  return { entry: Object.keys(after).length ? { media_id: r.media_id, op: 'update', before, after } : null, skipped };
+  return skipped;
 }
 
 async function upsertMap(writes: ImportMapWrite[], userId: string): Promise<void> {
@@ -130,13 +175,13 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
   if (!userId) throw new Error('Not signed in');
 
   const batchId = newBatchId();
-  const out: ApplyOutcome = { batchId, updated: 0, added: 0, skipped: 0, failed: 0, stoppedEarly: false };
-  const snap = new Map(rows.map((r) => [r.id, r]));
+  const out: ApplyOutcome = { batchId, updated: 0, added: 0, skipped: 0, failed: 0, stoppedEarly: false, notPutBack: 0 };
+  const snap = new Map((rows as Snapshot[]).map((r) => [r.id, r]));
   const mapWrites: ImportMapWrite[] = [];
 
-  // Matched rows: a ticked part, or automatic fields ("auto goes with the row").
-  const todo = matchedRows(plan).filter((r) =>
-    sel.progress.has(r.media_id) || sel.status.has(r.media_id) || sel.cover.has(r.media_id) || Object.keys(r.auto).length > 0 || r.map.length > 0);
+  // The planner's rowWrites rule with his current ticks: a row that changes nothing
+  // real is not touched at all (not even re-stamped), so a re-upload writes nothing.
+  const todo = matchedRows(plan).filter((r) => rowApplies(r, sel));
 
   const flush = async (entries: JournalEntry[]) => {
     if (!entries.length) return true;
@@ -145,10 +190,12 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
       return true;
     } catch (e) {
       console.error('Import journal failed; rolling back this chunk:', e);
-      await restoreEntries(entries, 'import', userId);
+      const back = await restoreEntries(entries, 'import', userId);
       out.updated -= entries.filter((x) => x.op === 'update').length;
       out.added -= entries.filter((x) => x.op === 'insert').length;
       out.failed += entries.length;
+      // Skipped or failed here = still live, with no Undo. Say so; never claim it was put back.
+      out.notPutBack += back.failed + back.skipped;
       out.stoppedEarly = true;
       return false;
     }
@@ -157,15 +204,12 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
   for (let i = 0; i < todo.length; i += CHUNK) {
     const entries: JournalEntry[] = [];
     for (const r of todo.slice(i, i + CHUNK)) {
-      try {
-        const res = await applyRow(r, snap.get(r.media_id), sel, userId);
-        out.skipped += res.skipped;
-        if (res.entry) { entries.push(res.entry); out.updated += 1; }
-        mapWrites.push(...r.map);
-      } catch (e) {
-        console.error('Import failed for one row:', e);
-        out.failed += 1;
-      }
+      const res = await applyRow(r, snap.get(r.media_id), sel, userId);
+      out.skipped += res.skipped;
+      // Journal whatever landed, even when a later part of the row failed.
+      if (res.entry) { entries.push(res.entry); if (!res.error) out.updated += 1; }
+      if (res.error) { console.error('Import failed for one row:', res.error); out.failed += 1; }
+      else mapWrites.push(...r.map);
     }
     if (!(await flush(entries))) return out;
   }
@@ -190,9 +234,14 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
       const { data, error } = await supabase.from('media_tracker').insert([row as never]).select('id').single();
       if (error || !data) { out.failed += 1; continue; }
       const id = (data as { id: number }).id;
+      // Undo removes it only while it's exactly as added: not rated, pinned, linked
+      // or covered since (media-bulk also refuses if it has tags).
       entries.push({
         media_id: id, op: 'insert', before: {},
-        after: { title: row.title, status: row.status, current_chapter: row.current_chapter },
+        after: {
+          title: row.title, status: row.status, current_chapter: row.current_chapter,
+          rating: null, cover_pinned: false, link_status: 'unlinked', cover_image: null,
+        },
       });
       out.added += 1;
       mapWrites.push({ origin_key: n.reader.origin_key, media_id: id, reader_cover: n.reader.thumbnail_url });

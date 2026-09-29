@@ -16,7 +16,8 @@ export async function loadTrackerRows(): Promise<PlanTrackerRow[]> {
   const { data: { session } } = await supabase.auth.getSession();
   const userId = session?.user?.id;
   if (!userId) throw new Error('Not signed in');
-  const cols = 'id, title, type, status, current_chapter, cover_image, cover_pinned, link_status, source, source_id, platform, reader_latest_chapter, last_activity_at';
+  // cover_origin rides along (not a planner field) so a cover undo restores it exactly.
+  const cols = 'id, title, type, status, current_chapter, cover_image, cover_pinned, cover_origin, link_status, source, source_id, platform, reader_latest_chapter, last_activity_at';
   const rows: PlanTrackerRow[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase.from('media_tracker').select(cols)

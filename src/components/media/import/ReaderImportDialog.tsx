@@ -74,6 +74,7 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
   const [backedUp, setBackedUp] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportFailed, setExportFailed] = useState<string[]>([]);
+  const [exportedAt, setExportedAt] = useState<Date | null>(null);
   const [applying, setApplying] = useState(false);
   useEffect(() => {
     void loadFullExport().then((x) => { setExporter(x); setBackedUp(!!x?.doneThisSession()); });
@@ -86,6 +87,7 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
       const r = await exporter.run();
       setExportFailed(r.failed);
       setBackedUp(exporter.doneThisSession());
+      if (!r.failed.length) setExportedAt(new Date());
       if (r.failed.length) {
         toast({ title: 'Export incomplete', description: `Couldn’t read: ${r.failed.join(', ')}. Approve stays off until a full export works.`, variant: 'destructive' });
       } else {
@@ -163,7 +165,11 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
         description: [
           r.skipped ? `skipped ${r.skipped} (changed since)` : '',
           r.failed ? `${r.failed} failed` : '',
-          r.stoppedEarly ? 'the undo record couldn’t be saved, so the last batch was put back' : '',
+          // Only claim a rollback that happened; name what didn't, and where it's safe.
+          r.stoppedEarly && !r.notPutBack ? 'the undo record couldn’t be saved, so the last batch was put back' : '',
+          r.notPutBack
+            ? `${r.notPutBack} change${r.notPutBack === 1 ? '' : 's'} couldn’t be put back; your backup${exportedAt ? ` from ${exportedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' from this session'} has the earlier values`
+            : '',
         ].filter(Boolean).join(' · ') || undefined,
         variant: r.failed || r.stoppedEarly ? 'destructive' : undefined,
         action: changed ? (

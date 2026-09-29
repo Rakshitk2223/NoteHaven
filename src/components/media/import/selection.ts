@@ -2,6 +2,7 @@
 // Supabase), so the rules are Vitest-covered: the defaults are exactly the
 // planner's proposals, and nothing he didn't see gets applied.
 import type { ImportPlan, NewTitleRow, PlanRow } from '@/lib/tachimanga/types';
+import { rowWrites } from '@/lib/tachimanga/plan';
 
 export type NewTitleType = 'Manga' | 'Manhwa' | 'Manhua';
 
@@ -48,19 +49,24 @@ export const addIsReady = (row: NewTitleRow, sel: ImportSelection): boolean =>
 export const addsMissingType = (sel: ImportSelection): number =>
   [...sel.adds.values()].filter((t) => !t).length;
 
-// Mirrors lib/media-bulk UNGUARDED_COLUMNS (kept here so this module stays pure).
-const TIMESTAMP_ONLY = new Set(['reader_checked_at', 'last_activity_at']);
-export const hasUndoableAuto = (r: PlanRow): boolean => Object.keys(r.auto).some((k) => !TIMESTAMP_ONLY.has(k));
+/** The row as he's ticked it now (the planner's rowWrites reads the row's own flags). */
+export function withTicks(r: PlanRow, sel: ImportSelection): PlanRow {
+  return {
+    ...r,
+    ticked: sel.progress.has(r.media_id),
+    status: r.status ? { ...r.status, ticked: sel.status.has(r.media_id) } : null,
+    cover: r.cover ? { ...r.cover, ticked: sel.cover.has(r.media_id) } : null,
+  };
+}
+
+/** Apply writes this row at all: the planner's one rule, with his current ticks. */
+export const rowApplies = (r: PlanRow, sel: ImportSelection): boolean => rowWrites(withTicks(r, sel));
 
 /** How many rows apply would touch, for the Approve button. */
 export function selectedCount(plan: ImportPlan, sel: ImportSelection): number {
   const ids = new Set<number>();
-  for (const r of matchedRows(plan)) {
-    const picked = sel.progress.has(r.media_id) || sel.status.has(r.media_id) || sel.cover.has(r.media_id);
-    // Automatic fields go with the row whenever the change is real and undoable
-    // (reader latest / platform; a timestamp alone isn't written) — as apply does.
-    if (picked || hasUndoableAuto(r)) ids.add(r.media_id);
-  }
+  // Exactly the rows apply writes (plan.writes uses the same rowWrites rule).
+  for (const r of matchedRows(plan)) if (rowApplies(r, sel)) ids.add(r.media_id);
   return ids.size + sel.matches.size + [...sel.adds.values()].filter(Boolean).length;
 }
 
