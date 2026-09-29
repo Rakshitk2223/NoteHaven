@@ -19,6 +19,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { refreshCoverImage, isNewCover, isPinnedOutcome } from '@/lib/media-refresh';
 import { fetchMediaMetadataBatch, removeCoverImage, computeProgress, type MediaMeta } from '@/lib/media-metadata';
 import { SettingsSection } from '@/components/settings/primitives';
+import { CoverArt } from '@/components/media/CoverArt';
 import { useRefreshActivity } from '@/contexts/RefreshActivityContext';
 import type { ItemOutcome, RefreshItemResult } from '@/lib/media-metadata';
 
@@ -47,22 +48,6 @@ const ROW_COLS = 'id, title, type, cover_image, current_season, current_episode,
 async function selectRows<T>(run: (cols: string) => PromiseLike<{ data: T | null; error: { code?: string } | null }>) {
   const res = await run(`${ROW_COLS}, cover_pinned`);
   return res.error && (res.error.code === '42703' || res.error.code === 'PGRST204') ? run(ROW_COLS) : res;
-}
-
-const GRADIENTS = [
-  'from-indigo-500/40 to-cyan-400/30', 'from-rose-500/40 to-orange-400/30',
-  'from-emerald-500/40 to-teal-400/30', 'from-violet-500/40 to-fuchsia-400/30',
-  'from-blue-500/40 to-sky-400/30', 'from-amber-500/40 to-yellow-400/30',
-];
-
-function Cover({ src, title, className }: { src?: string | null; title: string; className?: string }) {
-  if (src) return <img src={src} alt="" loading="lazy" className={cn('h-full w-full object-cover', className)} />;
-  const g = GRADIENTS[title.charCodeAt(0) % GRADIENTS.length];
-  return (
-    <div className={cn('flex h-full w-full items-center justify-center bg-gradient-to-br', g, className)}>
-      <span className="text-2xl font-bold text-white/80">{title.charAt(0).toUpperCase()}</span>
-    </div>
-  );
 }
 
 export function SyncActivitySection() {
@@ -210,7 +195,7 @@ export function SyncActivitySection() {
     >
       {!progress ? (
         <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No refresh has run yet. Start one from <span className="font-medium text-foreground">Media → ⋮ → Refresh Library</span>.
+          No refresh in this session yet. Start one from <span className="font-medium text-foreground">Media → More → Refresh library…</span>
         </div>
       ) : (
         <div className="space-y-4">
@@ -264,7 +249,7 @@ export function SyncActivitySection() {
                     className="group relative overflow-hidden rounded-xl border border-border bg-card/60 text-left transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-glow"
                   >
                     <div className="relative aspect-[2/3] overflow-hidden">
-                      <Cover src={row?.cover_image} title={it.title} className="transition-transform duration-300 group-hover:scale-105" />
+                      <CoverArt src={row?.cover_image} title={it.title} lazy imgClassName="transition-transform duration-300 group-hover:scale-105" />
                       <span className={cn('absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full bg-black/65 backdrop-blur-sm', m.cls)} title={m.label}>
                         <Icon className="h-3.5 w-3.5" strokeWidth={2.5} />
                       </span>
@@ -299,8 +284,8 @@ export function SyncActivitySection() {
               <div className="mt-4 space-y-4">
                 {/* Cover + key facts */}
                 <div className="flex gap-4">
-                  <div className="h-44 w-28 flex-shrink-0 overflow-hidden rounded-lg border border-border">
-                    <Cover src={detailRow?.cover_image} title={detailItem.title} />
+                  <div className="relative h-44 w-28 flex-shrink-0 overflow-hidden rounded-lg border border-border">
+                    <CoverArt src={detailRow?.cover_image} title={detailItem.title} letterClassName="text-3xl" />
                   </div>
                   <div className="min-w-0 flex-1 space-y-2 text-sm">
                     {detailMeta?.rating ? (
