@@ -1777,6 +1777,29 @@ const MediaTracker = () => {
   const closeDetails = useCallback(() => {
     guardEdits(() => { setDetailsOpen(false); setDetailsMode('view'); });
   }, [guardEdits]);
+  // Mac pane isn't modal, so the app sidebar stays clickable beside dirty edits.
+  // Catch internal links outside the pane and route them through the same prompt.
+  // (⌘K uses navigate() directly and isn't covered: known limit.)
+  const guardLinks = editDirty && detailLayout === 'pane';
+  useEffect(() => {
+    if (!guardLinks) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a || a.closest('[data-media-pane]') || a.hasAttribute('download')) return;
+      if (a.target && a.target !== '_self') return;
+      const url = new URL(a.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      const to = url.pathname + url.search + url.hash;
+      if (to === window.location.pathname + window.location.search + window.location.hash) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDiscardPrompt({ run: () => navigate(to) });
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, [guardLinks, navigate]);
+
   // Reload / closing the tab with unsaved edits gets the browser's own "Leave site?".
   useEffect(() => {
     if (!editDirty) return;

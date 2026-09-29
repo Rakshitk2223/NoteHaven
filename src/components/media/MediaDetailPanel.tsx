@@ -101,6 +101,7 @@ export function MediaDetailPanel({ open, onOpenChange, layout, title, subtitle, 
     return (
       <aside
         ref={paneRef}
+        data-media-pane=""
         aria-label={`${title} details`}
         className="sticky top-0 flex h-dvh w-[420px] flex-shrink-0 flex-col self-start border-l border-border/60 bg-card/80 backdrop-blur-xl animate-fade-in"
       >
