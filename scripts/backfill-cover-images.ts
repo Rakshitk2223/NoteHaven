@@ -250,17 +250,18 @@ async function backfill() {
   console.log('Fallback order varies by media type (see FALLBACK_BY_TYPE)');
   // Paged: a plain select stops at PostgREST's 1000-row cap, which silently
   // left everything past row 1000 out of the backfill.
-  const items: Array<{ id: number; title: string; type: string; cover_image: string | null }> = [];
+  const items: Array<{ id: number; title: string; type: string; cover_image: string | null; cover_pinned: boolean }> = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
-      .from('media_tracker').select('id, title, type, cover_image')
+      .from('media_tracker').select('id, title, type, cover_image, cover_pinned')
       .order('id').range(from, from + 999);
     if (error) { console.error('Query failed:', error.message); process.exit(1); }
     items.push(...(data || []));
     if (!data || data.length < 1000) break;
   }
 
-  const missing = items?.filter(i => !i.cover_image) || [];
+  // Pinned + no cover = "Remove cover" (no cover wanted): never refill those.
+  const missing = items?.filter(i => !i.cover_image && !i.cover_pinned) || [];
   console.log(`Total items: ${items?.length || 0}, Missing covers: ${missing.length}`);
 
   if (missing.length === 0) { console.log('All items already have covers.'); return; }
@@ -283,7 +284,8 @@ async function backfill() {
         .from('media_tracker')
         .update({ cover_image: result.cover })
         .eq('id', item.id)
-        .is('cover_image', null); // fill blanks only, never overwrite
+        .is('cover_image', null) // fill blanks only, never overwrite
+        .eq('cover_pinned', false); // …and never one pinned meanwhile
       if (!e) {
         updated++;
         console.log(`  [OK] ${item.title} (${item.type}) <- ${result.source}`);

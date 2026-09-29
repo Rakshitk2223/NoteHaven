@@ -36,6 +36,15 @@ interface MediaRow {
   current_season: number | null;
   current_episode: number | null;
   current_chapter: number | null;
+  /** Migration 28; absent on an older database. */
+  cover_pinned?: boolean;
+}
+
+const ROW_COLS = 'id, title, type, cover_image, current_season, current_episode, current_chapter';
+/** Row select with cover_pinned, retried without it on a database that predates migration 28. */
+async function selectRows<T>(run: (cols: string) => PromiseLike<{ data: T | null; error: { code?: string } | null }>) {
+  const res = await run(`${ROW_COLS}, cover_pinned`);
+  return res.error && (res.error.code === '42703' || res.error.code === 'PGRST204') ? run(ROW_COLS) : res;
 }
 
 const GRADIENTS = [
@@ -75,14 +84,11 @@ export function SyncActivitySection() {
     let cancelled = false;
     void (async () => {
       const ids = missing.map((i) => i.id);
-      const { data } = await supabase
-        .from('media_tracker')
-        .select('id, title, type, cover_image, current_season, current_episode, current_chapter')
-        .in('id', ids);
+      const { data } = await selectRows((cols) => supabase.from('media_tracker').select(cols).in('id', ids));
       if (!cancelled && data) {
         setRows((prev) => {
           const n = new Map(prev);
-          (data as MediaRow[]).forEach((r) => n.set(r.id, r));
+          (data as unknown as MediaRow[]).forEach((r) => n.set(r.id, r));
           return n;
         });
       }
@@ -109,11 +115,8 @@ export function SyncActivitySection() {
   const openDetail = (it: RefreshItemResult) => { setDetailId(it.id); setRenameValue(rows.get(it.id)?.title ?? it.title); };
 
   const reloadDetail = async (id: number, title: string, type: string) => {
-    const { data } = await supabase
-      .from('media_tracker')
-      .select('id, title, type, cover_image, current_season, current_episode, current_chapter')
-      .eq('id', id).maybeSingle();
-    if (data) setRows((prev) => new Map(prev).set(id, data as MediaRow));
+    const { data } = await selectRows((cols) => supabase.from('media_tracker').select(cols).eq('id', id).maybeSingle());
+    if (data) setRows((prev) => new Map(prev).set(id, data as unknown as MediaRow));
     const m = await fetchMediaMetadataBatch([{ id, title, type }]);
     if (m.has(id)) setMeta((prev) => new Map(prev).set(id, m.get(id)!));
   };
@@ -136,6 +139,8 @@ export function SyncActivitySection() {
   };
 
   const refreshCover = async (it: RefreshItemResult | MediaRow) => {
+    // A pinned cover is his call (incl. "Remove cover" = pinned + none); unpin it in Media first.
+    if (rows.get(it.id)?.cover_pinned) return;
     setCoverBusyId(it.id);
     try {
       const res = await refreshCoverImage(it.title, it.type, undefined, it.id);
@@ -324,10 +329,12 @@ export function SyncActivitySection() {
                   <Button variant="outline" size="sm" onClick={() => retryOne(detailItem)} disabled={running}>
                     <RefreshCw className={cn('mr-1.5 h-4 w-4', running && 'animate-spin')} /> Retry fetch
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => refreshCover(detailItem)} disabled={coverBusyId === detailItem.id}>
+                  <Button variant="outline" size="sm" onClick={() => refreshCover(detailItem)} disabled={coverBusyId === detailItem.id || !!detailRow?.cover_pinned}
+                    title={detailRow?.cover_pinned ? 'Cover pinned — unpin it in Media to refresh' : undefined}>
                     <ImageIcon className={cn('mr-1.5 h-4 w-4', coverBusyId === detailItem.id && 'animate-pulse')} /> Refresh cover
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => dropCover(detailItem.id)} disabled={!detailRow?.cover_image}>
+                  <Button variant="outline" size="sm" onClick={() => dropCover(detailItem.id)} disabled={!detailRow?.cover_image || !!detailRow?.cover_pinned}
+                    title={detailRow?.cover_pinned ? 'Cover pinned — unpin it in Media to change it' : undefined}>
                     <Trash2 className="mr-1.5 h-4 w-4" /> Remove cover
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => reloadDetail(detailItem.id, detailRow?.title ?? detailItem.title, detailItem.type)}>
