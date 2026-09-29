@@ -105,12 +105,13 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
 - The schema is `supabase/migrations/*.sql`, applied **by hand in the Supabase SQL editor**, in filename
   order: `00_baseline_schema` (the former 01–19, consolidated 2026-08-14), `20_data_cleanup`,
   `21_commands`, `22_security_lint`, `22_wishlist`, `23_work_projects`, `24_share_owner_check`,
-  `25_calendar_events_fixes`, `26_tag_usage_triggers`, `27_notes_realtime`, `28_media_source_links`.
-  There is no migration runner; don't use `supabase db push` (two files share the `22_` prefix). **Next new file: `29_*.sql`**, whose contents are
-  already scoped in `docs/media-v2/PLAN.md` § F (import map, bulk journal, link proposals, reader-latest
-  columns, Dropped / On Hold). Write it to that scope.
-- All of them are live on production (24–27 with fix batch 1; 28 on 2026-09-28, ahead of the Media v2
-  code that uses it).
+  `25_calendar_events_fixes`, `26_tag_usage_triggers`, `27_notes_realtime`, `28_media_source_links`,
+  `29_media_v2_import_link` (import map, bulk journal, link proposals, reader-latest and latest
+  season/episode columns, Dropped / On Hold). There is no migration runner; don't use `supabase db push`
+  (two files share the `22_` prefix). **Next new file: `30_*.sql`** — the roadmap needs none unless the
+  cover storage copy (E2) turns out to be necessary.
+- All of them are live on production (24–27 with fix batch 1; 28 on 2026-09-28 and 29 on 2026-09-29,
+  each ahead of the Media v2 code that uses it; prod had no `media_tracker.status` CHECK before 29).
 - **Re-run safety:** `21` onwards are all idempotent. **Don't re-run `00` or `20`**: `00` fails with
   "policy already exists" (and, if forced, would re-create `ledger_buckets`), and `20`'s orphan-tag
   cleanup predates `work_project_tags`, so it would delete tags used only by work projects. `24` leaves

@@ -8,7 +8,7 @@ This is where a fresh session picks up. The design is in `PLAN.md`, and the Phas
 |---|---|
 | `main` | **Live.** Netlify auto-deploys every push to main. It includes audit fix batch 1 + 1c and the Media progress hotfix (`8764322`). |
 | `media-v2` branch | **Not merged.** All Media v2 Phase 1 work so far. It must NOT be merged before the edge function is redeployed (see "Finish sequence"). |
-| Prod database | Migrations **24–28 applied** (28 adds the source links, `media_source_meta` and `media_progress_log`). Nothing else is pending. |
+| Prod database | Migrations **24–29 applied** (28: source links, `media_source_meta`, `media_progress_log`; 29 on 2026-09-29: import map, bulk journal, link proposals, reader latest, Dropped / On Hold). Nothing else is pending. |
 | Edge function `media-search` | Prod runs main's version. The v2 actions (`v2.ts`, `adult.ts`, 2100ms AniList pacing) are on media-v2 and need ONE redeploy at the end. |
 
 ## Phase 1 status
