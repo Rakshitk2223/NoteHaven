@@ -58,6 +58,12 @@ export const NATURAL_KEYS: Readonly<Record<string, readonly string[]>> = {
   birthdays: ['name', 'date_of_birth'],
 };
 
+// Media History (migration 28). Restored after its parent, but NOT through the
+// generic child path: strip() drops created_at, and here the timestamp IS the
+// data; and media_id is NOT NULL, so an unmapped row is dropped, not nulled.
+export const HISTORY_TABLE = 'media_progress_log';
+const HISTORY_CHUNK = 1000;
+
 // Deliberately NOT restored: vault_folders / vault_files (the rows would point
 // at Storage objects this backup does not contain, so a "restored" vault would
 // be a tree of dead links) and user_preferences (device-local layout).
@@ -180,7 +186,27 @@ export async function restoreBackup(
     await insertMapped(table, rows);
   }
 
-  // 3. Tag links. These carry no user_id (RLS scopes them via their parent),
+  // 3. History — remapped onto the restored titles, original timestamps kept.
+  //    Append-only, so this only ever inserts; a row whose title didn't restore is skipped.
+  const history = rowsFor(HISTORY_TABLE).flatMap((row) => {
+    const mediaId = idMap.media_tracker?.get(row.media_id as Id);
+    if (mediaId === undefined) return [];
+    const r: Row = { ...row, media_id: mediaId, user_id: userId };
+    delete r.id; // GENERATED ALWAYS
+    return [r];
+  });
+  for (let i = 0; i < history.length; i += HISTORY_CHUNK) {
+    const chunk = history.slice(i, i + HISTORY_CHUNK);
+    const { error } = await client.from(HISTORY_TABLE).insert(chunk);
+    if (error) {
+      console.error(`Import failed for ${HISTORY_TABLE}:`, error);
+      failed.push(`${HISTORY_TABLE} (${error.message})`);
+      break;
+    }
+    inserted += chunk.length;
+  }
+
+  // 4. Tag links. These carry no user_id (RLS scopes them via their parent),
   //    so they bypass strip(); a link with either end missing is skipped.
   for (const [table, col, parent] of IMPORT_JUNCTIONS) {
     const links = rowsFor(table).flatMap((row) => {

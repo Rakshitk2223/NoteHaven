@@ -54,12 +54,14 @@ const supabase = createClient(supabaseUrl, (serviceKey || anonKey)!, {
 });
 
 /** Tables RLS will hide from the anon key — an empty dump here is not a backup. */
-const USER_SCOPED = new Set(['media_tracker', 'media_tags']);
+const USER_SCOPED = new Set(['media_tracker', 'media_tags', 'media_progress_log']);
 
 // Everything that would be painful or impossible to reconstruct.
 // media_metadata is the expensive one: ~11k rows assembled from eight
 // third-party APIs over many runs.
-const TABLES = ['media_tracker', 'media_metadata', 'media_tags'] as const;
+// media_progress_log is History (migration 28): append-only, and its timestamps
+// can't be rebuilt from anything else.
+const TABLES = ['media_tracker', 'media_metadata', 'media_tags', 'media_progress_log'] as const;
 
 const PAGE = 1000;
 
@@ -176,6 +178,13 @@ touching the live one:
 
 Junction rows referencing \`media_tracker.id\` and \`tags.id\`. Only meaningful if
 both sides were restored with their original ids.
+
+## media_progress_log (History)
+
+Append-only rows (\`media_id\` → \`media_tracker.id\`, from → to, \`created_at\`).
+Keep \`created_at\`: it is the History. Remap \`media_id\` to the restored
+tracker ids and drop rows whose title wasn't restored (\`media_id\` is NOT NULL).
+Never delete or rewrite live rows; Undo entries are their own \`kind = 'undo'\` rows.
 
 ## Verifying this backup
 

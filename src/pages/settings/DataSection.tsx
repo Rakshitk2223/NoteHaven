@@ -18,6 +18,8 @@ import { SettingsSection, SettingRow } from '@/components/settings/primitives';
 // junction tables, while still promising "every section" (audit DATA-01).
 const EXPORT_TABLES = [
   'prompts', 'notes', 'tasks', 'media_tracker',
+  // Media History (migration 28): append-only; restore keeps its timestamps.
+  'media_progress_log',
   'subscriptions', 'subscription_categories',
   'ledger_entries', 'ledger_categories', 'ledger_accounts',
   'birthdays', 'countdowns', 'code_snippets', 'snippet_folders', 'tags',
