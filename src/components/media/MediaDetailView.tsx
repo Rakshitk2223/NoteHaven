@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ExternalLink, Globe, Pin, Plus, Replace, Sparkles, Star } from 'lucide-react';
+import { ExternalLink, Globe, Pin, Plus, Replace, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { TagBadge } from '@/components/TagBadge';
@@ -114,9 +114,6 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
               </span>
             )}
           </div>
-          {item.has_new_content && (
-            <p className="inline-flex items-center gap-1 text-xs font-semibold text-success"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> New content</p>
-          )}
           {linked ? (
             detail?.url ? (
               <a href={detail.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 text-sm font-medium text-primary hover:underline">
@@ -258,7 +255,6 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
           {prog.behind && (
             <p className="text-xs text-muted-foreground">
               {prog.total - prog.watched} {prog.kind === 'chapter' ? 'chapters' : 'episodes'} left
-              {item.has_new_content ? ' · new content available!' : ''}
             </p>
           )}
         </div>

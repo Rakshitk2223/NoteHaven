@@ -65,16 +65,16 @@ console.log('\nbuildContinueQueue');
     item({ id: 1, title: 'Behind',   current_episode: 3, last_activity_at: '2026-08-01T00:00:00Z' }),
     item({ id: 2, title: 'CaughtUp', current_episode: 10, last_activity_at: '2026-08-10T00:00:00Z' }),
     item({ id: 3, title: 'Planned',  status: 'Plan to Watch' }),
-    item({ id: 4, title: 'New',      current_episode: 1, has_new_content: true, last_activity_at: '2026-07-01T00:00:00Z' }),
+    item({ id: 4, title: 'Older',    current_episode: 1, last_activity_at: '2026-07-01T00:00:00Z' }),
   ];
   const m: MetaMap = new Map([
     [1, meta({ episodes: 10 })], [2, meta({ episodes: 10 })], [4, meta({ episodes: 10 })],
   ]);
   const q = buildContinueQueue(items, m);
-  eq('excludes caught-up and planned', q.map(e => e.item.title), ['New', 'Behind']);
-  eq('new content sorts first', q[0].item.title, 'New');
-  eq('next label is the following episode', q[1].nextLabel, 'S1 · E4');
-  eq('remaining counts correctly', q[1].remaining, 7);
+  eq('excludes caught-up and planned', q.map(e => e.item.title), ['Behind', 'Older']);
+  eq('most recent activity sorts first', q[0].item.title, 'Behind');
+  eq('next label is the following episode', q[0].nextLabel, 'S1 · E4');
+  eq('remaining counts correctly', q[0].remaining, 7);
 }
 {
   // A title with no cached metadata must still appear — otherwise a fresh
@@ -155,18 +155,18 @@ console.log('\nbuildContinueQueue — bulk-backfill handling');
   eq('zero-progress bulk items excluded', q.map((e) => e.item.title), ['In progress']);
 }
 {
-  // A never-started item still shows if it has new content or a real timestamp.
+  // A never-started item with only the bulk timestamp stays out; a started one shows.
   const BULK = '2026-06-22T13:08:52.843036+00:00';
   const items = [
     ...Array.from({ length: 10 }, (_, i) => item({ id: 200 + i, title: `Pad ${i}`, current_episode: 0, last_activity_at: BULK })),
-    item({ id: 9, title: 'New season', current_episode: 0, has_new_content: true, last_activity_at: BULK }),
-    // ...but one you HAVE started, with new episodes, leads the rail.
-    item({ id: 10, title: 'Started + new', current_episode: 5, has_new_content: true, last_activity_at: BULK }),
+    item({ id: 9, title: 'Never started', current_episode: 0, last_activity_at: BULK }),
+    // ...but one you HAVE started leads the rail.
+    item({ id: 10, title: 'Started', current_episode: 5, last_activity_at: BULK }),
   ];
   const m: MetaMap = new Map(items.map((i) => [i.id, meta({ episodes: 20 })]));
   const q = buildContinueQueue(items, m);
-  eq('never-started + new content is excluded; started + new leads',
-    q.map((e) => e.item.title), ['Started + new']);
+  eq('never-started is excluded; started leads',
+    q.map((e) => e.item.title), ['Started']);
 }
 {
   // With no bulk timestamp present, ordering stays plain recency.

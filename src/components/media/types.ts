@@ -18,7 +18,6 @@ export interface MediaItem {
   created_at: string;
   updated_at?: string;
   tags?: Tag[];
-  has_new_content?: boolean;
   last_known_total_episodes?: number | null;
   last_known_total_seasons?: number | null;
   // Migration 28 (Media v2 source links). Present on rows once it has run.

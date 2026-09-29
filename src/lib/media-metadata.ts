@@ -1,7 +1,7 @@
 // Media metadata data-access: surfaces the canonical media structure cached in
 // `media_metadata` (synopsis, real totals, per-season breakdown, genres, airing
 // status) for unlinked titles (linked ones read media_source_meta, merged by
-// metaFor), and clears the new-content flag. The old "Refresh Library" sweep is
+// metaFor). The old "Refresh Library" sweep (and its new-content flag) is
 // gone: the library-update pass (lib/media-update) keeps linked titles current.
 //
 // Personal progress (current_season/episode/chapter on media_tracker) is NEVER
@@ -142,21 +142,5 @@ export async function removeCoverImage(mediaId: number): Promise<boolean> {
   } catch (error) {
     console.error('removeCoverImage error:', error);
     return false;
-  }
-}
-
-/** Clear the "new content" flag once the user has seen the item. */
-export async function acknowledgeNewContent(mediaId: number): Promise<void> {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) return;
-    await supabase
-      .from('media_tracker')
-      .update({ has_new_content: false })
-      .eq('id', mediaId)
-      .eq('user_id', user.id);
-  } catch (error) {
-    console.error('acknowledgeNewContent error:', error);
   }
 }

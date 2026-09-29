@@ -48,7 +48,7 @@ import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { devLog } from "@/lib/logger";
 import { dateToYMD } from "@/lib/date-utils";
 import { refreshCoverImage, isNewCover, isPinnedOutcome } from "@/lib/media-refresh";
-import { fetchMediaMetadataBatch, removeCoverImage, acknowledgeNewContent, computeProgress, type MediaMeta } from "@/lib/media-metadata";
+import { fetchMediaMetadataBatch, removeCoverImage, computeProgress, type MediaMeta } from "@/lib/media-metadata";
 import { Progress } from "@/components/ui/progress";
 import { ContinueShelf } from "@/components/media/ContinueShelf";
 import { AiringSoon } from "@/components/media/AiringSoon";
@@ -278,9 +278,6 @@ const MediaListRow = ({
         aria-label={`Open ${item.title}`}
       >
         <CoverArt src={cover} title={item.title} initials={1} lazy letterClassName="text-lg" />
-        {item.has_new_content && (
-          <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[hsl(var(--success))] ring-2 ring-background" aria-hidden="true" />
-        )}
       </button>
 
       {/* Title + source meta + synopsis */}
@@ -456,7 +453,7 @@ const MediaTracker = () => {
   });
   const [needsCoverOnly, setNeedsCoverOnly] = useState(false);
   // Quick "what should I watch?" filter: all | behind (progress < total) | new (new season dropped)
-  const [progressFilter, setProgressFilter] = useState<'all' | 'behind' | 'new'>('all');
+  const [progressFilter, setProgressFilter] = useState<'all' | 'behind'>('all');
 
   // Genre filtering replaces the tag selector media never used: media_tags held
   // zero rows across the whole library, while genres are cached automatically.
@@ -746,7 +743,7 @@ const MediaTracker = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) return [] as MediaItem[];
-      const BASE = 'id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, has_new_content, last_known_total_episodes, last_known_total_seasons';
+      const BASE = 'id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, last_known_total_episodes, last_known_total_seasons';
       const run = (cols: string) => supabase
         .from('media_tracker')
         .select(cols)
@@ -1039,9 +1036,7 @@ const MediaTracker = () => {
     }
 
     // "What should I watch?" quick filter.
-    if (progressFilter === 'new') {
-      base = base.filter((i) => i.has_new_content);
-    } else if (progressFilter === 'behind') {
+    if (progressFilter === 'behind') {
       // The same rule as the cover's "N behind" badge (progress-view behindBadge).
       base = base.filter((i) => behindBadge(i, metaById.get(i.id)) != null);
     }
@@ -1835,26 +1830,8 @@ const MediaTracker = () => {
       setFormData(opened);
       editSnapshotRef.current = JSON.stringify(opened);
     }
-    // Opening the item counts as "seeing" any new-season alert — clear the flag.
-    if (item.has_new_content) {
-      acknowledgeNewContent(item.id);
-      queryClient.setQueryData<{ pages: Array<{ items: MediaItem[]; count: number; page: number }> }>(
-        ['mediaItems', filterStatus, searchTerm, sortBy, sortOrder],
-        (old) => old ? {
-          ...old,
-          pages: old.pages.map((pg) => ({
-            ...pg,
-            items: pg.items.map((i) => i.id === item.id ? { ...i, has_new_content: false } : i),
-          })),
-        } : old
-      );
-      // The Continue rail reads its own query, so without this the NEW badge
-      // stayed on the shelf (and kept sorting the item first) all session.
-      queryClient.setQueryData<MediaItem[]>(['mediaRails'], (old) =>
-        old?.map((i) => (i.id === item.id ? { ...i, has_new_content: false } : i)));
-    }
     setDetailsOpen(true);
-  }, [queryClient, filterStatus, searchTerm, sortBy, sortOrder]);
+  }, []);
 
   // Unsaved edits are never dropped silently: switching title (grid click, ← / →,
   // History, Stats) or closing the panel while the form differs from what it
@@ -2758,7 +2735,6 @@ const MediaTracker = () => {
                     <SelectContent>
                       <SelectItem value="all">Everything</SelectItem>
                       <SelectItem value="behind">Behind (more to watch/read)</SelectItem>
-                      <SelectItem value="new">New seasons / episodes</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

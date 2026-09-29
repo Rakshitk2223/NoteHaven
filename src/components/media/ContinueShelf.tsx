@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { ChevronLeft, ChevronRight, Play, Sparkles, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { QueueEntry } from '@/lib/media-insights';
@@ -60,7 +60,7 @@ export function ContinueShelf({ entries, covers, onAdvance, onOpen, busyIds }: C
         className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {entries.map((entry) => {
-          const { item, nextLabel, timeLeft, pct, isNew } = entry;
+          const { item, nextLabel, timeLeft, pct } = entry;
           const cover = item.cover_image ?? covers.get(item.id) ?? null;
           const busy = busyIds.has(item.id);
 
@@ -69,7 +69,7 @@ export function ContinueShelf({ entries, covers, onAdvance, onOpen, busyIds }: C
               key={item.id}
               className={cn(
                 'group relative w-[168px] flex-shrink-0 snap-start overflow-hidden rounded-xl border bg-card/60 transition-all sm:w-[190px]',
-                isNew ? 'border-primary/50 shadow-glow' : 'border-border/60 hover:border-border-strong',
+                'border-border/60 hover:border-border-strong',
               )}
             >
               <button
@@ -82,12 +82,6 @@ export function ContinueShelf({ entries, covers, onAdvance, onOpen, busyIds }: C
                   <CoverArt src={cover} title={item.title} initials={1} lazy
                     letterClassName="text-4xl font-black text-primary/70"
                     imgClassName="transition-transform duration-500 group-hover:scale-[1.04]" />
-
-                  {isNew && (
-                    <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[10px] font-bold text-white shadow-glow">
-                      <Sparkles className="h-2.5 w-2.5" /> NEW
-                    </span>
-                  )}
 
                   {/* Progress sits on the poster so the whole rail scans at a glance. */}
                   {pct > 0 && (

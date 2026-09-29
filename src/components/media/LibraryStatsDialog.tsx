@@ -21,7 +21,7 @@ interface LibraryStatsDialogProps {
   onOpenItem: (id: number) => void;
 }
 
-const STATS_COLS = 'id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, has_new_content, last_known_total_episodes, last_known_total_seasons';
+const STATS_COLS = 'id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, last_known_total_episodes, last_known_total_seasons';
 
 /**
  * The WHOLE library, not the grid's loaded pages (the dialog used to say "200

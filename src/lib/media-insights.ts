@@ -31,7 +31,6 @@ export interface InsightItem {
   created_at?: string;
   updated_at?: string | null;
   last_activity_at?: string | null;
-  has_new_content?: boolean | null;
 }
 
 export type MetaMap = Map<number, MediaMeta>;
@@ -116,8 +115,6 @@ export interface QueueEntry {
   pct: number;
   /** Unwatched content exists beyond the user's position. */
   behind: boolean;
-  /** New season/episodes appeared since the user last looked. */
-  isNew: boolean;
   /** last_activity_at reflects a real interaction, not a bulk backfill. */
   touched: boolean;
 }
@@ -209,7 +206,6 @@ export function buildContinueQueue(
     if (totalKnown && !prog.behind) continue;
 
     const started = prog.started;
-    const isNew = Boolean(item.has_new_content);
     // Real interaction, as opposed to the bulk backfill value.
     const touched = Boolean(item.last_activity_at) && item.last_activity_at !== bulk;
 
@@ -217,12 +213,6 @@ export function buildContinueQueue(
     // with no recorded interaction was never started — 315 titles in this
     // library are marked Watching but untouched, and they were crowding out the
     // things actually in progress.
-    //
-    // has_new_content deliberately does NOT rescue a never-started title: the
-    // flag fires when the episode count grew, which for something you have not
-    // opened means your backlog got bigger, not that there is anything to
-    // resume. Surfacing "Money Heist · S1 E1" under Continue is precisely the
-    // "why is this here" case.
     if (!started && !touched) continue;
 
     const remaining = totalKnown ? prog.total - prog.watched : 0;
@@ -235,19 +225,16 @@ export function buildContinueQueue(
       timeLeft: timeToFinish(item, meta),
       pct: prog.pct,
       behind: prog.behind,
-      isNew,
       touched,
     });
   }
 
   // Tiered, because raw recency is meaningless once most rows share a
   // backfilled timestamp:
-  //   1. new episodes appeared
-  //   2. genuinely interacted with, newest first
-  //   3. everything else by how far in you are — being 80% through something
+  //   1. genuinely interacted with, newest first
+  //   2. everything else by how far in you are — being 80% through something
   //      is a better reason to surface it than an arbitrary tie-break.
   entries.sort((a, b) => {
-    if (a.isNew !== b.isNew) return a.isNew ? -1 : 1;
     if (a.touched !== b.touched) return a.touched ? -1 : 1;
     if (a.touched && b.touched) return activityTime(b.item) - activityTime(a.item);
     if (b.pct !== a.pct) return b.pct - a.pct;
