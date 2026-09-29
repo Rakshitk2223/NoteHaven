@@ -2,11 +2,11 @@
 //
 // Audit BUG-12 fixed three problems with the previous inline implementation:
 //   1. The cache never expired, so a cover changed anywhere except through
-//      refreshCoverImage() was pinned forever behind a hardcoded "v1" key.
+//      the old per-card cover refresh was pinned forever behind a hardcoded "v1" key.
 //   2. Writes REPLACED the whole map with only the items on screen, so
 //      scrolling into a filtered view evicted every other cached cover.
-//   3. The key strings were re-declared as literals in media-refresh.ts, so the
-//      writer and the invalidator could silently drift apart.
+//   3. The key strings were re-declared as literals in the old cover-refresh
+//      module, so the writer and the invalidator could silently drift apart.
 //
 // Everything that touches the cache now goes through this module.
 

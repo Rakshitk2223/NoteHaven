@@ -15,7 +15,6 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "backfill:covers": "tsx scripts/backfill-cover-images.ts",
     "backfill:metadata": "tsx scripts/backfill-media-metadata.ts",
     "backup:media": "tsx scripts/backup-media.ts",
     "backup:vault": "tsx scripts/backup-vault.ts",
