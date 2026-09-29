@@ -6,6 +6,9 @@ type Row = Record<string, unknown>;
 const tracker = new Map<number, Row>();
 let journal: Row[] = [];
 let failJournal = false;
+/** Fail the journal from its Nth insert on (1-based); 0 = never. */
+let failJournalFrom = 0;
+let journalCalls = 0;
 
 function builder(table: string) {
   const q = {
@@ -21,7 +24,8 @@ function builder(table: string) {
     range: () => q,
     then: (resolve: (v: unknown) => void) => {
       if (table === 'media_bulk_journal') {
-        if (failJournal) return resolve({ error: { message: 'journal down' } });
+        journalCalls += 1;
+        if (failJournal || (failJournalFrom && journalCalls >= failJournalFrom)) return resolve({ error: { message: 'journal down' } });
         journal.push(...(q._rows ?? []));
         return resolve({ error: null });
       }
@@ -38,7 +42,7 @@ function builder(table: string) {
 const fake = { from: (t: string) => builder(t), auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) } };
 vi.mock('@/integrations/supabase/client', () => ({ supabase: fake }));
 
-const { setCover, setCovers, buildCoverOptions, defaultCover, wrongCovers, acceptCover } = await import('../media-cover');
+const { setCover, setCovers, buildCoverOptions, defaultCover, wrongCovers, acceptCover, CoverJournalError, COVER_JOURNAL_CHUNK } = await import('../media-cover');
 const { restoreEntry } = await import('../media-bulk');
 type CoverRow = import('../media-cover').CoverRow;
 
@@ -56,7 +60,7 @@ const base = (over: Partial<CoverRow> = {}): CoverRow => ({
 });
 const seed = (r: CoverRow) => tracker.set(r.id, { ...r, user_id: 'u' });
 
-beforeEach(() => { tracker.clear(); journal = []; failJournal = false; });
+beforeEach(() => { tracker.clear(); journal = []; failJournal = false; failJournalFrom = 0; journalCalls = 0; });
 
 // ---------------------------------------------------------------------------------------
 describe('coverVerdict (the one judge)', () => {
@@ -177,6 +181,29 @@ describe('setCover / setCovers (the one writer)', () => {
     ]);
     expect(res.written).toEqual([1, 2]);
     expect(new Set(journal.map((j) => j.batch_id)).size).toBe(1);
+  });
+
+  it('journals in chunks of 5: a failure in chunk 3 leaves 10 journaled, chunk 3 put back, the rest untouched', async () => {
+    expect(COVER_JOURNAL_CHUNK).toBe(5);
+    for (let id = 1; id <= 23; id++) seed(base({ id, cover_image: TMDB }));
+    failJournalFrom = 3; // the tab "dies" (journal unreachable) at the third chunk
+    const changes = Array.from({ length: 23 }, (_, i) => ({ id: i + 1, url: ANILIST_MANGA, origin: 'source' as const, expect: TMDB }));
+    const err = await setCovers(changes).catch((e) => e);
+    expect(err).toBeInstanceOf(CoverJournalError);
+    expect(err.result.written).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(journal).toHaveLength(10);
+    expect(new Set(journal.map((j) => j.batch_id)).size).toBe(1);
+    for (let id = 1; id <= 10; id++) expect(tracker.get(id)!.cover_image).toBe(ANILIST_MANGA); // written + undoable
+    for (let id = 11; id <= 15; id++) expect(tracker.get(id)!.cover_image).toBe(TMDB);         // chunk 3: put back
+    for (let id = 16; id <= 23; id++) expect(tracker.get(id)!.cover_image).toBe(TMDB);         // never touched
+  });
+
+  it('a clean bulk run journals every chunk into the same batch', async () => {
+    for (let id = 1; id <= 12; id++) seed(base({ id, cover_image: TMDB }));
+    const res = await setCovers(Array.from({ length: 12 }, (_, i) => ({ id: i + 1, url: ANILIST_MANGA, origin: 'source' as const, expect: TMDB })));
+    expect(res.written).toHaveLength(12);
+    expect(journalCalls).toBe(3); // 5 + 5 + 2
+    expect(new Set(journal.map((j) => j.batch_id))).toEqual(new Set([res.batchId]));
   });
 
   it("joins an EXISTING batch when given one (the import's Undo takes its covers back)", async () => {

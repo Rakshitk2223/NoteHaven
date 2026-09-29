@@ -177,12 +177,30 @@ async function casWrite(uid: string, id: number, patch: { cover_image: string | 
   return (data ?? []).length > 0;
 }
 
+/** Rows written then journaled per step: a closed tab mid-"Fix all" strands at most this many without Undo. */
+export const COVER_JOURNAL_CHUNK = 5;
+
+/**
+ * Thrown when a chunk's journal can't be written. That chunk has been put back;
+ * everything before it is written AND journaled (so the batch's Undo covers it),
+ * and nothing after it was touched. `result` says how far it got.
+ */
+export class CoverJournalError extends Error {
+  constructor(readonly result: CoverWriteResult, readonly cause: unknown) {
+    super("Couldn't record the cover change for Undo, so it was put back and the rest weren't touched.");
+  }
+}
+
 /**
  * THE cover writer: many rows, one journal batch (one Undo). Each row is
  * written only if it's unpinned and still shows the cover he saw; an automatic
  * cover must also pass the judge. Returns what was written and why the rest
- * wasn't. THROWS (after putting the written rows back) if the journal can't be
- * written: a change that can't be undone is never reported as done.
+ * wasn't.
+ *
+ * Written and journaled in chunks of COVER_JOURNAL_CHUNK (write 5 → journal
+ * those 5 → next), so a tab closed mid-run leaves at most one chunk unjournaled.
+ * If a chunk's journal fails, that chunk is put back and it THROWS
+ * CoverJournalError (a change that can't be undone is never reported as done).
  *
  * `journal.batchId` (+ `kind`) adds the rows to an EXISTING bulk batch instead
  * of opening a new one, e.g. the Tachimanga import passes its own batchId and
@@ -192,7 +210,34 @@ export async function setCovers(changes: CoverChange[], journal: { batchId?: str
   const uid = await sessionUserId();
   const rows = await readRows([...new Set(changes.map((c) => c.id))]);
   const skipped: Record<number, CoverWriteReason> = {};
-  const done: Array<{ c: CoverChange; before: CoverRow }> = [];
+  const written: number[] = [];
+  let batchId: string | null = journal.batchId ?? null;
+
+  let chunk: Array<{ c: CoverChange; before: CoverRow }> = [];
+  const flush = async () => {
+    if (!chunk.length) return;
+    batchId ??= newBatchId();
+    // cover_pinned: false sits in `after`, so Undo's guard also requires the row
+    // to be unpinned: pinning the cover afterwards makes it his, and Undo leaves it.
+    const entries: JournalEntry[] = chunk.map(({ c, before }) => ({
+      media_id: c.id,
+      op: 'update',
+      before: { cover_image: before.cover_image ?? null, cover_origin: before.cover_origin ?? null, cover_pinned: false },
+      after: { cover_image: c.url, cover_origin: c.url === null ? null : c.origin, cover_pinned: false },
+    }));
+    try {
+      await writeJournal(batchId, journal.kind ?? 'cover', entries);
+    } catch (e) {
+      // This chunk can't be undone → put it back (guarded on what we wrote) and stop.
+      for (const { c, before } of chunk) {
+        await casWrite(uid, c.id, { cover_image: before.cover_image ?? null, cover_origin: before.cover_origin ?? null }, c.url, c.url === null ? null : c.origin)
+          .catch(() => false);
+      }
+      throw new CoverJournalError({ batchId: written.length ? batchId : null, written: [...written], skipped }, e);
+    }
+    written.push(...chunk.map((d) => d.c.id));
+    chunk = [];
+  };
 
   for (const c of changes) {
     const row = rows.get(c.id);
@@ -202,30 +247,11 @@ export async function setCovers(changes: CoverChange[], journal: { batchId?: str
     if (!acceptCover(c.url, row.type, c.origin)) { skipped[c.id] = 'rejected'; continue; }
     if ((row.cover_image ?? null) === c.url && row.cover_origin === c.origin) continue; // nothing to do
     const ok = await casWrite(uid, c.id, { cover_image: c.url, cover_origin: c.url === null ? null : c.origin }, c.expect);
-    if (ok) done.push({ c, before: row }); else skipped[c.id] = 'changed';
+    if (ok) chunk.push({ c, before: row }); else skipped[c.id] = 'changed';
+    if (chunk.length >= COVER_JOURNAL_CHUNK) await flush();
   }
-  if (!done.length) return { batchId: null, written: [], skipped };
-
-  const batchId = journal.batchId ?? newBatchId();
-  // cover_pinned: false sits in `after`, so Undo's guard also requires the row
-  // to be unpinned: pinning the cover afterwards makes it his, and Undo leaves it.
-  const entries: JournalEntry[] = done.map(({ c, before }) => ({
-    media_id: c.id,
-    op: 'update',
-    before: { cover_image: before.cover_image ?? null, cover_origin: before.cover_origin ?? null, cover_pinned: false },
-    after: { cover_image: c.url, cover_origin: c.url === null ? null : c.origin, cover_pinned: false },
-  }));
-  try {
-    await writeJournal(batchId, journal.kind ?? 'cover', entries);
-  } catch (e) {
-    // Can't be undone → put every row back (guarded on what we wrote) and fail loudly.
-    for (const { c, before } of done) {
-      await casWrite(uid, c.id, { cover_image: before.cover_image ?? null, cover_origin: before.cover_origin ?? null }, c.url, c.url === null ? null : c.origin)
-        .catch(() => false);
-    }
-    throw e;
-  }
-  return { batchId, written: done.map((d) => d.c.id), skipped };
+  await flush();
+  return { batchId: written.length ? batchId : null, written, skipped };
 }
 
 /** One cover (the "Change cover…" pick, "Remove cover", a single fix). */
