@@ -45,10 +45,20 @@ export const UNGUARDED_COLUMNS = new Set([
 
 const CHUNK = 500;
 
+/**
+ * An entry's undo is only safe with at least one comparable column in `after`:
+ * without one the guard is empty, and undo would delete or rewrite the row by id
+ * alone, whatever he changed since.
+ */
+export const hasGuard = (after: Record<string, unknown>): boolean =>
+  Object.keys(after).some((k) => !UNGUARDED_COLUMNS.has(k));
+
 export const newBatchId = (): string => crypto.randomUUID();
 
 /** Record a bulk change. Throws on failure: a change that can't be undone must not be reported as done. */
 export async function writeJournal(batchId: string, kind: BulkKind, entries: JournalEntry[]): Promise<void> {
+  const unguarded = entries.filter((e) => !hasGuard(e.after));
+  if (unguarded.length) throw new Error(`${unguarded.length} journal entr${unguarded.length === 1 ? 'y has' : 'ies have'} nothing to guard an undo on`);
   for (let i = 0; i < entries.length; i += CHUNK) {
     const rows = entries.slice(i, i + CHUNK).map((e) => ({ batch_id: batchId, kind, ...e }));
     const { error } = await supabase.from('media_bulk_journal' as never).insert(rows as never);
@@ -120,6 +130,8 @@ export async function undoBatch(batchId: string): Promise<UndoOutcome> {
   const handled: number[] = [];
   for (const e of entries) {
     try {
+      // Never act without a guard (a row written before hasGuard existed, say).
+      if (!hasGuard(e.after)) { out.skipped += 1; handled.push(e.id); continue; }
       if (e.op === 'insert') {
         // The change created this title: remove it, unless it's been touched since.
         // (Its journal row goes with it: ON DELETE CASCADE.)

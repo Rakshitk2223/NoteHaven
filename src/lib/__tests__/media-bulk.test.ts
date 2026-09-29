@@ -93,6 +93,28 @@ describe('bulk journal + undo', () => {
     expect(tracker.has(8)).toBe(true);
   });
 
+  it('refuses to journal an entry with nothing to guard an undo on', async () => {
+    await expect(writeJournal('b3', 'import', [
+      { media_id: 1, op: 'insert', before: {}, after: {} },
+    ])).rejects.toThrow(/nothing to guard/);
+    await expect(writeJournal('b3', 'import', [
+      { media_id: 1, op: 'update', before: { last_activity_at: 'x' }, after: { last_activity_at: 'y' } },
+    ])).rejects.toThrow(/nothing to guard/);
+    expect(journal).toHaveLength(0);
+  });
+
+  it('skips (never deletes or rewrites) a stored entry without a guard', async () => {
+    tracker.set(9, { id: 9, user_id: 'u', title: 'Edited since', current_chapter: 50 });
+    // As if written before the guard check existed.
+    journal.push(
+      { id: 1, batch_id: 'b4', kind: 'import', op: 'insert', media_id: 9, before: {}, after: {}, undone_at: null },
+      { id: 2, batch_id: 'b4', kind: 'import', op: 'update', media_id: 9, before: { title: 'Old' }, after: { reader_checked_at: 'z' }, undone_at: null },
+    );
+    const r = await undoBatch('b4');
+    expect(r).toMatchObject({ removed: 0, restored: 0, skipped: 2 });
+    expect(tracker.get(9)).toMatchObject({ title: 'Edited since', current_chapter: 50 });
+  });
+
   it('only touches the batch asked for, and not rows already undone', async () => {
     tracker.set(1, { id: 1, user_id: 'u', current_chapter: 40 });
     tracker.set(2, { id: 2, user_id: 'u', current_chapter: 20 });
