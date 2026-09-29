@@ -299,8 +299,16 @@ export async function readSourceMeta(source: MediaSource, sourceId: string): Pro
 }
 
 /** Batch read for the grid: one request, keyed "source:source_id". */
+/**
+ * The grid's slim select: what cards, rails, filters and sorts read. The heavy
+ * per-episode lists, cast and banner stay for the detail view (readSourceMeta).
+ */
+export const SOURCE_META_SLIM =
+  'source, source_id, title, genres, status, score, chapters, episodes, total_seasons, seasons, latest_chapter, description, runtime, next_airing';
+
 export async function readSourceMetaBatch(
   pairs: Array<{ source: MediaSource; source_id: string }>,
+  cols = '*',
 ): Promise<Map<string, SourceDetail>> {
   const out = new Map<string, SourceDetail>();
   const bySource = new Map<MediaSource, string[]>();
@@ -309,10 +317,10 @@ export async function readSourceMetaBatch(
     for (let i = 0; i < ids.length; i += 100) {
       const { data } = await supabase
         .from('media_source_meta')
-        .select('*')
+        .select(cols)
         .eq('source', source)
         .in('source_id', ids.slice(i, i + 100));
-      for (const row of data ?? []) out.set(`${row.source}:${row.source_id}`, metaRowToDetail(row));
+      for (const row of (data ?? []) as unknown as MetaRow[]) out.set(`${row.source}:${row.source_id}`, metaRowToDetail(row));
     }
   }));
   return out;

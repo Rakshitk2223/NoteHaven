@@ -82,8 +82,8 @@ import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-
 import { latestUndoableBatch, undoBatch, type BulkKind } from '@/lib/media-bulk';
 import { IMPORT_ACCEPT, sniffFile } from '@/components/media/import/sniff';
 import { formatDistanceToNowStrict } from 'date-fns';
-import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
-import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
+import { SOURCE_META_SLIM, detectMediaV2Schema, linkEntry, readSourceMeta, readSourceMetaBatch, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
+import { buildMetaIndex, detailToMeta, mergeMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
 import { cleanResumeUrl, isShelved, progressFieldOf, statusOptionsFor, type MediaFormData } from '@/components/media/types';
 import { CoverArt } from '@/components/media/CoverArt';
@@ -753,7 +753,8 @@ const MediaTracker = () => {
         .order('updated_at', { ascending: false, nullsFirst: false })
         .limit(150);
       // cover_pinned is migration 28's; retry without it on a database that lacks it.
-      let { data, error } = await run(`${BASE}, cover_pinned`);
+      // Migration 28's link columns ride along, so rails-only titles get their source meta too.
+      let { data, error } = await run(`${BASE}, cover_pinned, link_status, source, source_id, last_known_latest_chapter`);
       if (error && (error.code === '42703' || error.code === 'PGRST204')) ({ data, error } = await run(BASE));
       if (error) throw error;
       return (data || []) as unknown as MediaItem[];
@@ -783,6 +784,36 @@ const MediaTracker = () => {
       })
       .catch((err) => console.error('Metadata load error:', err));
   }, [mediaItems, railItems]);
+
+  // Linked titles: the source's own metadata (media_source_meta, a slim select),
+  // merged over legacy in metaById below. Keyed on the link, so a Fix match refetches.
+  const [sourceMetaMap, setSourceMetaMap] = useState<Map<number, MediaMeta>>(() => new Map());
+  const sourceMetaAttemptedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!v2Schema.sourceLinks) return;
+    const todo = new Map<string, { id: number; source: MediaSource; source_id: string }>();
+    for (const i of [...mediaItems, ...railItems]) {
+      if (i.link_status !== 'linked' || !i.source || !i.source_id) continue;
+      const key = `${i.id}:${i.source}:${i.source_id}`;
+      if (sourceMetaAttemptedRef.current.has(key)) continue;
+      sourceMetaAttemptedRef.current.add(key);
+      todo.set(key, { id: i.id, source: i.source as MediaSource, source_id: i.source_id });
+    }
+    if (todo.size === 0) return;
+    const wanted = [...todo.values()];
+    readSourceMetaBatch(wanted.map(({ source, source_id }) => ({ source, source_id })), SOURCE_META_SLIM)
+      .then((details) => {
+        const got = new Map<number, MediaMeta>();
+        for (const w of wanted) {
+          const d = details.get(`${w.source}:${w.source_id}`);
+          if (d) got.set(w.id, detailToMeta(d));
+        }
+        if (got.size) setSourceMetaMap((prev) => new Map([...prev, ...got]));
+      })
+      .catch((err) => console.error('Source metadata load error:', err));
+  }, [mediaItems, railItems, v2Schema.sourceLinks]);
+  /** THE meta for any title (metaFor): source wins for linked rows, legacy fills blanks. */
+  const metaById = useMemo(() => buildMetaIndex(metadataMap, sourceMetaMap), [metadataMap, sourceMetaMap]);
 
   // Persist a light projection of the metadata map so revisits are instant.
   useEffect(() => {
@@ -979,23 +1010,23 @@ const MediaTracker = () => {
 
   // Derived rails + genre facets. All pure functions over data already loaded.
   const genreCounts = useMemo(
-    () => buildGenreCounts(categoryFilteredItems, metadataMap),
-    [categoryFilteredItems, metadataMap],
+    () => buildGenreCounts(categoryFilteredItems, metaById),
+    [categoryFilteredItems, metaById],
   );
 
   const continueQueue = useMemo(
-    () => buildContinueQueue(railItems, metadataMap, 20),
-    [railItems, metadataMap],
+    () => buildContinueQueue(railItems, metaById, 20),
+    [railItems, metaById],
   );
 
   const airingSoon = useMemo(
-    () => buildAiringSoon(railItems, metadataMap, 14),
-    [railItems, metadataMap],
+    () => buildAiringSoon(railItems, metaById, 14),
+    [railItems, metaById],
   );
 
   const episodeFreshness = useMemo(
-    () => episodeDataFreshness(railItems, metadataMap),
-    [railItems, metadataMap],
+    () => episodeDataFreshness(railItems, metaById),
+    [railItems, metaById],
   );
 
   const finalItems = useMemo(() => {
@@ -1004,7 +1035,7 @@ const MediaTracker = () => {
     // Genres are AND-ed: "Action + Thriller" means both, matching how the tag
     // filter behaved.
     if (selectedGenres.length > 0) {
-      base = base.filter((i) => selectedGenres.every((g) => itemHasGenre(i.id, g, metadataMap)));
+      base = base.filter((i) => selectedGenres.every((g) => itemHasGenre(i.id, g, metaById)));
     }
 
     // "Needs cover" = no persisted cover_image AND no resolved cover from the lazy loader.
@@ -1023,7 +1054,7 @@ const MediaTracker = () => {
       base = base.filter((i) => i.has_new_content);
     } else if (progressFilter === 'behind') {
       // The same rule as the cover's "N behind" badge (progress-view behindBadge).
-      base = base.filter((i) => behindBadge(i, metadataMap.get(i.id)) != null);
+      base = base.filter((i) => behindBadge(i, metaById.get(i.id)) != null);
     }
 
     // Client-side sort for metadata-derived orders (not available as DB columns).
@@ -1031,13 +1062,13 @@ const MediaTracker = () => {
       const dir = sortOrder === 'asc' ? 1 : -1;
       const keyOf = (i: MediaItem) =>
         sortBy === 'pct_complete'
-          ? computeProgress(i, metadataMap.get(i.id)).pct
-          : (metadataMap.get(i.id)?.rating ?? 0);
+          ? computeProgress(i, metaById.get(i.id)).pct
+          : (metaById.get(i.id)?.rating ?? 0);
       base = [...base].sort((a, b) => (keyOf(a) - keyOf(b)) * dir || a.title.localeCompare(b.title));
     }
 
     return base;
-  }, [categoryFilteredItems, needsCoverOnly, imageUrls, progressFilter, sortBy, sortOrder, metadataMap, selectedGenres]);
+  }, [categoryFilteredItems, needsCoverOnly, imageUrls, progressFilter, sortBy, sortOrder, metaById, selectedGenres]);
 
   // When "Needs cover" is on, resolve covers for the in-scope set (not just the
   // visible rows), in chunks, so every item actually missing artwork surfaces.
@@ -1244,7 +1275,7 @@ const MediaTracker = () => {
 
   // Every progress write goes through the compare-and-swap writer (audit F-M01).
   const { apply: applyProgressDelta, applyPatch: applyProgressPatch, undo: undoProgress, patchCachedItem } = useProgressMutation({ setEditingItem, setUpdatingIds });
-  const boundsOf = useCallback((item: MediaItem) => boundsFor(item, metadataMap.get(item.id) ?? null), [metadataMap]);
+  const boundsOf = useCallback((item: MediaItem) => boundsFor(item, metaById.get(item.id) ?? null), [metaById]);
 
   /** "Ch 12 → 13 · Undo" — every progress write can be taken back. */
   const toastProgress = useCallback((item: MediaItem, r: ProgressResult) => {
@@ -1302,7 +1333,7 @@ const MediaTracker = () => {
       WATCHABLE_TYPES.includes(item.type) &&
       (item.current_season ?? 0) >= 1 && (item.current_episode ?? 0) === 0
     ) {
-      const meta = metadataMap.get(item.id) ?? null;
+      const meta = metaById.get(item.id) ?? null;
       const nextSeason = (item.current_season ?? 0) + 1;
       const knownSeasons = meta?.seasons;
       // Don't invent a season that doesn't exist (the rail had this same gap).
@@ -2256,7 +2287,7 @@ const MediaTracker = () => {
   }, [patchCachedItem, toast]);
 
   // A linked entry's source detail: the cached media_source_meta row first,
-  // else a by-id fetch (which also caches it). Unlinked entries keep metadataMap.
+  // else a by-id fetch (which also caches it). Unlinked entries keep legacy meta.
   const detailSrc = editingItem && editingItem.link_status === 'linked' && editingItem.source && editingItem.source_id
     ? { source: editingItem.source as MediaSource, id: editingItem.source_id, type: editingItem.type as TrackerType }
     : null;
@@ -2272,9 +2303,9 @@ const MediaTracker = () => {
   });
   const detailMeta = useMemo(() => {
     if (!editingItem) return null;
-    const base = metadataMap.get(editingItem.id) ?? null;
+    const base = metaById.get(editingItem.id) ?? null;
     return sourceDetail ? mergeMeta(base, detailToMeta(sourceDetail)) : base;
-  }, [editingItem, metadataMap, sourceDetail]);
+  }, [editingItem, metaById, sourceDetail]);
 
   // Mac pane: ← / → walk the titles in on-screen order (not across pages you haven't loaded).
   const paneOpen = detailLayout === 'pane' && detailsOpen && !!editingItem;
@@ -2790,7 +2821,7 @@ const MediaTracker = () => {
           <LibraryStatsDialog
             open={statsOpen}
             onOpenChange={setStatsOpen}
-            metaMap={metadataMap}
+            metaMap={metaById}
             // Any title in the library, loaded in the grid or not.
             onOpenItem={(id) => { setStatsOpen(false); void openById(id); }}
           />
@@ -3270,7 +3301,7 @@ const MediaTracker = () => {
                     paneOpen={paneOpen}
                     activeId={paneOpen ? editingItem?.id : null}
                     covers={imageUrls}
-                    metas={metadataMap}
+                    metas={metaById}
                     selectedIds={selectedIds}
                     selectMode={inSelectMode}
                     onOpen={cardOnOpen}
@@ -3287,7 +3318,7 @@ const MediaTracker = () => {
                         key={item.id}
                         item={item}
                         cover={imageUrls.get(item.id)}
-                        meta={metadataMap.get(item.id) ?? null}
+                        meta={metaById.get(item.id) ?? null}
                         isUpdating={updatingIds.has(item.id)}
                         onScheduleLoad={scheduleImageLoad}
                         onOpenDetails={openDetails}

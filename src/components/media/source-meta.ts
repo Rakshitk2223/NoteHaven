@@ -3,6 +3,20 @@
 import type { MediaMeta } from '@/lib/media-metadata';
 import type { SourceDetail } from '@/lib/media-sources';
 
+/**
+ * One meta per title, for everything that reads it (grid, rails, genre filter,
+ * sorts, progress bounds, list rows, stats): a LINKED title's source metadata
+ * wins where it has a value, and the legacy title-matched cache fills the
+ * blanks; unlinked titles keep legacy only. (Legacy alone was the root of
+ * "wrong metadata" on linked titles.)
+ */
+export function buildMetaIndex(legacy: Map<number, MediaMeta>, source: Map<number, MediaMeta>): Map<number, MediaMeta> {
+  if (source.size === 0) return legacy;
+  const out = new Map(legacy);
+  for (const [id, m] of source) out.set(id, mergeMeta(legacy.get(id) ?? null, m));
+  return out;
+}
+
 export function detailToMeta(d: SourceDetail): MediaMeta {
   return {
     description: d.description,
