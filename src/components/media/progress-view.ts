@@ -28,21 +28,30 @@ export function numLabel(item: MediaItem): string {
 }
 
 /**
- * The newest chapter/episode that is actually OUT, when we know it — never a
- * guess (plan: "latest unknown" beats a wrong badge).
- *  - Reading: the source's chapter total, only once the work is finished (an
- *    ongoing series' "chapters" is usually null or stale). Phase-1 linking adds a
- *    real latest_chapter; until then this stays conservative.
- *  - Watching: episodes of the CURRENT season whose air date has passed.
+ * A reading title's two latests: the SOURCE's (a linked title's mirrored latest
+ * chapter, else a finished work's chapter total) and the READER app's own
+ * (migration 29, from the import). Whole chapters: a scanlator's 12.5 is not
+ * "half a chapter behind". Null = unknown on that side.
  */
-export function knownLatest(item: MediaItem, meta?: MediaMeta | null): number | null {
-  // A linked entry's latest released chapter (mirrored from its source) is the
-  // real answer for reading types, finished or not.
-  if (isReadable(item) && item.last_known_latest_chapter != null) return item.last_known_latest_chapter;
-  if (!meta) return null;
+export function latestParts(item: MediaItem, meta?: MediaMeta | null): { source: number | null; reader: number | null } {
+  const floor = (n: number | null | undefined) => (n == null || !Number.isFinite(Number(n)) ? null : Math.floor(Number(n)));
+  const source = item.last_known_latest_chapter != null
+    ? floor(item.last_known_latest_chapter)
+    : meta?.status === 'completed' && meta.chapters ? meta.chapters : null;
+  return { source, reader: floor(item.reader_latest_chapter) };
+}
+
+/**
+ * THE latest, for the "N behind" badge, the Behind filter and the Log clamp:
+ * reading = max(source, reader); watching = episodes of the current season that
+ * have aired. Never a guess (plan: "latest unknown" beats a wrong badge).
+ */
+export function latestOf(item: MediaItem, meta?: MediaMeta | null): number | null {
   if (isReadable(item)) {
-    return meta.status === 'completed' && meta.chapters ? meta.chapters : null;
+    const { source, reader } = latestParts(item, meta);
+    return source == null ? reader : reader == null ? source : Math.max(source, reader);
   }
+  if (!meta) return null;
   if (isWatchable(item)) {
     const season = item.current_season || 1;
     const today = dateToYMD(new Date());
@@ -61,7 +70,7 @@ export function knownLatest(item: MediaItem, meta?: MediaMeta | null): number | 
 
 /** How far behind the known latest this title is; null when the latest is unknown. */
 export function behindCount(item: MediaItem, meta?: MediaMeta | null): number | null {
-  const latest = knownLatest(item, meta);
+  const latest = latestOf(item, meta);
   if (latest == null) return null;
   const b = latest - progressValue(item);
   return b >= 0 ? b : null; // progress past "latest" means the data is stale: say nothing
@@ -86,6 +95,7 @@ export function boundsFor(item: MediaItem, meta?: MediaMeta | null): import('@/l
     seasons: meta?.seasons ?? null,
     total_episodes: meta?.episodes ?? null,
     total_chapters: meta?.status === 'completed' ? meta?.chapters ?? null : null,
-    latest_chapter: item.last_known_latest_chapter ?? null,
+    // The higher of the two latests: logging up to the reader's chapter is allowed.
+    latest_chapter: isReadable(item) ? latestOf(item, null) : null,
   };
 }

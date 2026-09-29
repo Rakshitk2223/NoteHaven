@@ -3,7 +3,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { MediaMeta } from '@/lib/media-metadata';
 import { type MediaItem, isReadable } from './types';
-import { knownLatest, progressValue, unitNoun, unitShort } from './progress-view';
+import { latestOf, latestParts, progressValue, unitNoun, unitShort } from './progress-view';
+import { SOURCE_LABEL, type MediaSource } from '@/lib/media-sources';
 import { CoverArt } from './CoverArt';
 
 const CHIPS = [1, 5, 10, 50] as const;
@@ -26,7 +27,14 @@ interface LogPanelProps {
  */
 export function LogPanel({ item, meta, cover, onCommit, onCancel, autoFocus }: LogPanelProps) {
   const current = progressValue(item);
-  const latest = knownLatest(item, meta);
+  const latest = latestOf(item, meta);
+  // When the source and the reader app disagree, say both: "Ch 120 out · 118 on AniList".
+  const parts = isReadable(item) ? latestParts(item, meta) : { source: null, reader: null };
+  const behindSide = parts.source != null && parts.reader != null && parts.source !== parts.reader
+    ? (parts.reader > parts.source
+      ? { n: parts.source, on: (item.source && SOURCE_LABEL[item.source as MediaSource]) || 'the source' }
+      : { n: parts.reader, on: item.platform?.trim() || 'your reader' })
+    : null;
   const [raw, setRaw] = useState(String(current));
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -64,7 +72,7 @@ export function LogPanel({ item, meta, cover, onCommit, onCancel, autoFocus }: L
   };
 
   const sub = isReadable(item)
-    ? (latest != null ? `Latest Ch ${latest}` : 'Latest chapter unknown')
+    ? (latest != null ? `Ch ${latest} out${behindSide ? ` · ${behindSide.n} on ${behindSide.on}` : ''}` : 'Latest chapter unknown')
     : `${item.current_season ? `Season ${item.current_season} · ` : ''}${latest != null ? `${latest} out` : 'aired count unknown'}`;
 
   return (

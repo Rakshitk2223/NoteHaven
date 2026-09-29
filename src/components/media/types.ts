@@ -28,6 +28,8 @@ export interface MediaItem {
   cover_pinned?: boolean | null;
   last_known_latest_chapter?: number | null;
   latest_changed_at?: string | null;
+  // Migration 29: the reader app's own latest (Tachimanga import only); N behind uses the max.
+  reader_latest_chapter?: number | null;
   platform?: string | null;
   resume_url?: string | null;
 }
