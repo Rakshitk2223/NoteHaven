@@ -85,7 +85,7 @@ import { UpdatesView } from '@/components/media/UpdatesView';
 import { holdReload } from '@/lib/app-update';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { SOURCE_META_SLIM, detectMediaV2Schema, linkEntry, readSourceMeta, readSourceMetaBatch, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
-import { buildMetaIndex, detailToMeta, mergeMeta } from '@/components/media/source-meta';
+import { buildMetaIndex, detailToMeta, linkedMeta, plausibleMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
 import { cleanResumeUrl, isShelved, progressFieldOf, statusOptionsFor, type MediaFormData } from '@/components/media/types';
 import { CoverArt } from '@/components/media/CoverArt';
@@ -811,7 +811,10 @@ const MediaTracker = () => {
       .catch((err) => console.error('Source metadata load error:', err));
   }, [mediaItems, railItems, v2Schema.sourceLinks]);
   /** THE meta for any title (metaFor): source wins for linked rows, legacy fills blanks. */
-  const metaById = useMemo(() => buildMetaIndex(metadataMap, sourceMetaMap), [metadataMap, sourceMetaMap]);
+  const metaById = useMemo(
+    () => buildMetaIndex(metadataMap, sourceMetaMap, [...mediaItems, ...railItems]),
+    [metadataMap, sourceMetaMap, mediaItems, railItems],
+  );
 
   // Persist a light projection of the metadata map so revisits are instant.
   useEffect(() => {
@@ -2128,7 +2131,8 @@ const MediaTracker = () => {
   const detailMeta = useMemo(() => {
     if (!editingItem) return null;
     const base = metaById.get(editingItem.id) ?? null;
-    return sourceDetail ? mergeMeta(base, detailToMeta(sourceDetail)) : base;
+    // The full source detail over the index's entry; the same plausibility check after.
+    return plausibleMeta(editingItem, sourceDetail ? linkedMeta(base, detailToMeta(sourceDetail)) : base);
   }, [editingItem, metaById, sourceDetail]);
 
   // Mac pane: ← / → walk the titles in on-screen order (not across pages you haven't loaded).

@@ -29,6 +29,9 @@ export interface MediaItem {
   latest_changed_at?: string | null;
   // Migration 29: the reader app's own latest (Tachimanga import only); N behind uses the max.
   reader_latest_chapter?: number | null;
+  // Migration 29: a watch title's latest AIRED episode, kept by the library-update pass.
+  last_known_latest_season?: number | null;
+  last_known_latest_episode?: number | null;
   platform?: string | null;
   resume_url?: string | null;
 }

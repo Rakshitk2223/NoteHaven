@@ -35,10 +35,13 @@ export function numLabel(item: MediaItem): string {
  */
 export function latestParts(item: MediaItem, meta?: MediaMeta | null): { source: number | null; reader: number | null } {
   const floor = (n: number | null | undefined) => (n == null || !Number.isFinite(Number(n)) ? null : Math.floor(Number(n)));
+  // A "latest" below where he already is can't be right (a junk cache row said 1 for
+  // a title he's 134 chapters into): unknown, never a clamp or an "of 1".
+  const plausible = (n: number | null) => (n != null && n < progressValue(item) ? null : n);
   const source = item.last_known_latest_chapter != null
     ? floor(item.last_known_latest_chapter)
     : meta?.status === 'completed' && meta.chapters ? meta.chapters : null;
-  return { source, reader: floor(item.reader_latest_chapter) };
+  return { source: plausible(source), reader: plausible(floor(item.reader_latest_chapter)) };
 }
 
 /**
@@ -51,6 +54,14 @@ export function latestOf(item: MediaItem, meta?: MediaMeta | null): number | nul
     const { source, reader } = latestParts(item, meta);
     return source == null ? reader : reader == null ? source : Math.max(source, reader);
   }
+  if (isWatchable(item)) {
+    const season = item.current_season || 1;
+    const ep = item.current_episode ?? 0;
+    // The update pass's stored latest aired episode (migration 29), when it's this season.
+    if (item.last_known_latest_season === season && item.last_known_latest_episode != null && item.last_known_latest_episode >= ep) {
+      return item.last_known_latest_episode;
+    }
+  }
   if (!meta) return null;
   if (isWatchable(item)) {
     const season = item.current_season || 1;
@@ -58,11 +69,13 @@ export function latestOf(item: MediaItem, meta?: MediaMeta | null): number | nul
     const aired = (meta.episodes_detail ?? []).filter(
       (e) => e.season === season && !!e.air_date && e.air_date.slice(0, 10) <= today,
     );
-    if (aired.length) return Math.max(...aired.map((e) => e.number));
+    const ep = item.current_episode ?? 0;
+    const ok = (n: number | null | undefined) => (n != null && n >= ep ? n : null); // below him = not real
+    if (aired.length) return ok(Math.max(...aired.map((e) => e.number)));
     if (meta.status === 'completed') {
       const s = meta.seasons?.find((x) => x.season_number === season);
-      if (s?.episode_count) return s.episode_count;
-      if (!meta.seasons?.length && meta.episodes && season === 1) return meta.episodes;
+      if (s?.episode_count) return ok(s.episode_count);
+      if (!meta.seasons?.length && meta.episodes && season === 1) return ok(meta.episodes);
     }
   }
   return null;
