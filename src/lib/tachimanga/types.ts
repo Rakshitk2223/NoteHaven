@@ -182,9 +182,11 @@ export interface CoverProposal {
  *   · `progress`: tickable (current_chapter), CAS against `expected`.
  *   · `status`: tickable (see StatusProposal), CAS against `expected`.
  *   · `cover`: tickable (see CoverProposal).
- *   · `auto`: applied with the row when non-empty (latest, platform-if-empty,
- *     last_activity_at). Never rating, title, type or resume_url.
- * Undefined keys are not written. An empty plan writes nothing at all.
+ *   · `auto`: reader_latest_chapter and platform-if-empty (real changes), plus
+ *     the timestamps reader_checked_at / last_activity_at, which ride along ONLY
+ *     when the row writes for another reason. Never rating, title, type or resume_url.
+ * Apply writes a row only when rowWrites(row) (plan.ts) is true for its current
+ * ticks. Undefined keys are not written. An empty plan writes nothing at all.
  */
 export interface TrackerPatch {
   current_chapter?: number;
@@ -273,6 +275,6 @@ export interface ImportPlan {
   hidden: { nsfw: number };
   /** Rows (in any group) with a ticked status proposal, for the header ("3 status changes"). */
   statusChanges: number;
-  /** Rows (in any group) whose apply would write something; 0 means re-running changes nothing. */
+  /** Rows where rowWrites() is true (timestamps alone never count); 0 = "Nothing to update". */
   writes: number;
 }

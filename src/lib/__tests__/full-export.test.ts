@@ -101,6 +101,29 @@ describe('runFullExport', () => {
 });
 
 describe('hasFullExportThisSession', () => {
+  it('expires 60 minutes after the export (and honours a custom max age)', async () => {
+    const t0 = Date.parse('2026-09-29T10:00:00.000Z');
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(t0);
+      await runFullExport({ download: () => {} });
+      vi.setSystemTime(t0 + 59 * 60_000);
+      expect(hasFullExportThisSession()).toBe(true);
+      vi.setSystemTime(t0 + 61 * 60_000);
+      expect(hasFullExportThisSession()).toBe(false);
+      expect(hasFullExportThisSession(2 * 60 * 60_000)).toBe(true);
+      vi.setSystemTime(t0 - 60_000); // clock went backwards: don't trust it
+      expect(hasFullExportThisSession()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a malformed stored value is not a backup', () => {
+    store.set('notehaven.fullExportAt', 'yes');
+    expect(hasFullExportThisSession()).toBe(false);
+  });
+
   it('is false, never throwing, when sessionStorage is unavailable (private mode)', async () => {
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get: () => { throw new Error('denied'); } });
     try {

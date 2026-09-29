@@ -112,6 +112,23 @@ function coverFor(row: PlanTrackerRow, readers: ReaderTitle[]): CoverProposal | 
   return { url, reason: 'alternative', ticked: false };
 }
 
+// ---- what counts as a write ---------------------------------------------------
+
+/** Timestamps: they ride along with a real change, never make a write by themselves. */
+const STAMPS: ReadonlySet<string> = new Set(['reader_checked_at', 'last_activity_at']);
+
+/**
+ * Does applying this row (with its CURRENT ticks) change anything real:
+ * progress, status, cover, reader_latest_chapter, platform, or an import-map key?
+ * Apply must skip the row when this is false; when true, `auto`'s timestamps go
+ * with it. `ImportPlan.writes` counts exactly these rows, so re-uploading the same
+ * file says "Nothing to update" instead of re-stamping every matched row.
+ */
+export function rowWrites(p: PlanRow): boolean {
+  return !!((p.progress && p.ticked) || p.status?.ticked || p.cover?.ticked || p.map.length
+    || Object.keys(p.auto).some((k) => !STAMPS.has(k)));
+}
+
 // ---- the planner --------------------------------------------------------------
 
 export function planImport(
@@ -233,6 +250,11 @@ export function planImport(
         map.push({ origin_key: r.origin_key, media_id: id, reader_cover: r.thumbnail_url });
       }
     }
+    const progress = cmp !== 0 && to !== null ? { current_chapter: to } : null;
+    const cover = coverFor(row, rs);
+    // Nothing real could change (not even an unticked option): no timestamps either.
+    const substantive = progress || status || cover || map.length || Object.keys(auto).some((k) => !STAMPS.has(k));
+    if (!substantive) for (const k of STAMPS) delete (auto as Record<string, unknown>)[k];
 
     group.push({
       media_id: id,
@@ -243,11 +265,11 @@ export function planImport(
       from,
       to,
       ticked: group === forward,
-      progress: cmp !== 0 && to !== null ? { current_chapter: to } : null,
+      progress,
       status,
       auto,
       expected: { current_chapter: from, status: row.status },
-      cover: coverFor(row, rs),
+      cover,
       map,
     });
   }
@@ -270,8 +292,7 @@ export function planImport(
   notInNoteHaven.sort((a, b) => a.reader.title.localeCompare(b.reader.title));
 
   const all = [...forward, ...same, ...noteHavenAhead];
-  const writes = all.filter((p) =>
-    (p.progress && p.ticked) || p.status?.ticked || p.cover?.ticked || Object.keys(p.auto).length || p.map.length).length;
+  const writes = all.filter(rowWrites).length;
 
   return {
     forward, same, noteHavenAhead, needsMatch, notInNoteHaven,

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import initSqlJs from 'sql.js';
 import { parseBackupBytes, type SqlJsStatic } from '../parse-core';
 import { buildFixtureTmb } from '../__fixtures__/make-fixture';
-import { planImport } from '../plan';
+import { planImport, rowWrites } from '../plan';
 import type { ImportPlan, PlanImportMapRow, PlanRow, PlanTrackerRow, ReaderTitle } from '../types';
 
 // Synthetic "[audit]" data only: never a real backup.
@@ -25,17 +25,22 @@ const reader = (title: string, over: Partial<ReaderTitle> = {}): ReaderTitle => 
 const find = (plan: ImportPlan, title: string): PlanRow | undefined =>
   [...plan.forward, ...plan.same, ...plan.noteHavenAhead].find((p) => p.title === title);
 
-/** What apply would do with the ticked parts (frontend owns the real one). */
-function applyPlan(plan: ImportPlan, rows: PlanTrackerRow[], map: PlanImportMapRow[]) {
+/**
+ * What apply would do with the ticked parts (frontend owns the real one). It
+ * skips rows where rowWrites() is false; `stamps: false` models an apply whose
+ * timestamps come from elsewhere (a trigger stamping now()), never copied.
+ */
+function applyPlan(plan: ImportPlan, rows: PlanTrackerRow[], map: PlanImportMapRow[], { stamps = true } = {}) {
   const byId = new Map(rows.map((r) => [r.id, r]));
   for (const p of [...plan.forward, ...plan.same, ...plan.noteHavenAhead]) {
+    if (!rowWrites(p)) continue;
     const r = byId.get(p.media_id)!;
     if (p.progress && p.ticked) r.current_chapter = p.progress.current_chapter!;
     if (p.status?.ticked) r.status = p.status.to;
     if (p.cover?.ticked) r.cover_image = p.cover.url;
     if (p.auto.reader_latest_chapter !== undefined) r.reader_latest_chapter = p.auto.reader_latest_chapter;
     if (p.auto.platform) r.platform = p.auto.platform;
-    if (p.auto.last_activity_at) r.last_activity_at = p.auto.last_activity_at;
+    if (stamps && p.auto.last_activity_at) r.last_activity_at = p.auto.last_activity_at;
     for (const m of p.map) {
       const i = map.findIndex((x) => x.origin_key === m.origin_key);
       if (i >= 0) map[i] = m; else map.push(m);
@@ -172,6 +177,75 @@ describe('planImport · the synthetic fixture, end to end', () => {
     expect(again.writes).toBe(0);
     expect(again.forward).toEqual([]);
     expect([...again.same, ...again.noteHavenAhead].every((p) => p.via === 'map')).toBe(true);
+  });
+});
+
+describe('planImport · writes (BE4d: timestamps never count on their own)', () => {
+  let readers: ReaderTitle[];
+  beforeAll(async () => {
+    const SQL = (await initSqlJs()) as unknown as SqlJsStatic;
+    const r = await parseBackupBytes(await buildFixtureTmb({ variant: 'extra' }), SQL);
+    if ('error' in r) throw new Error(r.error.code);
+    readers = r.backup.titles;
+  });
+  const seed = () => [
+    row('[audit] Forward Bump', { current_chapter: 57, cover_image: null }),
+    row('[audit] Equal Progress', { current_chapter: 20 }),
+    row('[audit] Two Sources', { current_chapter: 10 }),
+    row('[audit] 한글 제목', { current_chapter: 17 }),
+  ];
+
+  it('same file twice → 0 writes, even when apply never copies the timestamps', () => {
+    const rows = seed();
+    const map: PlanImportMapRow[] = [];
+    applyPlan(planImport(readers, rows, map, { now: NOW }), rows, map, { stamps: false });
+    const again = planImport(readers, rows, map, { now: '2026-10-01T09:00:00.000Z' });
+    expect(again.writes).toBe(0);
+    // The reader's last read is still "later" than NoteHaven's activity, but that alone writes nothing.
+    for (const p of [...again.forward, ...again.same, ...again.noteHavenAhead]) {
+      expect(rowWrites(p)).toBe(false);
+      // No option left at all → no timestamp either. (A row still offering an
+      // UNTICKED option, like an alternative cover, keeps its stamp for if he ticks it.)
+      if (!p.progress && !p.status && !p.cover) expect(p.auto).toEqual({});
+    }
+    expect([...again.same].filter((p) => !p.cover).length).toBeGreaterThan(0); // the check above really ran
+  });
+
+  it('a latest-only bump (a new chapter out, same progress) → exactly 1 write, stamped', () => {
+    const rows = seed();
+    const map: PlanImportMapRow[] = [];
+    applyPlan(planImport(readers, rows, map, { now: NOW }), rows, map, { stamps: false });
+    const bumped = readers.map((r) => (r.title === '[audit] Equal Progress' ? { ...r, latest_max: (r.latest_max ?? 0) + 1 } : r));
+    const plan = planImport(bumped, rows, map, { now: '2026-10-01T09:00:00.000Z' });
+    expect(plan.writes).toBe(1);
+    const p = find(plan, '[audit] Equal Progress')!;
+    expect(p.auto).toMatchObject({ reader_latest_chapter: 26, reader_checked_at: '2026-10-01T09:00:00.000Z' });
+    expect(p.progress).toBeNull();
+  });
+
+  it('a row whose only difference is a later reader read plans no write and no timestamp', () => {
+    const r = row('[audit] Only Stamp', { current_chapter: 10, reader_latest_chapter: 12, platform: '[audit] Source A', last_activity_at: '2026-01-01T00:00:00.000Z' });
+    const rd = reader('[audit] Only Stamp', { read_max: 10, latest_max: 12, last_read_at: '2026-09-01T00:00:00.000Z' });
+    const plan = planImport([rd], [r], [{ origin_key: rd.origin_key, media_id: r.id, reader_cover: null }], { now: NOW });
+    expect(plan.writes).toBe(0);
+    expect(plan.same[0].auto).toEqual({});
+  });
+
+  it('timestamps ride along with a real change', () => {
+    const r = row('[audit] Stamp Rides', { current_chapter: 5, last_activity_at: '2026-01-01T00:00:00.000Z' });
+    const rd = reader('[audit] Stamp Rides', { read_max: 9, last_read_at: '2026-09-01T00:00:00.000Z' });
+    const p = planImport([rd], [r], [], { now: NOW }).forward[0];
+    expect(rowWrites(p)).toBe(true);
+    expect(p.auto.last_activity_at).toBe('2026-09-01T00:00:00.000Z');
+  });
+
+  it('unticking the only real change makes the row write nothing (rowWrites follows the UI ticks)', () => {
+    const r = row('[audit] Untick Me', { current_chapter: 5, reader_latest_chapter: 12, platform: '[audit] Source A' });
+    const rd = reader('[audit] Untick Me', { read_max: 9, latest_max: 12, last_read_at: '2026-09-01T00:00:00.000Z' });
+    const p = planImport([rd], [r], [{ origin_key: rd.origin_key, media_id: r.id, reader_cover: null }], { now: NOW }).forward[0];
+    expect(rowWrites(p)).toBe(true);
+    p.ticked = false; // he unticked "move forward"
+    expect(rowWrites(p)).toBe(false); // so its last_activity_at must not be written alone
   });
 });
 

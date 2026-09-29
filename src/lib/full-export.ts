@@ -4,7 +4,8 @@
 // Pages every user table past PostgREST's 1000-row cap, skips migration-29
 // tables this database doesn't have yet (not a failure; see isNotSetUp), and
 // downloads the file. A COMPLETE export sets a per-tab session flag, so a bulk
-// dialog can require "exported in this session" before it enables Apply.
+// dialog can require "exported in this session, in the last hour" before it
+// enables Apply.
 // Toasts stay with the caller.
 
 import { supabase } from '@/integrations/supabase/client';
@@ -133,10 +134,19 @@ export async function runFullExport(opts: FullExportOptions = {}): Promise<FullE
   return { failed, skipped, fileName };
 }
 
-/** True once a COMPLETE full export ran in this tab's session. */
-export function hasFullExportThisSession(): boolean {
+/** How long a complete export counts as "just backed up" for a bulk-change gate. */
+export const FULL_EXPORT_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * True when a COMPLETE full export ran in this tab's session within `maxAgeMs`
+ * (default 60 min): a backup from this morning shouldn't unlock this evening's
+ * bulk change. False on a missing, unreadable, malformed or future timestamp.
+ */
+export function hasFullExportThisSession(maxAgeMs: number = FULL_EXPORT_MAX_AGE_MS): boolean {
   try {
-    return !!sessionStorage.getItem(SESSION_KEY);
+    const at = Date.parse(sessionStorage.getItem(SESSION_KEY) ?? '');
+    const age = Date.now() - at;
+    return Number.isFinite(at) && age >= 0 && age <= maxAgeMs;
   } catch {
     return false;
   }
