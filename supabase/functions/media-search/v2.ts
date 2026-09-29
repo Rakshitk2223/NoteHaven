@@ -60,7 +60,14 @@ interface Detail extends Candidate {
   episodes_detail: Array<Json> | null;
   cast_members: Array<{ name: string; character: string | null; image: string | null }> | null;
   runtime: number | null;
-  next_airing: { episode: number; airs_at: string } | null;
+  /** The next episode to air. airs_at is ISO (AniList, TVmaze airstamp) or a bare date (TMDB). */
+  next_airing: { episode: number; season?: number | null; airs_at: string } | null;
+  /**
+   * Watch types: the latest AIRED season + episode (TMDB last_episode_to_air,
+   * TVmaze's episode list), for the library update pass. Returned to the
+   * client only; media_source_meta has no column for it.
+   */
+  last_aired: { season: number; episode: number; air_date: string | null } | null;
   alt_ids: Record<string, string>;
   fetched_at: string;
 }
@@ -465,9 +472,38 @@ export async function searchAll(d: V2Deps, q: string, type: TType, limit: number
 const baseDetail = (c: Candidate): Detail => ({
   ...c,
   description: null, banner: null, genres: [], total_seasons: null, seasons: null,
-  episodes_detail: null, cast_members: null, runtime: null, next_airing: null,
+  episodes_detail: null, cast_members: null, runtime: null, next_airing: null, last_aired: null,
   alt_ids: {}, fetched_at: new Date().toISOString(),
 });
+
+/**
+ * TVmaze episodes → the latest aired and the next upcoming position. "Aired"
+ * uses the episode's airstamp (a real timestamp) when present, so an evening
+ * US airing isn't counted early in another timezone; else its airdate.
+ * Specials (season 0 / no number) are skipped. Pure: Vitest covers it.
+ */
+export function airedPositions(
+  eps: Array<{ season?: unknown; number?: unknown; airdate?: string | null; airstamp?: string | null }>,
+  nowMs: number,
+): { last: Detail['last_aired']; next: Detail['next_airing'] } {
+  let last: Detail['last_aired'] = null;
+  let next: (NonNullable<Detail['next_airing']> & { t: number }) | null = null;
+  for (const e of eps) {
+    const season = posInt(e.season);
+    const episode = posInt(e.number);
+    if (!season || !episode) continue;
+    const t = Date.parse(e.airstamp || e.airdate || '');
+    if (!Number.isFinite(t)) continue;
+    if (t <= nowMs) {
+      if (!last || season > last.season || (season === last.season && episode > last.episode)) {
+        last = { season, episode, air_date: e.airdate || null };
+      }
+    } else if (!next || t < next.t) {
+      next = { t, season, episode, airs_at: (e.airstamp || e.airdate) as string };
+    }
+  }
+  return { last, next: next ? { episode: next.episode, season: next.season, airs_at: next.airs_at } : null };
+}
 
 async function detailAniList(d: V2Deps, id: string, type: TType): Promise<Detail | null> {
   const res = await d.pacedFetch('anilist', 'https://graphql.anilist.co', {
@@ -604,6 +640,17 @@ async function detailTMDB(d: V2Deps, id: string, type: TType): Promise<Detail | 
     name: c?.name, character: c?.character ?? null, image: c?.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : null,
   })).filter((c) => c.name);
   det.cast_members = cast.length ? cast : null;
+  if (kind === 'tv') {
+    // Same response, no extra call: TMDB names the last aired and the next episode.
+    const la = r.last_episode_to_air;
+    const na = r.next_episode_to_air;
+    if (posInt(la?.season_number) && posInt(la?.episode_number)) {
+      det.last_aired = { season: la.season_number, episode: la.episode_number, air_date: la.air_date || null };
+    }
+    if (na?.air_date && posInt(na?.episode_number)) {
+      det.next_airing = { episode: na.episode_number, season: posInt(na.season_number), airs_at: na.air_date };
+    }
+  }
   det.alt_ids.tmdb = String(r.id);
   if (r.external_ids?.imdb_id) det.alt_ids.imdb = String(r.external_ids.imdb_id);
   if (r.external_ids?.tvdb_id) det.alt_ids.tvdb = String(r.external_ids.tvdb_id);
@@ -636,6 +683,9 @@ async function detailTVmaze(d: V2Deps, id: string): Promise<Detail | null> {
     runtime: posInt(e.runtime), overview: plain(e.summary, 300),
   }));
   if (!det.episodes_detail.length) det.episodes_detail = null;
+  const aired = airedPositions(eps, Date.now());
+  det.last_aired = aired.last;
+  det.next_airing = aired.next;
   det.runtime = posInt(s.averageRuntime ?? s.runtime);
   const cast = ((s._embedded?.cast || []) as Loose[]).slice(0, 12).map((c) => ({
     name: c?.person?.name, character: c?.character?.name ?? null, image: c?.person?.image?.medium ?? null,
