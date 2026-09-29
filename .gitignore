@@ -51,6 +51,10 @@ pnpm-lock.yaml
 
 # Local data backups (contain real user rows — never commit)
 backups/
+# Reader-app backups (Tachimanga .tmb, Mihon/Tachiyomi .tachibk / .proto.gz), wherever they land
+*.tmb
+*.tachibk
+*.proto.gz
 
 # Playwright MCP scratch output (screenshots, snapshots, console logs)
 .playwright-mcp/
