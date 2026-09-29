@@ -4,6 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import type { ImportPlan, NewTitleRow, PlanRow } from '@/lib/tachimanga/types';
 import { CoverArt } from '../CoverArt';
+import { ReviewCard } from '../ReviewCard';
 import { type ImportSelection, type NewTitleType, matchedRows, toggled } from './selection';
 
 interface ImportPreviewProps {
@@ -186,29 +187,19 @@ export function ImportPreview({ plan, sel, onSel, currentCovers, showNsfw, onSho
       <Section title="Needs a match" count={plan.needsMatch.length} hint="Pick the title it is, or skip it.">
         {plan.needsMatch.map((n) => {
           const picked = sel.matches.get(n.reader.origin_key);
-          const pick = (id: number | null) => {
-            const matches = new Map(sel.matches);
-            if (id == null) matches.delete(n.reader.origin_key); else matches.set(n.reader.origin_key, id);
-            onSel({ ...sel, matches });
-          };
           return (
-            <div key={n.reader.origin_key} className="space-y-1 px-3 py-2">
-              <p className="truncate text-sm font-medium text-foreground">{n.reader.title} <span className="text-xs font-normal tabular-nums text-muted-foreground">· {ch(n.reader.read_max)}</span></p>
-              <div role="radiogroup" aria-label={`Match for ${n.reader.title}`} className="flex flex-wrap gap-1.5">
-                {n.candidates.map((c) => (
-                  <button key={c.media_id} type="button" role="radio" aria-checked={picked === c.media_id} onClick={() => pick(c.media_id)}
-                    className={cn('min-h-11 max-w-full truncate rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      picked === c.media_id ? 'border-transparent bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:text-foreground')}>
-                    {c.title} · {c.type}
-                  </button>
-                ))}
-                <button type="button" role="radio" aria-checked={picked === undefined} onClick={() => pick(null)}
-                  className={cn('min-h-11 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    picked === undefined ? 'border-transparent bg-secondary text-foreground' : 'border-border text-muted-foreground hover:text-foreground')}>
-                  Skip
-                </button>
-              </div>
-            </div>
+            <ReviewCard
+              key={n.reader.origin_key}
+              title={n.reader.title}
+              subtitle={ch(n.reader.read_max)}
+              candidates={n.candidates.map((c) => ({ key: String(c.media_id), title: c.title, line: c.type }))}
+              picked={picked === undefined ? undefined : String(picked)}
+              onPick={(key) => {
+                const matches = new Map(sel.matches);
+                if (key == null) matches.delete(n.reader.origin_key); else matches.set(n.reader.origin_key, Number(key));
+                onSel({ ...sel, matches });
+              }}
+            />
           );
         })}
       </Section>

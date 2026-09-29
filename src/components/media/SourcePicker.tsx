@@ -99,7 +99,8 @@ export function SourcePicker({
             autoComplete="off"
             spellCheck={false}
             enterKeyHint="search"
-            className="h-12 rounded-xl pl-9 pr-10 text-base"
+            // Our own ✕ clears it; hide the browser's native one so there aren't two.
+            className="h-12 rounded-xl pl-9 pr-10 text-base [&::-webkit-search-cancel-button]:appearance-none"
           />
           {query && (
             <button type="button" onClick={() => setQuery('')} aria-label="Clear search"

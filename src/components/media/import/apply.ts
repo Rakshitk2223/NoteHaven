@@ -89,7 +89,8 @@ async function applyRowParts(
   // typed after the preview must survive (it goes through the guarded path below).
   if (sel.progress.has(r.media_id) && r.progress?.current_chapter != null) {
     const target = r.progress.current_chapter;
-    const { last_activity_at: lastRead, platform: _platform, ...extra } = auto;
+    const { last_activity_at: lastRead, ...extra } = auto;
+    delete extra.platform;
     // Activity = max(his last activity, the reader's last read): the planner only sets
     // lastRead when it's newer. The exact value written is journaled, so Undo restores it.
     const activityAt = (lastRead as string | undefined) ?? snap?.last_activity_at ?? new Date().toISOString();
