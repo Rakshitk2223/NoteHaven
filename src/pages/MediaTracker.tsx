@@ -1950,7 +1950,8 @@ const MediaTracker = () => {
       }
       const reading = READABLE_TYPES.includes(p.type);
       const watching = WATCHABLE_TYPES.includes(p.type);
-      const title = (c?.title ?? p.title).trim();
+      // The user's typed name is the display title (user-owned); the source's titles stay in source meta.
+      const title = (choice.title || p.title || c?.title || '').trim();
       const { data: created, error } = await supabase.from('media_tracker').insert([{
         user_id: user.id,
         title,
@@ -2662,11 +2663,12 @@ const MediaTracker = () => {
                   wide={pickerWide}
                   libraryIndex={libraryIndex}
                   autoFocus={logPopover}
-                  onPick={(c, type) => {
+                  onPick={(c, type, typed) => {
                     const inLib = libraryIndex.get(`${c.source}:${c.source_id}`);
                     const it = inLib != null ? itemsByIdRef.current.get(inLib) : undefined;
                     if (it) { setSection('library'); openDetails(it, 'view'); return; }
-                    setPick({ mode: 'add', type, candidate: c, title: c.title });
+                    // The typed name stays the display name; the source title lives in source meta.
+                    setPick({ mode: 'add', type, candidate: c, title: typed || c.title });
                   }}
                   onAddUnlinked={(title, type) => setPick({ mode: 'add', type, candidate: null, title })}
                 />

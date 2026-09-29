@@ -75,7 +75,9 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
     : '—';
   const linked = item.link_status === 'linked' && !!item.source;
   const sourceLabel = item.source ? SOURCE_LABEL[item.source as MediaSource] ?? item.source : null;
-  const altTitle = detail?.alt_titles?.find((t) => t && t !== item.title) ?? null;
+  // Your name for it is the heading; the source's own title (then its alt titles) goes underneath.
+  const sameName = (t: string) => t.trim().toLowerCase() === item.title.trim().toLowerCase();
+  const altTitle = [detail?.title, ...(detail?.alt_titles ?? [])].find((t): t is string => !!t && !sameName(t)) ?? null;
   const byline = detail?.authors?.slice(0, 2).join(', ') || null;
   const synopsis = meta?.description ?? detail?.description ?? null;
   const longSyn = !!synopsis && synopsis.length > 180;

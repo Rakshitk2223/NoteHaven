@@ -32,7 +32,8 @@ interface SourcePickerProps {
   libraryIndex: Map<string, number>;
   /** The entry being re-linked (Fix match), to mark its current link. */
   linkedKey?: string | null;
-  onPick: (c: Candidate, type: TrackerType) => void;
+  /** `query` = what the user typed (trimmed): an add keeps it as the display name. */
+  onPick: (c: Candidate, type: TrackerType, query: string) => void;
   /** Add mode: always-available escape hatch. */
   onAddUnlinked?: (title: string, type: TrackerType) => void;
   autoFocus?: boolean;
@@ -51,6 +52,7 @@ export function SourcePicker({
   const [loading, setLoading] = useState(false);
   const [retry, setRetry] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pick = (c: Candidate, t: TrackerType) => onPick(c, t, query.trim());
 
   useEffect(() => { if (autoFocus) inputRef.current?.focus({ preventScroll: true }); }, [autoFocus]);
 
@@ -144,7 +146,7 @@ export function SourcePicker({
                   <ul className="space-y-1.5">
                     {g.items.map((c) => (
                       <li key={`${c.source}:${c.source_id}`}>
-                        <CandidateRow c={c} type={type} libraryIndex={libraryIndex} linkedKey={linkedKey} onPick={onPick} />
+                        <CandidateRow c={c} type={type} libraryIndex={libraryIndex} linkedKey={linkedKey} onPick={pick} />
                       </li>
                     ))}
                   </ul>
@@ -152,7 +154,7 @@ export function SourcePicker({
                   <ul className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {g.items.map((c) => (
                       <li key={`${c.source}:${c.source_id}`} className="w-[124px] flex-shrink-0">
-                        <CandidateCard c={c} type={type} libraryIndex={libraryIndex} linkedKey={linkedKey} onPick={onPick} />
+                        <CandidateCard c={c} type={type} libraryIndex={libraryIndex} linkedKey={linkedKey} onPick={pick} />
                       </li>
                     ))}
                   </ul>

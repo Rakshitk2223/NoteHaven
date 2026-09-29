@@ -8,6 +8,8 @@ import { SOURCE_LABEL, type Candidate, type TrackerType } from '@/lib/media-sour
 import { candidateLine, READING_TRACKER_TYPES } from './picker-utils';
 
 export interface PickChoice {
+  /** Add: the display name (what you typed, or edited here). */
+  title: string;
   status: string;
   progress: number | null;
   useNewCover: boolean;
@@ -39,20 +41,30 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
   const [status, setStatus] = useState(statuses[0]);
   const [raw, setRaw] = useState('');
   const [useNewCover, setUseNewCover] = useState(false);
+  // Add keeps the name you typed as the display title (a search can be a fragment, so it's editable);
+  // Fix match shows the entry you're linking to and never renames.
+  const initialName = (mode === 'add' && title.trim()) || candidate?.title || title;
+  const [name, setName] = useState(initialName);
 
   useEffect(() => {
     if (!open) return;
     setStatus(statusesFor(type)[0]);
     setRaw('');
     setUseNewCover(false);
-  }, [open, type, candidate?.source, candidate?.source_id]);
+    setName(initialName);
+  }, [open, type, candidate?.source, candidate?.source_id, initialName]);
 
   const reading = READING_TRACKER_TYPES.has(type);
   const hasProgress = type !== 'Movie';
   const line = candidate ? candidateLine(candidate, type) : '';
-  const shownTitle = candidate?.title ?? title;
+  const editName = mode === 'add' && !!candidate;
+  const shownTitle = editName ? name : initialName;
+  const sameName = (t: string) => t.trim().toLowerCase() === shownTitle.trim().toLowerCase();
+  const subTitle = candidate ? [candidate.title, ...candidate.alt_titles].find((t) => !!t && !sameName(t)) ?? null : null;
+  const canUseSource = editName && !sameName(candidate.title);
 
   const confirm = () => onConfirm({
+    title: (editName ? name : initialName).trim() || candidate?.title || title,
     status,
     progress: hasProgress && raw !== '' ? parseInt(raw, 10) : null,
     useNewCover,
@@ -76,8 +88,21 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
             {candidate?.cover ? <img src={candidate.cover} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" /> : null}
           </span>
           <div className="min-w-0 space-y-1">
-            <p className="font-semibold leading-snug text-foreground">{shownTitle}</p>
-            {candidate?.alt_titles[0] && <p className="text-sm text-muted-foreground">{candidate.alt_titles[0]}</p>}
+            {editName ? (
+              <input
+                value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" spellCheck={false}
+                aria-label="Name in your library"
+                className="h-10 w-full rounded-lg border border-border bg-secondary/40 px-3 font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            ) : (
+              <p className="font-semibold leading-snug text-foreground">{shownTitle}</p>
+            )}
+            {canUseSource ? (
+              <button type="button" onClick={() => setName(candidate.title)}
+                className="min-h-10 text-left text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
+                Use “{candidate.title}”
+              </button>
+            ) : subTitle && <p className="text-sm text-muted-foreground">{subTitle}</p>}
             {candidate && (
               <p className="text-sm text-muted-foreground">{[candidate.authors.slice(0, 2).join(', '), candidate.year, candidate.format].filter(Boolean).join(' · ')}</p>
             )}
@@ -127,7 +152,7 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Back</Button>
-          <Button variant="gradient" onClick={confirm} disabled={busy}>
+          <Button variant="gradient" onClick={confirm} disabled={busy || (editName && !name.trim())}>
             {busy ? 'Saving…' : mode === 'fix' ? 'Link' : 'Add to library'}
           </Button>
         </DialogFooter>
