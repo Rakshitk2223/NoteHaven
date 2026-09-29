@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, LayoutGrid, RefreshCw, SlidersHorizontal, Upload,
+  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, LayoutGrid, RefreshCw, RotateCcw, SlidersHorizontal, Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -22,6 +22,8 @@ interface MediaMoreViewProps {
   onExportJson: () => void;
   onExportCsv: () => void;
   onExportTxt: () => void;
+  /** Only while an un-undone bulk change exists (migration 29); null hides the row. */
+  undoBulk?: { hint: string; busy: boolean; onUndo: () => void } | null;
 }
 
 function Row({ icon: Icon, label, hint, onClick, disabled, trailing }: {
@@ -115,6 +117,9 @@ export function MediaMoreView(p: MediaMoreViewProps) {
         <Row icon={Download} label="Export JSON" hint="Full backup, with tags" onClick={p.onExportJson} />
         <Row icon={FileSpreadsheet} label="Export CSV" onClick={p.onExportCsv} />
         <Row icon={FileText} label="Export TXT…" hint="A plain list, by type" onClick={p.onExportTxt} />
+        {p.undoBulk && (
+          <Row icon={RotateCcw} label={p.undoBulk.busy ? 'Undoing…' : 'Undo last bulk change'} hint={p.undoBulk.hint} onClick={p.undoBulk.onUndo} disabled={p.undoBulk.busy} />
+        )}
       </Group>
     </div>
   );

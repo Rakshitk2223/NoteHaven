@@ -79,6 +79,8 @@ import { PickPreview, type PickChoice } from '@/components/media/PickPreview';
 import { HistoryView } from '@/components/media/HistoryView';
 import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type TrackerType } from '@/lib/media-sources';
 import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-match';
+import { latestUndoableBatch, undoBatch, type BulkKind } from '@/lib/media-bulk';
+import { formatDistanceToNowStrict } from 'date-fns';
 import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
 import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
@@ -392,6 +394,8 @@ const splitNoCover = <T extends Pick<MediaItem, 'id' | 'cover_pinned' | 'cover_i
   fetch: items.filter((i) => !wantsNoCover(i)),
   none: new Map<number, string | null>(items.filter(wantsNoCover).map((i) => [i.id, null])),
 });
+
+const BULK_KIND_LABEL: Record<BulkKind, string> = { import: 'Import', link: 'Linking', cover: 'Cover change' };
 
 const tagKey = (tags: Tag[]) => tags.map((t) => t.name.toLowerCase()).sort().join('\u0000');
 
@@ -2030,6 +2034,41 @@ const MediaTracker = () => {
       return out;
     },
   });
+  // "Undo last bulk change" (migration 29's journal): the row exists only while
+  // an un-undone batch does, so the query runs only where it's shown.
+  const { data: lastBatch = null } = useQuery({
+    queryKey: ['mediaBulkLatest'],
+    enabled: v2Schema.importLink && section === 'more',
+    staleTime: 30 * 1000,
+    queryFn: latestUndoableBatch,
+  });
+  const [undoBulkOpen, setUndoBulkOpen] = useState(false);
+  const [undoingBulk, setUndoingBulk] = useState(false);
+  const runUndoBulk = useCallback(async () => {
+    if (!lastBatch) return;
+    setUndoingBulk(true);
+    try {
+      const r = await undoBatch(lastBatch.batch_id);
+      for (const key of ['mediaItems', 'mediaRails', 'groupCounts', 'mediaTitleIndex', 'mediaHistory', 'mediaBulkLatest']) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      const done = r.restored + r.removed;
+      toast({
+        title: done ? `Undid ${done} change${done === 1 ? '' : 's'}` : 'Nothing to undo',
+        description: [
+          r.removed ? `${r.removed} added title${r.removed === 1 ? '' : 's'} removed` : '',
+          r.skipped ? `${r.skipped} skipped (changed since)` : '',
+          r.failed ? `${r.failed} failed; try again` : '',
+        ].filter(Boolean).join(' · ') || undefined,
+        variant: r.failed ? 'destructive' : undefined,
+      });
+    } catch (e) {
+      toast({ title: 'Couldn’t undo', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
+    } finally {
+      setUndoingBulk(false);
+    }
+  }, [lastBatch, queryClient, toast]);
+
   const libraryLookup = useMemo(() => buildLibraryLookup([...titleIndex, ...mediaItems]), [titleIndex, mediaItems]);
   const inLibrary = useCallback((c: Candidate, t: TrackerType) => findInLibrary(libraryLookup, c, t), [libraryLookup]);
   // Open a title by id: from the loaded pages, else one row fetch. False if it's gone.
@@ -2842,6 +2881,11 @@ const MediaTracker = () => {
                 onExportJson={handleExportJson}
                 onExportCsv={handleExportCsv}
                 onExportTxt={() => setTxtExportDialogOpen(true)}
+                undoBulk={v2Schema.importLink && lastBatch && lastBatch.rows > 0 ? {
+                  hint: `${BULK_KIND_LABEL[lastBatch.kind]} · ${lastBatch.rows.toLocaleString()} title${lastBatch.rows === 1 ? '' : 's'} · ${formatDistanceToNowStrict(new Date(lastBatch.created_at), { addSuffix: true })}`,
+                  busy: undoingBulk,
+                  onUndo: () => setUndoBulkOpen(true),
+                } : null}
               />
             )}
             {/* Library stays mounted while More is open: scroll, pages and covers survive. */}
@@ -3312,6 +3356,16 @@ const MediaTracker = () => {
         </MediaDetailPanel>
       </div>
       
+      <ConfirmDialog
+        open={undoBulkOpen}
+        onOpenChange={setUndoBulkOpen}
+        onConfirm={() => { setUndoBulkOpen(false); void runUndoBulk(); }}
+        title="Undo the last bulk change?"
+        description={lastBatch ? `${BULK_KIND_LABEL[lastBatch.kind]} of ${lastBatch.rows.toLocaleString()} title${lastBatch.rows === 1 ? '' : 's'}: each goes back to how it was, and titles it added are removed. Anything you changed since is left as it is.` : ''}
+        confirmText="Undo"
+        cancelText="Keep"
+      />
+
       <ConfirmDialog
         open={!!discardPrompt}
         onOpenChange={(o) => { if (!o) setDiscardPrompt(null); }}
