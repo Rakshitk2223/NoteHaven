@@ -360,13 +360,10 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
           <div className="flex gap-3 overflow-x-auto pb-1">
             {meta.cast_members.map((c, i) => (
               <div key={i} className="flex w-16 flex-shrink-0 flex-col items-center gap-1.5 text-center">
-                {c.image ? (
-                  <img src={c.image} alt={c.name} referrerPolicy="no-referrer" className="h-14 w-14 rounded-full object-cover ring-1 ring-border" />
-                ) : (
-                  <div className="grid h-14 w-14 place-items-center rounded-full bg-gradient-brand-soft text-sm font-bold text-primary ring-1 ring-primary/20">
-                    {c.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}
-                  </div>
-                )}
+                {/* Same tile + fallback as covers, in a circle; alt stays empty (the name is right below). */}
+                <span className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-full ring-1 ring-border">
+                  <CoverArt src={c.image} title={c.name} lazy letterClassName="text-sm" />
+                </span>
                 <span className="line-clamp-2 text-[11px] font-medium leading-tight">{c.name}</span>
                 {c.character && <span className="line-clamp-1 text-[10px] text-muted-foreground">{c.character}</span>}
               </div>
