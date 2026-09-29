@@ -1638,11 +1638,21 @@ const MediaTracker = () => {
       }
       if (progressChanged) payload.last_activity_at = new Date().toISOString();
 
+      // Undo snapshot: the stored values of exactly the columns this save writes,
+      // plus the tags, read just before writing.
+      const id = editingItem.id;
+      const userId = editingItem.user_id;
+      const cols = Object.keys(payload);
+      const [{ data: beforeRow }, beforeTags] = await Promise.all([
+        supabase.from('media_tracker').select(cols.join(', ')).eq('id', id).maybeSingle(),
+        fetchMediaTags(id).catch(() => null),
+      ]);
+
       const { error } = await supabase
         .from('media_tracker')
         .update(payload)
-        .eq('id', editingItem.id)
-        .eq('user_id', editingItem.user_id);
+        .eq('id', id)
+        .eq('user_id', userId);
 
       if (error) {
         throw error;
@@ -1658,16 +1668,55 @@ const MediaTracker = () => {
       // snapshot, and every cached copy of the row. Nothing waits on a refetch.
       setEditingItemTags(savedTags);
       editTagsSnapshotRef.current = tagKey(savedTags);
-      patchCachedItem(editingItem.id, { tags: savedTags });
+      patchCachedItem(id, { ...(payload as Partial<MediaItem>), tags: savedTags });
 
-      setDetailsOpen(false);
-      setEditingItem(null);
-      setEditingItemTags([]);
-      resetForm();
+      // Stay on this title: back to its view, showing what was just saved.
+      setDetailsMode('view');
       fetchTags();
-  refetch();
+      refetch();
       queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
-      toast({ title: 'Updated', description: 'Media item saved successfully' });
+
+      const before = beforeRow as unknown as Record<string, unknown> | null;
+      const undoEdit = async () => {
+        if (!before) return;
+        // Compare-and-swap on the user fields this save wrote: if any changed since
+        // (a +1 logged after saving, an edit on another device), don't clobber it.
+        // Column names are runtime values here, which the typed builder can't follow.
+        type CasQuery = {
+          eq(col: string, v: unknown): CasQuery;
+          is(col: string, v: null): CasQuery;
+          select(cols: string): PromiseLike<{ data: unknown[] | null; error: unknown }>;
+        };
+        let q = supabase.from('media_tracker').update(before as never).eq('id', id).eq('user_id', userId) as unknown as CasQuery;
+        for (const k of cols) {
+          if (k === 'last_activity_at') continue; // a timestamp's text form differs; not a user field
+          const v = (payload as Record<string, unknown>)[k];
+          q = v === null ? q.is(k, null) : q.eq(k, v);
+        }
+        const { data: hit, error: undoError } = await q.select('id');
+        if (undoError || !hit?.length) {
+          toast({ title: 'Couldn’t undo', description: 'It changed since you saved.', variant: 'destructive' });
+          return;
+        }
+        if (beforeTags && tagKey(beforeTags) !== tagKey(savedTags)) {
+          await setMediaTags(id, beforeTags.map((t) => t.id)).catch(() => {});
+        }
+        patchCachedItem(id, { ...(before as Partial<MediaItem>), ...(beforeTags ? { tags: beforeTags } : {}) });
+        if (beforeTags && openIdRef.current === id) {
+          setEditingItemTags(beforeTags);
+          editTagsSnapshotRef.current = tagKey(beforeTags);
+        }
+        refetch();
+        queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
+        toast({ title: 'Undone', description: title });
+      };
+      toast({
+        title: 'Saved',
+        description: title,
+        action: before ? (
+          <ToastAction altText="Undo" onClick={() => { void undoEdit(); }}>Undo</ToastAction>
+        ) : undefined,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update media item';
       setError(message);
@@ -1704,17 +1753,6 @@ const MediaTracker = () => {
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      title: "",
-      type: "" as MediaItem['type'],
-      status: "" as MediaItem['status'],
-      rating: "",
-      current_season: "",
-      current_episode: "",
-      current_chapter: ""
-    });
-  };
 
 
   const openDetailsNow = useCallback((item: MediaItem, mode: 'view' | 'edit' = 'view') => {
