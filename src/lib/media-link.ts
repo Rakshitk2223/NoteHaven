@@ -58,27 +58,33 @@ type TrackerLinkRow = LinkFields & { id: number; type: string | null };
 // Schema detection (migration 28)
 // ---------------------------------------------------------------------------
 
-let schemaProbe: Promise<{ sourceLinks: boolean; progressLog: boolean }> | null = null;
+export interface MediaV2Schema { sourceLinks: boolean; progressLog: boolean; importLink: boolean }
+let schemaProbe: Promise<MediaV2Schema> | null = null;
 
 /**
- * Whether migration 28 is live: the link columns on media_tracker and the
- * media_progress_log table. Cached per page load. Use it to HIDE (not empty)
- * surfaces that need it — e.g. the History tab.
+ * Whether migration 28 is live (the link columns on media_tracker and the
+ * media_progress_log table) and migration 29 (importLink: media_import_map, which
+ * ships with the Dropped / On Hold status CHECK). Cached per page load. Use it to
+ * HIDE (not empty) surfaces that need it — e.g. the History tab.
  */
-export function detectMediaV2Schema(): Promise<{ sourceLinks: boolean; progressLog: boolean }> {
+export function detectMediaV2Schema(): Promise<MediaV2Schema> {
   if (!schemaProbe) {
     schemaProbe = (async () => {
-      const [links, log] = await Promise.all([
+      const [links, log, imp] = await Promise.all([
         supabase.from('media_tracker').select('link_status').limit(0),
         supabase.from('media_progress_log').select('id').limit(0),
+        supabase.from('media_import_map' as never).select('media_id').limit(0),
       ]);
       // 42703 = undefined column (link columns missing); PGRST205/42P01 = table missing.
       const missingCol = (e: unknown) => (e as { code?: string } | null)?.code === '42703' || (e as { code?: string } | null)?.code === 'PGRST204';
       return {
         sourceLinks: !links.error || !(missingCol(links.error) || isMissingTableError(links.error)),
         progressLog: !log.error || !isMissingTableError(log.error),
+        // Strict: only a clean answer counts. A false positive here would offer a
+        // status the database's CHECK then rejects.
+        importLink: !imp.error,
       };
-    })().catch(() => ({ sourceLinks: false, progressLog: false }));
+    })().catch(() => ({ sourceLinks: false, progressLog: false, importLink: false }));
   }
   return schemaProbe;
 }

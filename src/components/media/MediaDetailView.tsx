@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { computeProgress, type MediaMeta } from '@/lib/media-metadata';
 import type { Tag } from '@/lib/tags';
 import { AIRING_LABEL, AIRING_STYLE } from './media-style';
-import { type MediaItem, type ProgressField, READABLE_TYPES, WATCHABLE_TYPES, progressFieldOf } from './types';
+import { type MediaItem, type ProgressField, READABLE_TYPES, WATCHABLE_TYPES, cleanResumeUrl, progressFieldOf, statusOptionsFor } from './types';
 import { ProgressControl } from './ProgressControl';
 import { LogNumberButton, type LogTarget } from './LogSheet';
 import { SOURCE_LABEL, type MediaSource, type SourceDetail } from '@/lib/media-sources';
@@ -36,11 +36,14 @@ interface MediaDetailViewProps {
   detail?: SourceDetail | null;
   /** Present once migration 28 is live: Fix match / Link source, Pin cover. */
   onFixMatch?: (item: MediaItem) => void;
+  /** Migration 29 is live: On Hold / Dropped join the status chips. */
+  v29?: boolean;
 }
 
 /** The detail drawer's view mode (moved out of MediaTracker.tsx, behaviour unchanged
  *  except the 44px progress control + Log, and no season/episode for movies). */
-export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onSetPosition, onToggleWatched, log, detail, onFixMatch }: MediaDetailViewProps) {
+export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump, onSetPosition, onToggleWatched, log, detail, onFixMatch, v29 = false }: MediaDetailViewProps) {
+  const resumeHref = cleanResumeUrl(item.resume_url);
   const [synOpen, setSynOpen] = useState(false);
   const prog = computeProgress(item, meta);
   const airing = meta?.status ? AIRING_LABEL[meta.status] : null;
@@ -134,8 +137,8 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
             <Plus className="h-4 w-4" aria-hidden="true" /> Log
           </LogNumberButton>
         )}
-        {item.resume_url && (
-          <a href={item.resume_url} target="_blank" rel="noopener noreferrer" className={actionBtn}>
+        {resumeHref && (
+          <a href={resumeHref} target="_blank" rel="noopener noreferrer" className={actionBtn}>
             <Globe className="h-4 w-4" aria-hidden="true" /> Open {item.platform ? `on ${item.platform}` : 'where I read'}
             <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           </a>
@@ -203,7 +206,7 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
         {(progressFieldOf(item) || !onToggleWatched) && <div className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">Status</span>
           <div className="flex flex-wrap gap-1.5">
-            {(isReadableItem ? ['Reading', 'Plan to Read', 'Completed'] : ['Watching', 'Plan to Watch', 'Completed']).map((s) => (
+            {statusOptionsFor(isReadableItem, v29).map((s) => (
               <button
                 key={s}
                 type="button"

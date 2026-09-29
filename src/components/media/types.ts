@@ -9,7 +9,7 @@ export interface MediaItem {
   title: string;
   // Restrict to the allowed canonical set while keeping string for legacy DB rows
   type: 'Movie' | 'Series' | 'Anime' | 'Manga' | 'Manhwa' | 'Manhua' | 'KDrama' | 'JDrama' | string;
-  status: 'Watching' | 'Reading' | 'Plan to Watch' | 'Plan to Read' | 'Completed' | string;
+  status: 'Watching' | 'Reading' | 'Plan to Watch' | 'Plan to Read' | 'Completed' | 'Dropped' | 'On Hold' | string;
   rating?: number;
   current_season?: number;
   current_episode?: number;
@@ -62,10 +62,52 @@ export const getStatusCategory = (status: string): string => {
       return 'Planned';
     case 'Completed':
       return 'Completed';
+    // Migration 29. Their own categories: without these they fell through to 'Active'.
+    case 'Dropped':
+      return 'Dropped';
+    case 'On Hold':
+      return 'On Hold';
     default:
       return 'Active';
   }
 };
+
+/** Parked titles (migration 29): shown in the library, never nudged. */
+export const PARKED_STATUSES = ['On Hold', 'Dropped'] as const;
+
+/**
+ * Not something you're currently following: Continue, Airing Soon and the
+ * "N behind" badge leave these out (Completed, and the two parked statuses).
+ */
+export const isShelved = (status: string) => status === 'Completed' || status === 'Dropped' || status === 'On Hold';
+
+/**
+ * The status choices for a title, in picker order. `parked` adds On Hold and
+ * Dropped, and only once migration 29's CHECK allows them (v2Schema.importLink).
+ */
+export const statusOptionsFor = (reading: boolean, parked: boolean): string[] => [
+  ...(reading ? ['Reading', 'Plan to Read'] : ['Watching', 'Plan to Watch']),
+  'Completed',
+  ...(parked ? PARKED_STATUSES : []),
+];
+
+/**
+ * "Open where I read" link: a trimmed http(s) URL (migration 28's CHECK), else
+ * null. Anything else would be rejected by the database or be unsafe as an href.
+ */
+export const cleanResumeUrl = (raw: string | null | undefined): string | null => {
+  const v = (raw ?? '').trim();
+  if (!v) return null;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.toString() : null;
+  } catch {
+    return null;
+  }
+};
+
+/** A few common platforms for the free-text field (suggestions, not a list). */
+export const PLATFORM_SUGGESTIONS = ['Tachimanga', 'Webtoon', 'Tapas', 'MangaDex', 'Crunchyroll', 'Netflix', 'Prime Video', 'Disney+'] as const;
 
 /** The full add/edit form's values (inputs keep strings; parsed on save). */
 export interface MediaFormData {
@@ -76,13 +118,19 @@ export interface MediaFormData {
   current_season: string;
   current_episode: string;
   current_chapter: string;
+  /** Free text; saved (trimmed, or null) only once migration 29 is live. */
+  platform: string;
+  /** An http(s) link; validated with cleanResumeUrl on save. */
+  resume_url: string;
 }
 
 export type MediaSortBy = 'title' | 'rating' | 'updated_at' | 'created_at' | 'pct_complete' | 'ext_rating';
 
 // Valid types and statuses for runtime validation
 export const VALID_TYPES = ['Movie', 'Series', 'Anime', 'Manga', 'Manhwa', 'Manhua', 'KDrama', 'JDrama'] as const;
-export const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 'Completed'] as const;
+// Dropped / On Hold are valid rows once migration 29 is live; accepting them here keeps
+// normalizeMediaItem from coercing them to 'Plan to Watch'. Pickers gate them separately.
+export const VALID_STATUSES = ['Watching', 'Reading', 'Plan to Watch', 'Plan to Read', 'Completed', 'Dropped', 'On Hold'] as const;
 
 /** Coerce legacy rows into the valid type/status set. */
 /** Placeholder initials: letters/digits only, so "[audit] Solo" reads "AS", not "[S". */

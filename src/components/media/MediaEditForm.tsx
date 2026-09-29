@@ -4,7 +4,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CompactTagSelector } from '@/components/CompactTagSelector';
 import type { Tag } from '@/lib/tags';
-import { type MediaFormData, type MediaItem, READABLE_TYPES, WATCHABLE_TYPES } from './types';
+import { type MediaFormData, type MediaItem, PLATFORM_SUGGESTIONS, READABLE_TYPES, WATCHABLE_TYPES, cleanResumeUrl, statusOptionsFor } from './types';
 
 interface MediaEditFormProps {
   formData: MediaFormData;
@@ -13,10 +13,13 @@ interface MediaEditFormProps {
   tags: Tag[];
   availableTags: Tag[];
   onTagsChange: (tags: Tag[]) => void;
+  /** Migration 29 is live: On Hold / Dropped, plus the Platform and Resume link fields. */
+  v29?: boolean;
 }
 
 /** The detail drawer's add/edit form (moved out of MediaTracker.tsx unchanged). */
-export function MediaEditForm({ formData, setFormData, onSubmit, tags, availableTags, onTagsChange }: MediaEditFormProps) {
+export function MediaEditForm({ formData, setFormData, onSubmit, tags, availableTags, onTagsChange, v29 = false }: MediaEditFormProps) {
+  const urlBad = formData.resume_url.trim() !== '' && !cleanResumeUrl(formData.resume_url);
   const showSeasonEpisode = WATCHABLE_TYPES.includes(formData.type);
   const showChapter = READABLE_TYPES.includes(formData.type);
   // UX-18: Edit is mostly for fixing where you are, so land in the progress field
@@ -75,27 +78,11 @@ export function MediaEditForm({ formData, setFormData, onSubmit, tags, available
               <SelectValue placeholder="Select status" />
             </SelectTrigger>
             <SelectContent>
-              {READABLE_TYPES.includes(formData.type) ? (
-                <>
-                  <SelectItem value="Reading">Reading</SelectItem>
-                  <SelectItem value="Plan to Read">Plan to Read</SelectItem>
-                  <SelectItem value="Completed">Completed</SelectItem>
-                </>
-              ) : WATCHABLE_TYPES.includes(formData.type) || formData.type === 'Movie' ? (
-                <>
-                  <SelectItem value="Watching">Watching</SelectItem>
-                  <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
-                  <SelectItem value="Completed">Completed</SelectItem>
-                </>
-              ) : (
-                <>
-                  <SelectItem value="Watching">Watching</SelectItem>
-                  <SelectItem value="Reading">Reading</SelectItem>
-                  <SelectItem value="Plan to Watch">Plan to Watch</SelectItem>
-                  <SelectItem value="Plan to Read">Plan to Read</SelectItem>
-                  <SelectItem value="Completed">Completed</SelectItem>
-                </>
-              )}
+              {(READABLE_TYPES.includes(formData.type) || WATCHABLE_TYPES.includes(formData.type) || formData.type === 'Movie'
+                ? statusOptionsFor(READABLE_TYPES.includes(formData.type), v29)
+                // No type picked yet: every status.
+                : [...new Set([...statusOptionsFor(false, v29), ...statusOptionsFor(true, v29)])]
+              ).map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -153,6 +140,40 @@ export function MediaEditForm({ formData, setFormData, onSubmit, tags, available
             onChange={(e) => setFormData({ ...formData, current_chapter: e.target.value })}
             placeholder="Chapter number"
           />
+        </div>
+      )}
+
+      {v29 && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="platform">Platform</Label>
+            <Input
+              id="platform"
+              list="media-platform-suggestions"
+              value={formData.platform}
+              onChange={(e) => setFormData({ ...formData, platform: e.target.value.slice(0, 60) })}
+              placeholder="Where you read or watch it"
+              autoComplete="off"
+            />
+            <datalist id="media-platform-suggestions">
+              {PLATFORM_SUGGESTIONS.map((p) => <option key={p} value={p} />)}
+            </datalist>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="resume_url">Resume link</Label>
+            <Input
+              id="resume_url"
+              type="url"
+              inputMode="url"
+              value={formData.resume_url}
+              onChange={(e) => setFormData({ ...formData, resume_url: e.target.value })}
+              placeholder="https://…"
+              autoComplete="off"
+              aria-invalid={urlBad || undefined}
+              aria-describedby={urlBad ? 'resume_url_error' : undefined}
+            />
+            {urlBad && <p id="resume_url_error" className="text-xs text-destructive">Use a full link starting with http:// or https://</p>}
+          </div>
         </div>
       )}
 

@@ -2,7 +2,7 @@
 // sheet's unit and "latest", and the Mihon-style behind badge. No I/O.
 import type { MediaMeta } from '@/lib/media-metadata';
 import { dateToYMD } from '@/lib/date-utils';
-import { type MediaItem, getStatusCategory, isReadable, isWatchable, progressFieldOf } from './types';
+import { type MediaItem, isReadable, isShelved, isWatchable, progressFieldOf } from './types';
 
 /** The counter the everyday "log" moves, as a number (0 when unset). */
 export function progressValue(item: MediaItem): number {
@@ -69,12 +69,12 @@ export function behindCount(item: MediaItem, meta?: MediaMeta | null): number | 
 
 /**
  * The cover's "N behind" badge, and the Behind filter — one rule for both: the
- * known latest is ahead of your progress, and the title isn't Completed.
- * Null = no badge.
+ * known latest is ahead of your progress, and you're still following the title
+ * (not Completed, On Hold or Dropped). Null = no badge.
  */
 export function behindBadge(item: MediaItem, meta?: MediaMeta | null): number | null {
   const b = behindCount(item, meta);
-  return b != null && b > 0 && getStatusCategory(item.status) !== 'Completed' ? b : null;
+  return b != null && b > 0 && !isShelved(item.status) ? b : null;
 }
 
 /**

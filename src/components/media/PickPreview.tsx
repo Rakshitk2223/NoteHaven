@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { cn } from '@/lib/utils';
 import { SOURCE_LABEL, type Candidate, type TrackerType } from '@/lib/media-sources';
 import { candidateLine, READING_TRACKER_TYPES } from './picker-utils';
+import { PLATFORM_SUGGESTIONS, cleanResumeUrl, statusOptionsFor } from './types';
 
 export interface PickChoice {
   /** Add: the display name (what you typed, or edited here). */
@@ -13,6 +14,9 @@ export interface PickChoice {
   status: string;
   progress: number | null;
   useNewCover: boolean;
+  /** Add, migration 29 only: where you read/watch it, and a link back (http(s), or null). */
+  platform?: string | null;
+  resume_url?: string | null;
 }
 
 interface PickPreviewProps {
@@ -26,18 +30,20 @@ interface PickPreviewProps {
   /** Fix match: offer "Use this cover" (the current one is fine / pinned otherwise). */
   offerCover?: boolean;
   busy?: boolean;
+  /** Migration 29 is live: On Hold / Dropped, plus Platform and Resume link on add. */
+  v29?: boolean;
   onConfirm: (choice: PickChoice) => void;
 }
-
-const statusesFor = (type: TrackerType) =>
-  READING_TRACKER_TYPES.has(type) ? ['Reading', 'Plan to Read', 'Completed'] : ['Watching', 'Plan to Watch', 'Completed'];
 
 /**
  * The confirm step after picking a search result: what it is, then how you're
  * tracking it. Nothing is written until Add / Link.
  */
-export function PickPreview({ open, onOpenChange, mode, type, candidate, title, offerCover, busy, onConfirm }: PickPreviewProps) {
-  const statuses = statusesFor(type);
+export function PickPreview({ open, onOpenChange, mode, type, candidate, title, offerCover, busy, v29 = false, onConfirm }: PickPreviewProps) {
+  const statuses = statusOptionsFor(READING_TRACKER_TYPES.has(type), v29);
+  const [platform, setPlatform] = useState('');
+  const [resumeRaw, setResumeRaw] = useState('');
+  const urlBad = resumeRaw.trim() !== '' && !cleanResumeUrl(resumeRaw);
   const [status, setStatus] = useState(statuses[0]);
   const [raw, setRaw] = useState('');
   const [useNewCover, setUseNewCover] = useState(false);
@@ -48,8 +54,10 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
 
   useEffect(() => {
     if (!open) return;
-    setStatus(statusesFor(type)[0]);
+    setStatus(statusOptionsFor(READING_TRACKER_TYPES.has(type), false)[0]);
     setRaw('');
+    setPlatform('');
+    setResumeRaw('');
     setUseNewCover(false);
     setName(initialName);
   }, [open, type, candidate?.source, candidate?.source_id, initialName]);
@@ -68,6 +76,7 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
     status,
     progress: hasProgress && raw !== '' ? parseInt(raw, 10) : null,
     useNewCover,
+    ...(v29 && mode === 'add' ? { platform: platform.trim() || null, resume_url: cleanResumeUrl(resumeRaw) } : {}),
   });
 
   return (
@@ -140,6 +149,25 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
                 />
               </label>
             )}
+            {v29 && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  list="pick-platform-suggestions" value={platform} onChange={(e) => setPlatform(e.target.value.slice(0, 60))}
+                  placeholder="Platform (optional)" aria-label="Platform" autoComplete="off"
+                  className="h-11 rounded-xl border border-border bg-secondary/40 px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                <datalist id="pick-platform-suggestions">
+                  {PLATFORM_SUGGESTIONS.map((p) => <option key={p} value={p} />)}
+                </datalist>
+                <input
+                  type="url" inputMode="url" value={resumeRaw} onChange={(e) => setResumeRaw(e.target.value)}
+                  placeholder="Resume link (optional)" aria-label="Resume link" autoComplete="off"
+                  aria-invalid={urlBad || undefined} aria-describedby={urlBad ? 'pick-resume-error' : undefined}
+                  className="h-11 rounded-xl border border-border bg-secondary/40 px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+                {urlBad && <p id="pick-resume-error" className="text-xs text-destructive sm:col-span-2">Use a full link starting with http:// or https://</p>}
+              </div>
+            )}
           </div>
         )}
 
@@ -152,7 +180,7 @@ export function PickPreview({ open, onOpenChange, mode, type, candidate, title, 
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Back</Button>
-          <Button variant="gradient" onClick={confirm} disabled={busy || (editName && !name.trim())}>
+          <Button variant="gradient" onClick={confirm} disabled={busy || (editName && !name.trim()) || (mode === 'add' && urlBad)}>
             {busy ? 'Saving…' : mode === 'fix' ? 'Link' : 'Add to library'}
           </Button>
         </DialogFooter>

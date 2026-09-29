@@ -79,10 +79,10 @@ import { PickPreview, type PickChoice } from '@/components/media/PickPreview';
 import { HistoryView } from '@/components/media/HistoryView';
 import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type TrackerType } from '@/lib/media-sources';
 import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-match';
-import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned } from '@/lib/media-link';
+import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
 import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
-import { progressFieldOf, type MediaFormData } from '@/components/media/types';
+import { cleanResumeUrl, isShelved, progressFieldOf, statusOptionsFor, type MediaFormData } from '@/components/media/types';
 import { CoverArt } from '@/components/media/CoverArt';
 import {
   type MediaItem, type MediaPages, type MediaSortBy, READABLE_TYPES, WATCHABLE_TYPES, getStatusCategory,
@@ -174,6 +174,10 @@ const getStatusColor = (status: string) => {
       return 'bg-[hsl(var(--warning)/0.15)] text-warning';
     case 'Completed':
       return 'bg-muted text-muted-foreground';
+    case 'On Hold':
+      return 'bg-[hsl(var(--accent-2)/0.15)] text-accent-2';
+    case 'Dropped':
+      return 'bg-[hsl(var(--destructive)/0.15)] text-destructive';
     default:
       return 'bg-muted text-muted-foreground';
   }
@@ -476,7 +480,7 @@ const MediaTracker = () => {
     window.scrollTo(0, sectionScroll.current[section] ?? 0);
   }, [section]);
   // History only exists once migration 28 has run (hidden, not empty, before that).
-  const [v2Schema, setV2Schema] = useState({ sourceLinks: false, progressLog: false });
+  const [v2Schema, setV2Schema] = useState<MediaV2Schema>({ sourceLinks: false, progressLog: false, importLink: false });
   useEffect(() => { void detectMediaV2Schema().then(setV2Schema); }, []);
   const mediaSections = useMemo(
     () => [SECTION_LIBRARY, ...(v2Schema.progressLog ? [SECTION_HISTORY] : []), SECTION_BROWSE, SECTION_MORE],
@@ -527,7 +531,9 @@ const MediaTracker = () => {
     rating: "",
     current_season: "",
     current_episode: "",
-    current_chapter: ""
+    current_chapter: "",
+    platform: "",
+    resume_url: "",
   });
   const [isImporting, setIsImporting] = useState(false);
   const formOpenedWithRef = useRef<{ type: string; current_season: string; current_episode: string; current_chapter: string } | null>(null);
@@ -730,7 +736,8 @@ const MediaTracker = () => {
         .from('media_tracker')
         .select(cols)
         .eq('user_id', user.id)
-        .neq('status', 'Completed')
+        // Continue + Airing Soon: only titles you're following (not Completed, On Hold or Dropped).
+        .not('status', 'in', '("Completed","On Hold","Dropped")')
         // last_activity_at is null for rows untouched since migration 11a, so
         // fall back to updated_at rather than burying them.
         .order('last_activity_at', { ascending: false, nullsFirst: false })
@@ -846,30 +853,35 @@ const MediaTracker = () => {
       }
 
       const typeCounts: Record<string, number> = {};
-      // Per-type status-category breakdown: type -> { inProgress, planned, completed }.
-      const typeStatus: Record<string, { inProgress: number; planned: number; completed: number }> = {};
-      const ensure = (t: string) => (typeStatus[t] ??= { inProgress: 0, planned: 0, completed: 0 });
+      // Per-type status-category breakdown: type -> { inProgress, planned, completed, onHold, dropped }.
+      type Buckets = { inProgress: number; planned: number; completed: number; onHold: number; dropped: number };
+      const typeStatus: Record<string, Buckets> = {};
+      const ensure = (t: string) => (typeStatus[t] ??= { inProgress: 0, planned: 0, completed: 0, onHold: 0, dropped: 0 });
+      const BUCKET: Record<string, keyof Buckets> = { Active: 'inProgress', Planned: 'planned', Completed: 'completed', 'On Hold': 'onHold', Dropped: 'dropped' };
       rows.forEach((row) => {
         typeCounts[row.type] = (typeCounts[row.type] || 0) + 1;
-        const cat = getStatusCategory(row.status || 'Active'); // Active | Planned | Completed
-        const bucket = cat === 'Active' ? 'inProgress' : cat === 'Planned' ? 'planned' : 'completed';
-        ensure(row.type)[bucket] += 1;
+        // Each category its own bucket: On Hold / Dropped used to land in "completed".
+        ensure(row.type)[BUCKET[getStatusCategory(row.status || 'Active')] ?? 'inProgress'] += 1;
       });
 
       const groupCounts: Record<string, number> = { all: rows.length };
       // Global status totals (sum of per-type buckets keeps them consistent).
-      let gIn = 0, gPlan = 0, gDone = 0;
+      let gIn = 0, gPlan = 0, gDone = 0, gHold = 0, gDrop = 0;
       for (const t of Object.keys(typeCounts)) {
         const s = ensure(t);
-        gIn += s.inProgress; gPlan += s.planned; gDone += s.completed;
+        gIn += s.inProgress; gPlan += s.planned; gDone += s.completed; gHold += s.onHold; gDrop += s.dropped;
         groupCounts[`type:${t}`] = typeCounts[t];
         groupCounts[`type:${t}:inProgress`] = s.inProgress;
         groupCounts[`type:${t}:planned`] = s.planned;
         groupCounts[`type:${t}:completed`] = s.completed;
+        groupCounts[`type:${t}:onHold`] = s.onHold;
+        groupCounts[`type:${t}:dropped`] = s.dropped;
       }
       groupCounts['stat:inProgress'] = gIn;
       groupCounts['stat:planned'] = gPlan;
       groupCounts['stat:completed'] = gDone;
+      groupCounts['stat:onHold'] = gHold;
+      groupCounts['stat:dropped'] = gDrop;
 
       for (const group of customGroups) {
         let count = 0;
@@ -1088,11 +1100,10 @@ const MediaTracker = () => {
     if (selectedItems.length === 0) return [] as string[];
     const anyReadable = selectedItems.some((i) => READABLE_TYPES.includes(i.type));
     const anyWatchable = selectedItems.some((i) => !READABLE_TYPES.includes(i.type));
-    if (anyReadable && anyWatchable) return ['Completed'];
-    return anyReadable
-      ? ['Reading', 'Plan to Read', 'Completed']
-      : ['Watching', 'Plan to Watch', 'Completed'];
-  }, [selectedItems]);
+    // Completed / On Hold / Dropped fit every type; the rest are per medium.
+    if (anyReadable && anyWatchable) return statusOptionsFor(false, v2Schema.importLink).filter((s) => isShelved(s));
+    return statusOptionsFor(anyReadable, v2Schema.importLink);
+  }, [selectedItems, v2Schema.importLink]);
 
   // Changing what's on screen invalidates the selection: ids for rows no longer
   // loaded stayed in the Set, so the toolbar could say "300 selected" while a
@@ -1192,7 +1203,7 @@ const MediaTracker = () => {
   // Overview stats that react to the selected category (All vs a type/custom group).
   const currentStats = useMemo(() => {
     const gc = groupCountsData;
-    if (!gc) return { all: 0, inProgress: 0, planned: 0, completed: 0 };
+    if (!gc) return { all: 0, inProgress: 0, planned: 0, completed: 0, onHold: 0, dropped: 0 };
 
     if (activeCategory === 'all') {
       return {
@@ -1200,6 +1211,8 @@ const MediaTracker = () => {
         inProgress: gc['stat:inProgress'] || 0,
         planned: gc['stat:planned'] || 0,
         completed: gc['stat:completed'] || 0,
+        onHold: gc['stat:onHold'] || 0,
+        dropped: gc['stat:dropped'] || 0,
       };
     }
 
@@ -1207,14 +1220,16 @@ const MediaTracker = () => {
       ? [typeOf(activeCategory)]
       : (customGroups.find((g) => g.id === activeCategory)?.types ?? []);
 
-    let all = 0, inProgress = 0, planned = 0, completed = 0;
+    let all = 0, inProgress = 0, planned = 0, completed = 0, onHold = 0, dropped = 0;
     for (const t of types) {
       all += gc[`type:${t}`] || 0;
       inProgress += gc[`type:${t}:inProgress`] || 0;
       planned += gc[`type:${t}:planned`] || 0;
       completed += gc[`type:${t}:completed`] || 0;
+      onHold += gc[`type:${t}:onHold`] || 0;
+      dropped += gc[`type:${t}:dropped`] || 0;
     }
-    return { all, inProgress, planned, completed };
+    return { all, inProgress, planned, completed, onHold, dropped };
   }, [groupCountsData, activeCategory, customGroups]);
 
 
@@ -1547,7 +1562,8 @@ const MediaTracker = () => {
         byType.set(item.type, list);
       });
 
-      const STATUS_ORDER = ['Active', 'Planned', 'Completed', 'Other'];
+      // Every category, or its titles silently drop out of the export (On Hold / Dropped: migration 29).
+      const STATUS_ORDER = ['Active', 'Planned', 'On Hold', 'Completed', 'Dropped', 'Other'];
       const out: string[] = [
         'NOTEHAVEN — MEDIA LIBRARY',
         `Exported ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })} · ${items.length} titles`,
@@ -1628,7 +1644,16 @@ const MediaTracker = () => {
         current_episode?: number | null;
         current_chapter?: number | null;
         last_activity_at?: string;
+        platform?: string | null;
+        resume_url?: string | null;
       } = { title: mediaData.title, type: mediaData.type, status: mediaData.status, rating: mediaData.rating };
+      // Migration 29 surfaces: the form only shows these fields once it's live.
+      if (v2Schema.importLink) {
+        const url = cleanResumeUrl(formData.resume_url);
+        if (formData.resume_url.trim() && !url) throw new Error('Resume link must be a full http:// or https:// address');
+        payload.platform = formData.platform.trim() || null;
+        payload.resume_url = url;
+      }
       let progressChanged = false;
       for (const f of ['current_season', 'current_episode', 'current_chapter'] as const) {
         if (typeChanged || !opened || formData[f] !== opened[f]) {
@@ -1775,6 +1800,8 @@ const MediaTracker = () => {
         current_season: item.current_season?.toString() || "",
         current_episode: item.current_episode?.toString() || "",
         current_chapter: item.current_chapter?.toString() || "",
+        platform: item.platform ?? "",
+        resume_url: item.resume_url ?? "",
       };
       setFormData(opened);
       editSnapshotRef.current = JSON.stringify(opened);
@@ -1951,7 +1978,9 @@ const MediaTracker = () => {
     const q = searchTerm.trim();
     const statusLabel = filterStatus === 'Active' ? 'in-progress'
       : filterStatus === 'Planned' ? 'planned'
-      : filterStatus === 'Completed' ? 'completed' : '';
+      : filterStatus === 'Completed' ? 'completed'
+      : filterStatus === 'On Hold' ? 'on-hold'
+      : filterStatus === 'Dropped' ? 'dropped' : '';
     return [
       activeCategory === 'all' && filterStatus === 'All' && !q ? 'all' : '',
       String(n),
@@ -2070,6 +2099,9 @@ const MediaTracker = () => {
         current_episode: watching ? choice.progress : null,
         current_season: watching ? 1 : null,
         cover_image: c?.cover && isUsableCover(c.cover, p.type) ? c.cover : null,
+        // Only present when migration 29 is live (PickPreview shows the fields then).
+        ...(choice.platform !== undefined ? { platform: choice.platform } : {}),
+        ...(choice.resume_url !== undefined ? { resume_url: choice.resume_url } : {}),
       }]).select('id').single();
       if (error || !created) throw error ?? new Error('Could not add');
       let linkNote = '';
@@ -2480,6 +2512,7 @@ const MediaTracker = () => {
             title={pick?.title ?? ''}
             offerCover={!!pick?.forItem && !pick.forItem.cover_pinned}
             busy={pickBusy}
+            v29={v2Schema.importLink}
             onConfirm={(choice) => { if (pick) void confirmPick(pick, choice); }}
           />
           <Dialog open={!!fixFor} onOpenChange={(o) => { if (!o) setFixFor(null); }}>
@@ -2863,7 +2896,12 @@ const MediaTracker = () => {
                     { label: 'In progress', value: currentStats.inProgress, status: 'Active', dot: 'bg-success' },
                     { label: 'Planned', value: currentStats.planned, status: 'Planned', dot: 'bg-warning' },
                     { label: 'Completed', value: currentStats.completed, status: 'Completed', dot: 'bg-muted-foreground' },
-                  ] as const).map((s) => {
+                    // Migration 29: shown once there's something in them (or it's the active filter).
+                    ...(v2Schema.importLink ? [
+                      { label: 'On Hold', value: currentStats.onHold, status: 'On Hold', dot: 'bg-accent-2' },
+                      { label: 'Dropped', value: currentStats.dropped, status: 'Dropped', dot: 'bg-destructive' },
+                    ] : []).filter((p) => p.value > 0 || filterStatus === p.status),
+                  ]).map((s) => {
                     const active = filterStatus === s.status;
                     return (
                       <button
@@ -3254,6 +3292,7 @@ const MediaTracker = () => {
               onToggleWatched={toggleWatched}
               detail={sourceDetail ?? null}
               onFixMatch={v2Schema.sourceLinks ? (i) => setFixFor(i) : undefined}
+              v29={v2Schema.importLink}
               log={logProps}
             />
           )}
@@ -3265,6 +3304,7 @@ const MediaTracker = () => {
               tags={editingItemTags}
               availableTags={availableTags}
               onTagsChange={setEditingItemTags}
+              v29={v2Schema.importLink}
             />
           )}
         </MediaDetailPanel>

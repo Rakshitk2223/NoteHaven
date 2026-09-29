@@ -43,6 +43,8 @@ export const STATUS_DOT: Record<string, string> = {
   Completed: 'bg-muted-foreground',
   'Plan to Watch': 'bg-warning',
   'Plan to Read': 'bg-warning',
+  'On Hold': 'bg-accent-2',
+  Dropped: 'bg-destructive',
 };
 
 // Deterministic gradient palette for the letter fallback so a wall of cover-less items
