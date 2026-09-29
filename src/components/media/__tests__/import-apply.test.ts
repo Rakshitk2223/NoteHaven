@@ -236,4 +236,28 @@ describe('applyImport', () => {
     expect(r).toMatchObject({ updated: 1, failed: 0, mapNotSaved: 1 });
     expect(tracker.get(1)!.current_chapter).toBe(20);
   });
+
+  it('the fixture’s latest-only title lands in its group, and applying it writes only the latest (+ its stamps / platform-if-empty)', async () => {
+    const initSqlJs = (await import('sql.js')).default;
+    const { parseBackupBytes } = await import('@/lib/tachimanga/parse-core');
+    const { buildFixtureTmb } = await import('@/lib/tachimanga/__fixtures__/make-fixture');
+    const { planImport } = await import('@/lib/tachimanga/plan');
+    const parsed = await parseBackupBytes(await buildFixtureTmb({ variant: 'extra' }), (await initSqlJs()) as never);
+    if ('error' in parsed) throw new Error(parsed.error.code);
+    const s1 = snap(1, { title: '[audit] Equal Progress', current_chapter: 20, cover_image: 'https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx2.jpg' });
+    put(s1);
+    const p = planImport(parsed.backup.titles, [s1], [], { now: '2026-09-29T12:00:00.000Z' });
+    expect((p.latestOnly ?? []).map((r) => r.media_id)).toEqual([1]);
+
+    const off = initialSelection(p);
+    off.latest.delete(1); // unticked: nothing at all is written
+    expect((await applyImport(p, off, [s1])).updated).toBe(0);
+    expect(journal).toHaveLength(0);
+
+    const r = await applyImport(p, initialSelection(p), [s1]);
+    expect(r.updated).toBe(1);
+    expect(tracker.get(1)).toMatchObject({ current_chapter: 20, status: 'Reading', reader_latest_chapter: 25 });
+    const allowed = new Set(['reader_latest_chapter', 'reader_checked_at', 'last_activity_at', 'platform']);
+    expect(Object.keys(journal[0].after as Row).every((k) => allowed.has(k))).toBe(true);
+  });
 });

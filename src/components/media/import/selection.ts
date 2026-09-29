@@ -13,6 +13,10 @@ export interface ImportSelection {
   status: Set<number>;
   /** media_id → apply the cover proposal. */
   cover: Set<number>;
+  /** "New chapters out" rows (plan.latestOnly) he's leaving ticked (all, by default). */
+  latest: Set<number>;
+  /** Which rows ARE in that group (it has no tick flag of its own on the row). */
+  latestGroup: Set<number>;
   /** reader origin_key → the row he picked for an uncertain match (absent = Skip). */
   matches: Map<string, number>;
   /** reader origin_key → add as a new title of this type (absent = don't add; a tick needs a type). */
@@ -20,7 +24,8 @@ export interface ImportSelection {
 }
 
 /** Every matched row, whatever group it's in. */
-export const matchedRows = (plan: ImportPlan): PlanRow[] => [...plan.forward, ...plan.same, ...plan.noteHavenAhead];
+export const matchedRows = (plan: ImportPlan): PlanRow[] =>
+  [...plan.forward, ...plan.same, ...(plan.latestOnly ?? []), ...plan.noteHavenAhead];
 
 /** The planner's defaults, unchanged: forward progress, ticked statuses and covers. Everything else off. */
 export function initialSelection(plan: ImportPlan): ImportSelection {
@@ -32,7 +37,8 @@ export function initialSelection(plan: ImportPlan): ImportSelection {
     if (r.status?.ticked && !r.status.conflict) status.add(r.media_id);
     if (r.cover?.ticked) cover.add(r.media_id);
   }
-  return { progress, status, cover, matches: new Map(), adds: new Map() };
+  const latestGroup = new Set((plan.latestOnly ?? []).map((r) => r.media_id));
+  return { progress, status, cover, latest: new Set(latestGroup), latestGroup, matches: new Map(), adds: new Map() };
 }
 
 export const toggled = <T,>(set: Set<T>, key: T, on: boolean): Set<T> => {
@@ -60,7 +66,8 @@ export function withTicks(r: PlanRow, sel: ImportSelection): PlanRow {
 }
 
 /** Apply writes this row at all: the planner's one rule, with his current ticks. */
-export const rowApplies = (r: PlanRow, sel: ImportSelection): boolean => rowWrites(withTicks(r, sel));
+export const rowApplies = (r: PlanRow, sel: ImportSelection): boolean =>
+  sel.latestGroup.has(r.media_id) && !sel.latest.has(r.media_id) ? false : rowWrites(withTicks(r, sel));
 
 /** How many rows apply would touch, for the Approve button. */
 export function selectedCount(plan: ImportPlan, sel: ImportSelection): number {
@@ -86,6 +93,8 @@ export function withPicks(finalPlan: ImportPlan, prev: ImportSelection, pickedKe
     progress: merge(prev.progress, init.progress),
     status: merge(prev.status, init.status),
     cover: merge(prev.cover, init.cover),
+    latest: merge(new Set([...prev.latest].filter((id) => init.latestGroup.has(id))), init.latest),
+    latestGroup: init.latestGroup,
     matches: new Map(),
     adds: new Map(prev.adds),
   };

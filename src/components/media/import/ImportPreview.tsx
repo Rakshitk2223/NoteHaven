@@ -27,7 +27,16 @@ const COVER_REASON: Record<string, string> = {
 };
 const ch = (n: number | null) => (n == null ? '—' : `Ch ${Number.isInteger(n) ? n : n.toFixed(1)}`);
 
-function Section({ title, count, hint, action, children }: { title: string; count: number; hint?: string; action?: ReactNode; children: ReactNode }) {
+function Section({ title, count, hint, action, collapsible, children }: {
+  title: string; count: number; hint?: string; action?: ReactNode;
+  /** Starts collapsed on phones (a long, low-stakes list); the count stays in view. */
+  collapsible?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(() => {
+    if (!collapsible) return true;
+    try { return window.matchMedia('(min-width: 768px)').matches; } catch { return true; }
+  });
   if (count === 0) return null;
   return (
     <section aria-label={title} className="space-y-2">
@@ -36,9 +45,17 @@ function Section({ title, count, hint, action, children }: { title: string; coun
           <h3 className="text-sm font-semibold text-foreground">{title} <span className="tabular-nums text-muted-foreground">· {count}</span></h3>
           {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
         </div>
-        {action}
+        <div className="flex flex-shrink-0 items-center gap-1">
+          {open && action}
+          {collapsible && (
+            <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+              className="min-h-11 rounded-lg px-3 text-xs font-semibold text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              {open ? 'Hide' : 'Show'}
+            </button>
+          )}
+        </div>
       </div>
-      <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border bg-card/60">{children}</div>
+      {open && <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border bg-card/60">{children}</div>}
     </section>
   );
 }
@@ -136,6 +153,21 @@ export function ImportPreview({ plan, sel, onSel, currentCovers, showNsfw, onSho
               {r.status!.from ?? 'No status'} → <span className="font-semibold text-foreground">{r.status!.to}</span>
               {r.status!.reason === 'started' ? ' · you started it' : r.status!.category ? ` · from “${r.status!.category}”` : ''}
               {r.status!.conflict && <span className="font-medium text-warning"> · your categories disagree</span>}
+            </span>
+          </TickRow>
+        ))}
+      </Section>
+
+      <Section title="Latest chapter known" count={(plan.latestOnly ?? []).length} collapsible
+        hint="Your progress stays; NoteHaven learns how far the series has got."
+        action={<AllToggle ids={(plan.latestOnly ?? []).map((r) => r.media_id)} set={sel.latest} onSet={(latest) => onSel({ ...sel, latest })} />}>
+        {(plan.latestOnly ?? []).map((r) => (
+          <TickRow key={r.media_id} label={`Record the latest chapter for ${r.title}`} checked={sel.latest.has(r.media_id)}
+            onChange={(v) => onSel({ ...sel, latest: toggled(sel.latest, r.media_id, v) })}>
+            <span className="block truncate text-sm font-medium text-foreground">{r.title}</span>
+            <span className="block text-xs tabular-nums text-muted-foreground">
+              {r.latest ? <>Latest {ch(r.latest.from)} → <span className="font-semibold text-foreground">{ch(r.latest.to)}</span></> : null}
+              {r.auto.platform ? <>{r.latest ? ' · ' : ''}platform “{r.auto.platform}”</> : null}
             </span>
           </TickRow>
         ))}

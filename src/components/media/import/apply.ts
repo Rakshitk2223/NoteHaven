@@ -219,7 +219,8 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
       // Journal whatever landed, even when a later part of the row failed.
       if (res.entry) { entries.push(res.entry); if (!res.error) out.updated += 1; }
       if (res.error) { console.error('Import failed for one row:', res.error); out.failed += 1; }
-      else mapWrites.push(...r.map);
+      // Map keys only with a row that actually wrote (never map-only).
+      else if (res.entry) mapWrites.push(...r.map);
     }
     if (!(await flush(entries))) return out;
   }
