@@ -94,6 +94,16 @@ describe('linkEntry', () => {
     expect(rows.get(1)!.cover_image).toBe(ANIME_COVER);
   });
 
+  it('keepCover leaves the cover alone, even a missing or wrong-medium one, and still links', async () => {
+    rows.set(1, baseRow({ cover_image: ANIME_COVER }));
+    const r = await linkEntry(1, candidate, { keepCover: true, useNewCover: true });
+    expect(r.ok && r.coverChanged).toBe(false);
+    expect(rows.get(1)).toMatchObject({ cover_image: ANIME_COVER, link_status: 'linked', source_id: '105398' });
+    rows.set(2, baseRow({ id: 2 }));
+    await linkEntry(2, candidate, { keepCover: true, isNew: true });
+    expect(rows.get(2)!.cover_image).toBeNull();
+  });
+
   it('never saves a wrong-medium source cover', async () => {
     rows.set(1, baseRow());
     detailMock.mockResolvedValue(detail({ cover: ANIME_COVER }));
@@ -114,6 +124,19 @@ describe('refreshLinked', () => {
     expect(r1.ok && r1.latestGrew).toBe(true);    // 190 → 201 the first time
     expect(r2.ok && r2.latestGrew).toBe(false);   // nothing new the second time
     expect(a.latest_changed_at).toBe(b.latest_changed_at);
+  });
+
+  it('never LOWERS a stored latest when the source drops (review §B.9)', async () => {
+    rows.set(1, baseRow({ link_status: 'linked', source: 'anilist', source_id: '105398', last_known_latest_chapter: 210, latest_changed_at: '2026-09-01T00:00:00.000Z' }));
+    const r = await refreshLinked(1); // the source now says 201
+    expect(rows.get(1)).toMatchObject({ last_known_latest_chapter: 210, latest_changed_at: '2026-09-01T00:00:00.000Z' });
+    expect(r.ok && r.latestGrew).toBe(false);
+    expect(r.ok && r.latestChanged).toBe(false);
+    // …but an unknown latest is still filled, as a baseline (no "update" stamp).
+    rows.set(2, baseRow({ id: 2, link_status: 'linked', source: 'anilist', source_id: '105398' }));
+    const r2 = await refreshLinked(2);
+    expect(rows.get(2)).toMatchObject({ last_known_latest_chapter: 201, latest_changed_at: null });
+    expect(r2.ok && r2.latestChanged).toBe(true);
   });
 
   it('never touches the cover or user fields, and refuses unlinked entries', async () => {

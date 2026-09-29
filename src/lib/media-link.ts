@@ -147,11 +147,13 @@ const coverOf = (detail: SourceDetail | null, candidate?: Candidate | null): str
  * Bind an entry to a source work. Writes link fields, fetches detail by id
  * (which also caches it in media_source_meta), mirrors the latest chapter, and
  * applies the cover rules. `isNew`: the entry was just created by the picker.
+ * `keepCover`: leave the cover exactly as it is, whatever the rules would do
+ * (e.g. he unticked "use the source cover" in the Link-your-library queue).
  */
 export async function linkEntry(
   trackerId: number,
   candidate: Candidate,
-  opts: { useNewCover?: boolean; isNew?: boolean } = {},
+  opts: { useNewCover?: boolean; isNew?: boolean; keepCover?: boolean } = {},
 ): Promise<LinkOutcome<{ detail: SourceDetail | null; coverChanged: boolean }>> {
   const before = await readLinkRow(trackerId);
   if (typeof before === 'string') return { ok: false, reason: before };
@@ -176,7 +178,7 @@ export async function linkEntry(
   // Cover rules (see header).
   const newCover = coverOf(detail, candidate);
   let coverChanged = false;
-  if (!before.cover_pinned && newCover && isUsableCover(newCover, type) && newCover !== before.cover_image) {
+  if (!opts.keepCover && !before.cover_pinned && newCover && isUsableCover(newCover, type) && newCover !== before.cover_image) {
     const currentBad = !before.cover_image || !isUsableCover(before.cover_image, type);
     if (opts.useNewCover || opts.isNew || currentBad) {
       patch.cover_image = newCover;
@@ -242,13 +244,16 @@ export async function refreshLinked(
   const latest = detail.latest_chapter ?? null;
   const prev = before.last_known_latest_chapter;
   const latestGrew = latest != null && prev != null && latest > prev;
-  if (latest != null && latest !== prev) patch.last_known_latest_chapter = latest;
+  // Never LOWER a stored latest when a source drops (review §B.9): a latest
+  // only fills an unknown or grows. A source that forgets chapters can't
+  // shrink "N behind".
+  if (latest != null && (prev == null || latest > prev)) patch.last_known_latest_chapter = latest;
   if (latestGrew) patch.latest_changed_at = now;
   patch.latest_checked_at = now;
 
   const res = await writeWithUndo(trackerId, before, patch);
   if (res.ok === false) return res;
-  return { ...res, detail, latestGrew, latestChanged: latest != null && latest !== prev };
+  return { ...res, detail, latestGrew, latestChanged: patch.last_known_latest_chapter !== undefined };
 }
 
 type MetaRow = Tables<'media_source_meta'>;
