@@ -30,7 +30,26 @@ gesture.
   delete or bulk-overwrite user rows; take a fresh backup before any bulk linking write.
 - Keep his existing-cover guard until linking ships; after that, "pinned" replaces it.
 - Extend the existing Aurora tokens and components; no second design system.
-- The iOS reader app is parked (out of scope).
+- The iOS reader app stays out of scope. **Importing Tachimanga backups is in scope** (unit U2b, below).
+
+## Decided 2026-09-29 (Rakshit, after the coherence review; don't re-ask)
+1. **Import before linking.** The Tachimanga import (U2b) ships before "Link your library" (U3).
+2. **N behind = the higher of the two latests,** and both are shown: the source's
+   (`last_known_latest_chapter`) and the reader's (`reader_latest_chapter`, from the import). For
+   example, "120 out · 118 on <source>".
+3. **Source art is the default cover for linked reading titles.** The Tachimanga thumbnail is the
+   fallback (see the cover priority below).
+4. **Covers are copied into Storage only if thumbnails fail to load** directly. The U2b preview
+   measures this first, so E2 / migration 30 may never happen.
+5. **Refresh Library and Sync activity are removed in U4.** First, `release_date` (their only writer)
+   moves into the library-update pass.
+6. **"Set back" is a per-row tick in the import preview, off by default.** Without it the import only
+   moves progress forward.
+7. **The import sets `platform` only when it's empty**, and never writes `resume_url`.
+
+Butler overrides recorded with the review: keep the edge function's merge-upsert into `media_metadata`
+(`e6916aa`) until U4 retires the legacy path, because deleting it now would re-search every unlinked
+title on every visit.
 
 ## Prerequisite: land fix batch 1 + 1c (his hands, then /ship). Media v2 edits start after the ship, so commits stay separable.
 1. Paste SQL 24 → 25 → 26 → 27 in the Supabase SQL editor.
@@ -92,7 +111,11 @@ Reuse the existing per-source fetchers, the `SOURCE_SPACING_MS` pacing, `corsFor
   `nextProgress` and the mappers' normalization. Hook it into `.github/workflows/ci.yml` (`test:insights`
   already runs there).
 
-## Phases (each: build → tsc/lint/build/Vitest → UX browser check at 390 + 1440 with `[audit]` rows → his redeploy/SQL → ship)
+## Phases as first planned (2026-09-28; each: build → tsc/lint/build/Vitest → UX browser check at 390 + 1440 with `[audit]` rows → his redeploy/SQL → ship)
+> **History.** Phase 1 below is what was built on `media-v2`. Phases 2 and 3 are **superseded** by the
+> U0 → U6 roadmap in "Re-cut 2026-09-29" further down. They're kept here as the record of the original
+> intent.
+
 **Phase 1: link, fetch by id, and log fast** (nav: Library · History · Browse · More)
 - **Add = search-and-pick sheet** (one flow; replaces Quick Add and the empty-state form). Type the title,
   get live candidates grouped by source (cover, title, alt title, author, year, "Ch 140 · ongoing" / "12
@@ -134,6 +157,107 @@ Reuse the existing per-source fetchers, the `SOURCE_SPACING_MS` pacing, `corsFor
   `hooks/media/{useMediaLibrary,useMediaMutations,useMediaMetadata,useMediaFilters}`,
   `components/media/{ProgressControl,MediaDetailSheet/*,SourcePicker,LogSheet,MediaActionsMenu}`,
   following the seams in the frontend report's Media deep-dive.
+
+## Re-cut 2026-09-29: one writer per field (from the coherence review)
+The five Media features do three jobs: **what you did** (progress: the manual Log plus the Tachimanga
+import), **what the work is** (identity and metadata: the source link) and **what it looks like** (the
+cover). Before this review each job had 2–5 writers with different rules. The fix is one writer per
+field, one review component (a shared `ReviewCard` for Fix match, the Phase 2 queue and the Tachimanga
+preview), one undo journal, and deleting the legacy title-guessing paths in named units.
+
+The Tachimanga import replaces **logging**, not linking. The backup carries no source ids, so the order
+is import (U2b) → link (U3) → re-upload.
+
+### A. Who may write each field
+| Field | Writers (priority) | Never | On disagreement |
+|---|---|---|---|
+| Progress | 1 Log / Edit (either direction); 2 Tachimanga apply (forward only, compare-and-swap against the preview snapshot, after approval); restore creates new rows only | refresh, link, Sync activity, scripts | the higher value stays (reader 40 vs NoteHaven 52 → 52); a "NoteHaven ahead" group with a per-row "Set back" tick, off by default |
+| `last_activity_at` | progress writes; the import sets max(current, reader last-read) | cover writes (they bump it today; U0 stops that) | — |
+| Latest / N behind | source `last_known_latest_chapter` (`linkEntry` / `refreshLinked`); reader `reader_latest_chapter` (the import only) | legacy `media_metadata.chapters` | read the max; the Log sheet shows both; stamp `latest_changed_at` when the max grows |
+| Cover | see D | refresh-by-id, the display-time search, scripts | a pin always wins; automatic writes only fill a missing or suspect cover |
+| Synopsis, genres, status, totals | the edge function → `media_source_meta` only | the client, the import (reader metadata is never stored) | linked: the source wins and legacy fills blanks; unlinked: legacy, frozen |
+| Identity (`source`, `source_id`, `alt_ids`) | Browse add, Fix match, Phase 2 approve, unlink | refresh, import, restore | the reader's identity lives in `media_import_map`, never in `alt_ids` (`linkEntry` overwrites those) |
+| `platform`, `resume_url` | the Edit form; the import fills `platform` only when empty | everything else | typed values are never overwritten |
+
+**Restore is not an undo:** it inserts new rows, so it duplicates `media_tracker`. The backup is the
+disaster floor; `media_bulk_journal` is the undo.
+
+### D. Covers
+- **One writer:** `setCover(id, url, origin)`, with the pin guard inside the UPDATE, a journal row and
+  `cover_origin`. **One judge:** `coverVerdict(url, type, origin)` in `lib/cover-medium.ts` (ok /
+  wrong-medium / blocked / unverified). It runs at write time, in the review counts and in `audit:covers`.
+- **Priority:**
+  1. His own pick or pin ("Change cover…" pins).
+  2. The linked source's cover.
+  3. The Tachimanga thumbnail, kept in `media_import_map`. A re-upload fixes a dead URL.
+  4. The existing legacy cover, if `coverVerdict` passes it.
+  5. The letter tile.
+- **Web search is never automatic** (it made the wrong covers the audit counted). Its results appear only
+  as options in "Change cover…".
+- **Display:** `cover_image` → the linked source's cover → the letter tile. The display-time search is cut
+  in U4.
+- **Storage copy (E2):** measure first. The U2b preview test-loads thumbnails (no-referrer). Only if fewer
+  than about 95% load: `cover_copy` with SSRF guards (https only, no IP literals, `image/*` ≤ 2 MB, at most
+  2 redirects, the caller must own the `media_id`, a daily cap, content-hashed keys).
+
+### E. One entry point per job
+| Job | The one place |
+|---|---|
+| Log progress | the Log sheet |
+| Add a title | Browse |
+| Sync from Tachimanga | More → Import… (`.tmb`) → full-screen preview |
+| Link the library | More → Link your library, plus a header pill while it runs |
+| Pick matches | header chip "Needs a pick · N" |
+| Fix identity | detail ⋮ → Fix match |
+| Fix a cover | detail ⋮ → Change cover… / Pin / Remove |
+| Fresh metadata / latest | automatic, plus pull-to-refresh on Updates |
+| New chapters | the Updates tab (U4) |
+| History | the History tab (import rows labelled) |
+| Undo a bulk change | its toast, plus More → Undo last bulk change |
+| Backup | Settings → Data (bulk dialogs run the export inline first) |
+
+**Removal list** (each goes in the unit named; nothing runs in parallel with its replacement):
+- **U0 / E1:** `resolveBatch` and the edge `resolve` action (unused).
+- **U2b:** the "Import JSON" row becomes one "Import…" row that detects `.json` vs `.tmb`.
+- **U4:** Refresh Library, `RefreshActivityContext`, Settings → Sync activity, the "New seasons" filter and
+  dot (`has_new_content` stops being read), the display-time cover search, `backfill-media-metadata`.
+- **U5:** Refresh cover (the slot machine), bulk refresh covers, `media-refresh.ts`, the legacy
+  `removeCoverImage`, `backfill-cover-images`.
+
+### F. Migration `29` (one paste, idempotent)
+1. `media_link_proposals` (no `applied` or `batch_id` columns).
+2. `media_import_map` (`user_id`, `origin`, `origin_key` = sha256 of `source:url`, `media_id` FK cascade,
+   `reader_cover`, `last_seen_at`; PK `user_id + origin + origin_key`).
+3. `media_bulk_journal` (`id`, `user_id`, `batch_id` uuid, `kind` link | import | cover, `media_id` FK
+   cascade, `before` jsonb, `after` jsonb, `created_at`, `undone_at`).
+4. `media_tracker` ADD `reader_latest_chapter` numeric, `reader_checked_at` timestamptz, `cover_origin` text.
+5. `media_progress_log` ADD `origin` text.
+6. The `status` CHECK gains `'Dropped'` and `'On Hold'`, guarded. This is the only change that isn't an ADD.
+7. RLS: own rows, plus an EXISTS check that the tracker row is the caller's. The journal allows UPDATE of
+   `undone_at` only.
+
+**Not in 29:** reader titles or metadata, `media_metadata` changes, dropped columns, writes of
+`link_status = 'review'`, triggers, pg_cron, or a Storage bucket (that would be 30, with E2, only if
+needed).
+**Same unit as 29:**
+- Tables 1–3 go into `EXPORT_TABLES` and `backup-media` `TABLES`.
+- Restore remaps `media_import_map` by `media_id` and drops unmapped rows. Proposals and the journal are
+  never restored.
+- `types.ts` is updated.
+
+**Edge:** E1 ships with the Phase 1 deploy (the v2 actions, minus `resolve`). The import, the linking and
+the library update need **no** deploy. E2 only if needed.
+
+### G. Roadmap U0 → U6
+| Unit | Contents | Removes | Depends on | Size |
+|---|---|---|---|---|
+| **U0** Phase 1 ship, now | the Phase 1 fixes; the gate at 390 / 820 / 1180 / 1440; pin guards on the 3 legacy cover writers (bulk refresh, `refreshCoverImage`, Sync activity retry); Sync activity "Remove" uses `setCoverPinned`; cover writes stop bumping `last_activity_at`; the Behind filter uses `behindCount`; E1; merge | `resolveBatch`, edge `resolve` | his deploy | S–M |
+| **U2a** statuses and fields | paste 29; Dropped / On Hold in filters, rails and badge suppression (**before any badge lights up**); `platform` + `resume_url` in Edit and PickPreview | — | 29 | S |
+| **U2b** Tachimanga import | a Worker + sql.js; the matcher (import map → title → linked alt titles, reading rows only; a new title's type is a required pick); the preview; apply through a compare-and-swap lib extracted from `useProgressMutation`; History `origin`; the reader latest in the badge and sort; the backup gate; journal Undo; a fixture + Vitest | the "Import JSON" row | U2a, sql.js | L |
+| **U3** Link your library | the resolver, proposals, one-tap auto band, the `ReviewCard` queue (watch types and unmapped reading rows first), duplicates, suspect covers → the source cover via `setCover`; grid, rails, genres and sorts read `media_source_meta` for linked rows (legacy becomes a read-only fallback) | — | U2b | L |
+| **U4** library update + Updates | paced `refreshLinked` on open and on pull; `release_date` moves here; episode latest for watch types (anime from TMDB / TVmaze seasons, since AniList splits seasons); the Updates feed (it needs two observations); one `latestOf(item, meta)` for badge, filter, sort, clamp and Updates | Refresh Library, Sync activity, `has_new_content` reads, the display-time search, the `media_metadata` merge-upsert | U3 | L |
+| **U5** covers | `setCover` everywhere, `coverVerdict`, the "Change cover…" picker, "Wrong covers · N"; E2 only if needed | the slot machine, bulk refresh, the legacy remove, the cover backfill | U3 (+ U2b) | M |
+| **U6** rest of Phase 3 | hold-to-repeat, season picker, "Caught up", Mac hover +1 | — | U4 | M |
 
 ## Visual direction: A · Mihon Library (Rakshit, 2026-09-28; demo https://claude.ai/artifact/CYGnLNArE56iqP2wVwRGBL)
 Dense cover grid, a behind-count badge in Mihon's unread spot, Library / Updates / History / Browse /
