@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, laz
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Download, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ArrowDownUp, Library, Clock, Compass } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Download, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ArrowDownUp, Library, Clock, Compass, Sparkles } from "lucide-react";
 import { ToastAction } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,6 +83,7 @@ import { latestUndoableBatch, undoBatch, type BulkKind } from '@/lib/media-bulk'
 import { IMPORT_ACCEPT, sniffFile } from '@/components/media/import/sniff';
 import { useLinkRun } from '@/components/media/link/useLinkRun';
 import { LinkBar } from '@/components/media/link/LinkBar';
+import { UpdatesView } from '@/components/media/UpdatesView';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { SOURCE_META_SLIM, detectMediaV2Schema, linkEntry, readSourceMeta, readSourceMetaBatch, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
 import { buildMetaIndex, detailToMeta, mergeMeta } from '@/components/media/source-meta';
@@ -95,9 +96,10 @@ import {
 } from '@/components/media/types';
 import { useMediaLibrary } from '@/hooks/media/useMediaLibrary';
 
-type MediaSectionId = 'library' | 'history' | 'browse' | 'more';
+type MediaSectionId = 'library' | 'updates' | 'history' | 'browse' | 'more';
 // Icons already in the app-wide icons chunk — new glyphs would grow first paint.
 const SECTION_LIBRARY: MediaSection<MediaSectionId> = { id: 'library', label: 'Library', icon: Library };
+const SECTION_UPDATES: MediaSection<MediaSectionId> = { id: 'updates', label: 'Updates', icon: Sparkles };
 const SECTION_HISTORY: MediaSection<MediaSectionId> = { id: 'history', label: 'History', icon: Clock };
 const SECTION_BROWSE: MediaSection<MediaSectionId> = { id: 'browse', label: 'Browse', icon: Compass };
 const SECTION_MORE: MediaSection<MediaSectionId> = { id: 'more', label: 'More', icon: MoreVertical };
@@ -496,8 +498,9 @@ const MediaTracker = () => {
   const [v2Schema, setV2Schema] = useState<MediaV2Schema>({ sourceLinks: false, progressLog: false, importLink: false });
   useEffect(() => { void detectMediaV2Schema().then(setV2Schema); }, []);
   const mediaSections = useMemo(
-    () => [SECTION_LIBRARY, ...(v2Schema.progressLog ? [SECTION_HISTORY] : []), SECTION_BROWSE, SECTION_MORE],
-    [v2Schema.progressLog],
+    // Updates only once its data can exist (migration 29's latest columns): NO HOLES rule 2.
+    () => [SECTION_LIBRARY, ...(v2Schema.importLink ? [SECTION_UPDATES] : []), ...(v2Schema.progressLog ? [SECTION_HISTORY] : []), SECTION_BROWSE, SECTION_MORE],
+    [v2Schema.progressLog, v2Schema.importLink],
   );
   const pickerWide = useMediaQuery('(min-width: 1280px)');
   const tabletUp = useMediaQuery('(min-width: 768px)');
@@ -2083,6 +2086,18 @@ const MediaTracker = () => {
     staleTime: 30 * 1000,
     queryFn: latestUndoableBatch,
   });
+  // The library keeps itself up to date: one paced pass per Media open (the engine
+  // throttles each title to once per 6 h and shares the source lock with linking).
+  useEffect(() => {
+    if (!v2Schema.importLink) return;
+    let cancelled = false;
+    void import('@/lib/media-update').then(({ getUpdater }) => getUpdater().run()).then((p) => {
+      if (cancelled || !p || p.grew === 0) return;
+      for (const key of ['mediaItems', 'mediaRails', 'mediaUpdates']) void queryClient.invalidateQueries({ queryKey: [key] });
+    }).catch((e) => console.warn('Library update pass failed:', e));
+    return () => { cancelled = true; };
+  }, [v2Schema.importLink, queryClient]);
+
   // "Link your library" (migration 29): the resolver run, its pill and the review queue.
   const linkRun = useLinkRun(v2Schema.importLink);
   const [queueOpen, setQueueOpen] = useState(false);
@@ -2934,6 +2949,7 @@ const MediaTracker = () => {
                 />
               </div>
             )}
+            {section === 'updates' && v2Schema.importLink && <UpdatesView onOpen={(id) => { void openById(id); }} />}
             {section === 'history' && v2Schema.progressLog && (
               <HistoryView onOpen={(id) => { void openById(id); }} />
             )}
