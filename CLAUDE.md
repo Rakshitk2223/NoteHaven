@@ -60,7 +60,8 @@ caches (`EDGE_CACHE_WRITES=0`; opt in with `EDGE_DEV_CACHE_WRITES=1`). Writes ma
 (progress, links, History) are real production writes. Behind the office proxy, start it with
 `DENO_TLS_CA_STORE=mozilla,system`.
 
-Maintenance scripts (`backfill:*`, `backup:media`, `audit:coverage`, `smoke:apis`) are described in `README.md`.
+Maintenance scripts (`backfill:*`, `backup:*`, `audit:*`, `smoke:apis`, and the synthetic Tachimanga
+fixture generator `npx tsx scripts/make-tachimanga-fixture.ts`) are described in `README.md`.
 
 **Done means** `npm run build`, `npm run lint` (zero errors), `npm test` and `npm run test:insights` all pass —
 what CI runs (`.github/workflows/ci.yml`, GitHub Actions, on push to `main` and on PRs), plus an esbuild
@@ -158,10 +159,12 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
   `settings/SidebarSection` `DEFAULT_ORDER`, `lib/route-prefetch.ts` loaders, and `CommandPalette` items.
 - **Tags:** negative tag ids are unsaved placeholders — persist with `createTag`, then the entity's
   `set<Entity>Tags` helper (note, task, media, prompt, snippet, work project).
-- **Adding a user table** means adding it to the backup list in `settings/DataSection.tsx`
-  (`EXPORT_TABLES`) and its FK remaps in `lib/restore.ts`.
+- **Adding a user table** means adding it to `EXPORT_TABLES` in `lib/full-export.ts`, to `TABLES` in
+  `scripts/backup-media.ts` if it's a Media table, and its FK remaps (or an explicit "never restored") in
+  `lib/restore.ts`. A table from a migration that may not be pasted yet goes in `NOT_YET_MIGRATED` too.
 - **Pure modules** (`media-insights`, `media-progress`, `media-match`, `cover-medium`, `title-match`,
-  `secret-mask`, `recipe-parse`, `pantry-match`)
+  `tachimanga/plan`, `tachimanga/types`, `components/media/progress-view`, `components/media/import/selection`
+  and `sniff`, `secret-mask`, `recipe-parse`, `pantry-match`)
   must not import the Supabase client — it pulls in `import.meta.env` and breaks the `tsx` test.
 - **localStorage** holds UI preferences; guard every access in try/catch. Key list: `context/frontend.md`.
 - **Big pages** (MediaTracker, Library, Notes) mix fetching, state and JSX: extract when making
@@ -211,8 +214,10 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     linking and refresh never write those. `media_source_meta` holds what the source knows, keyed
     `(source, source_id)`, and **only the edge function writes it** (no client write policies; writes
     revoked). `media_metadata` stays as the legacy shared cache for unlinked entries.
-15. **`media_progress_log` is append-only.** One writer (`hooks/media/useProgressMutation.ts`):
-    compare-and-swap UPDATE first, then a separate log insert. A failed insert never blocks or rolls
+15. **One progress writer; `media_progress_log` is append-only.** Every progress change (taps, the Log
+    sheet, Undo, the Tachimanga import) goes through `casProgressWrite` in `lib/media-progress-write.ts`;
+    `hooks/media/useProgressMutation.ts` is only its React side (cache patches, toasts). Don't write
+    `current_*` columns anywhere else. Compare-and-swap UPDATE first, then a separate log insert. A failed insert never blocks or rolls
     back progress. Undo writes a `kind = 'undo'` row and never deletes one. No UPDATE / DELETE grants.
 16. **`cover_pinned`** means "keep my cover" (pinned with a null cover means "no cover wanted"). Every
     cover writer (linking, refresh, sweeps, bulk refresh) must skip a pinned cover.
@@ -222,10 +227,27 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     There is no batch `resolve` action (removed); Phase 2 loops `action=search` at a client pace.
 18. **Media roadmap is U0–U5, scope frozen** (2026-09-29): one writer per field, cover priority, entry
     points and migration 29 are in `docs/media-v2/PLAN.md` ("Re-cut 2026-09-29"). U6 and the other
-    later ideas are parked in `docs/BACKLOG.md`; don't pull them forward.
-19. **Tachimanga backups are personal data.** Docs, commits, tests and fixtures describe the import
-    feature only: never a title, count or other detail from his backup (the repo is public). Keep
-    backups and exports in gitignored `backups/`.
+    later ideas are parked in `docs/BACKLOG.md`; don't pull them forward. Unit status lives in
+    `PLAN.md` § G (U0, U2a, U2b done on the branch; U3 next).
+19. **Tachimanga backups are personal data** (the repo is public). Docs, commits, tests and fixtures
+    describe the import feature only: never a title, shelf name, count or other detail from his backup.
+    In code: reader titles and shelf (category) names live **only in browser memory** during an import.
+    Never log them, toast them, put them in an error message, send them to the edge function, or store
+    them. The database gets `media_import_map` (a sha256 `origin_key` + thumbnail URL) and updates to
+    his own rows; the shelf → status map stays in `localStorage`. Parsing runs in a Web Worker
+    (`lib/tachimanga/parse.worker.ts`; sql.js stays off cold load and out of the PWA precache).
+    Fixtures are synthetic `[audit]` data from `lib/tachimanga/__fixtures__/make-fixture.ts`; the
+    generator refuses paths inside the repo. **Agents never open `backups/tachimanga/`** (his real
+    backups) and never copy a real backup's schema text or entries into the repo.
+20. **One full export.** `lib/full-export.ts` `runFullExport` is the only JSON backup (Settings → Data,
+    and the backup gate in bulk dialogs). A complete run stamps `sessionStorage` `notehaven.fullExportAt`;
+    bulk writes (the import's Approve today) stay disabled until `hasFullExportThisSession()` (60 min).
+    Don't add a second exporter or a gate that accepts a partial export.
+21. **Every bulk change is journaled.** Anything that writes many `media_tracker` rows at once (import,
+    U3 linking, U5 cover passes) writes `media_bulk_journal` before/after rows through
+    `lib/media-bulk.ts` `writeJournal` **before** it reports done, and must roll back a chunk it can't
+    journal. "Undo last bulk change" (`undoBatch`) is a compare-and-swap restore that skips rows changed
+    since. Journal rows are never edited except `undone_at` (the grant allows nothing else).
 
 ## Decided — don't re-litigate
 
