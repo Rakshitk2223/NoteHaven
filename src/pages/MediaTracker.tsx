@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -80,6 +80,7 @@ import { HistoryView } from '@/components/media/HistoryView';
 import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type TrackerType } from '@/lib/media-sources';
 import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-match';
 import { latestUndoableBatch, undoBatch, type BulkKind } from '@/lib/media-bulk';
+import { IMPORT_ACCEPT, sniffFile } from '@/components/media/import/sniff';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
 import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
@@ -395,6 +396,9 @@ const splitNoCover = <T extends Pick<MediaItem, 'id' | 'cover_pinned' | 'cover_i
   none: new Map<number, string | null>(items.filter(wantsNoCover).map((i) => [i.id, null])),
 });
 
+// Tachimanga import: the dialog pulls in the Worker (sql.js + jszip), so it loads only when a .tmb is picked.
+const ReaderImportDialog = lazy(() => import('@/components/media/import/ReaderImportDialog'));
+
 const BULK_KIND_LABEL: Record<BulkKind, string> = { import: 'Import', link: 'Linking', cover: 'Cover change' };
 
 const tagKey = (tags: Tag[]) => tags.map((t) => t.name.toLowerCase()).sort().join('\u0000');
@@ -545,6 +549,7 @@ const MediaTracker = () => {
   const [typedSearchTerm, setTypedSearchTerm] = useState(''); // immediate input echo
   const searchDebounceRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [readerFile, setReaderFile] = useState<File | null>(null);
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
   const [isRefreshingCovers, setIsRefreshingCovers] = useState(false);
@@ -2760,10 +2765,27 @@ const MediaTracker = () => {
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/json,.json"
+            // One Import…: a NoteHaven JSON backup, or (migration 29) a Tachimanga backup.
+            // Told apart by CONTENT, never the name (test backups travel renamed .zip on iOS).
+            accept={v2Schema.importLink ? IMPORT_ACCEPT : 'application/json,.json'}
             className="hidden"
-            onChange={handleJsonImport}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              if (!v2Schema.importLink) { void handleJsonImport(e); return; }
+              void sniffFile(f).then((kind) => {
+                if (kind === 'zip') { setReaderFile(f); e.target.value = ''; return; }
+                if (kind === 'json') { void handleJsonImport(e); return; }
+                e.target.value = '';
+                toast({ title: 'Not a backup file', description: 'Pick a NoteHaven JSON backup or a Tachimanga backup.', variant: 'destructive' });
+              });
+            }}
           />
+          {readerFile && (
+            <Suspense fallback={null}>
+              <ReaderImportDialog file={readerFile} onClose={() => setReaderFile(null)} phone={!tabletUp} />
+            </Suspense>
+          )}
 
           <LibraryStatsDialog
             open={statsOpen}
@@ -2877,6 +2899,8 @@ const MediaTracker = () => {
                 onManageTabs={() => setTabsManageOpen(true)}
                 onRefreshLibrary={() => setRefreshLibraryOpen(true)}
                 onImport={() => fileInputRef.current?.click()}
+                importLabel={v2Schema.importLink ? 'Import…' : 'Import JSON…'}
+                importHint={v2Schema.importLink ? 'A NoteHaven JSON backup, or a Tachimanga backup (.tmb)' : undefined}
                 importing={isImporting}
                 onExportJson={handleExportJson}
                 onExportCsv={handleExportCsv}

@@ -19,6 +19,8 @@ interface MediaMoreViewProps {
   onRefreshLibrary: () => void;
   onImport: () => void;
   importing: boolean;
+  importLabel: string;
+  importHint?: string;
   onExportJson: () => void;
   onExportCsv: () => void;
   onExportTxt: () => void;
@@ -113,7 +115,7 @@ export function MediaMoreView(p: MediaMoreViewProps) {
       </Group>
 
       <Group title="Import & export">
-        <Row icon={Upload} label={p.importing ? 'Importing…' : 'Import JSON…'} onClick={p.onImport} disabled={p.importing} />
+        <Row icon={Upload} label={p.importing ? 'Importing…' : p.importLabel} hint={p.importHint} onClick={p.onImport} disabled={p.importing} />
         <Row icon={Download} label="Export JSON" hint="Full backup, with tags" onClick={p.onExportJson} />
         <Row icon={FileSpreadsheet} label="Export CSV" onClick={p.onExportCsv} />
         <Row icon={FileText} label="Export TXT…" hint="A plain list, by type" onClick={p.onExportTxt} />
