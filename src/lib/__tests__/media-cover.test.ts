@@ -163,9 +163,19 @@ describe('setCover / setCovers (the one writer)', () => {
       { id: 1, url: ANILIST_MANGA, origin: 'source', expect: TMDB },
       { id: 2, url: ANILIST_MANGA, origin: 'source', expect: TMDB }, // he saw TMDB, it's READER now
     ]);
-    expect(res).toEqual({ batchId: null, written: [], skipped: { 1: 'pinned', 2: 'changed' } });
+    expect(res).toEqual({ batchId: null, written: [], skipped: { 1: 'pinned', 2: 'changed' }, unchanged: [] });
     expect(tracker.get(1)!.cover_image).toBe(TMDB);
     expect(tracker.get(2)!.cover_image).toBe(READER);
+    expect(journal).toEqual([]);
+  });
+
+  it('0 rows written says why: missing row → not-found; same cover → unchanged (no-op, not a failure)', async () => {
+    seed(base({ id: 1, cover_image: READER, cover_origin: 'reader' }));
+    const res = await setCovers([
+      { id: 1, url: READER, origin: 'reader', expect: READER },         // already this cover
+      { id: 9, url: READER, origin: 'reader', expect: null },           // no such row
+    ]);
+    expect(res).toEqual({ batchId: null, written: [], skipped: { 9: 'not-found' }, unchanged: [1] });
     expect(journal).toEqual([]);
   });
 

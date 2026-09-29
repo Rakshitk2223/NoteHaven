@@ -41,6 +41,31 @@ describe('pickCover with E2', () => {
   });
 });
 
+describe('pickCover: the copy IS the current cover (E2 dedupe)', () => {
+  const copied = { ...(row as object), cover_image: STORE, cover_origin: 'source' } as never;
+  it('pins only, no write, and says so (never "couldn’t be found")', async () => {
+    const d = deps();
+    const r = await pickCover(copied, 'https://uploads.mangadex.org/c.jpg', 'source', { ...d, copy: async () => ({ url: STORE, deduped: true }) }, { copyOnly: true });
+    expect(r).toMatchObject({ ok: true, pinned: true, same: true, url: STORE });
+    expect(d.setCover).not.toHaveBeenCalled();
+    expect(d.setCoverPinned).toHaveBeenCalledWith(1, true);
+  });
+  it('a writer no-op (unchanged) is the same: pinned, not an error', async () => {
+    const d = { ...deps(), setCover: vi.fn(async (id: number) => ({ batchId: null, written: [], skipped: {}, unchanged: [id] })) };
+    const r = await pickCover(row, 'https://src/a.jpg', 'source', d);
+    expect(r).toMatchObject({ ok: true, pinned: true, same: true });
+  });
+  it('a real miss keeps its reason (changed / not-found)', async () => {
+    const miss = (reason: string) => ({ ...deps(), setCover: vi.fn(async (id: number) => ({ batchId: null, written: [], skipped: { [id]: reason } })) });
+    expect(await pickCover(row, 'https://src/a.jpg', 'source', miss('changed') as never)).toEqual({ ok: false, reason: 'changed' });
+    expect(await pickCover(row, 'https://src/a.jpg', 'source', miss('not-found') as never)).toEqual({ ok: false, reason: 'not-found' });
+  });
+  it('a new cover is still written and not "same"', async () => {
+    const r = await pickCover(row, 'https://src/a.jpg', 'source', { ...deps(), copy: async () => ({ url: STORE, deduped: false }) });
+    expect(r).toMatchObject({ ok: true, same: false, url: STORE });
+  });
+});
+
 describe('fixInChunks with E2', () => {
   const wrong = (id: number) => ({ row: { ...(row as object), id, cover_image: `https://old/${id}` } as never, problem: 'wrong-medium' as const, suggestion: { url: `https://src/${id}.jpg`, origin: 'source' as const } });
   it('copies each chunk first: copies are saved, "unavailable" keeps the original, a real failure is skipped', async () => {

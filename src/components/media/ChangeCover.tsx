@@ -84,12 +84,14 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
         });
         return;
       }
-      onChanged(res.url, o.url === row.cover_image ? row.cover_origin : o.origin, res.pinned);
+      onChanged(res.url, res.same ? row.cover_origin : o.origin, res.pinned);
       onOpenChange(false);
       const was = { url: row.cover_image, origin: row.cover_origin, pinned: !!row.cover_pinned };
       toast({
-        title: res.pinned ? 'Cover changed and pinned' : 'Cover changed',
-        description: res.pinned ? 'Linking and cover fixes will keep it.' : 'It couldn’t be pinned; unpinned covers can be replaced by fixes.',
+        title: res.same ? 'That’s already the cover' : res.pinned ? 'Cover changed and pinned' : 'Cover changed',
+        description: res.same
+          ? (res.pinned ? 'Pinned: linking and cover fixes will keep it.' : 'It couldn’t be pinned; unpinned covers can be replaced by fixes.')
+          : res.pinned ? 'Linking and cover fixes will keep it.' : 'It couldn’t be pinned; unpinned covers can be replaced by fixes.',
         action: (
           <ToastAction altText="Undo cover change" onClick={() => {
             void res.undo().then((ok) => { if (ok) onChanged(was.url, was.origin, was.pinned); });

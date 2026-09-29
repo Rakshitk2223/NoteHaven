@@ -74,6 +74,8 @@ export interface CoverWriteResult {
   written: number[];
   /** Per id, why it wasn't written. */
   skipped: Record<number, CoverWriteReason>;
+  /** Already that cover (same URL and origin): nothing to write, not a failure. */
+  unchanged?: number[];
 }
 
 export interface WrongCover {
@@ -232,6 +234,7 @@ export async function setCovers(changes: CoverChange[], journal: { batchId?: str
   const rows = await readRows([...new Set(changes.map((c) => c.id))]);
   const skipped: Record<number, CoverWriteReason> = {};
   const written: number[] = [];
+  const unchanged: number[] = [];
   let batchId: string | null = journal.batchId ?? null;
 
   let chunk: Array<{ c: CoverChange; before: CoverRow }> = [];
@@ -254,7 +257,7 @@ export async function setCovers(changes: CoverChange[], journal: { batchId?: str
         await casWrite(uid, c.id, { cover_image: before.cover_image ?? null, cover_origin: before.cover_origin ?? null }, c.url, c.url === null ? null : c.origin)
           .catch(() => false);
       }
-      throw new CoverJournalError({ batchId: written.length ? batchId : null, written: [...written], skipped }, e);
+      throw new CoverJournalError({ batchId: written.length ? batchId : null, written: [...written], skipped, unchanged }, e);
     }
     written.push(...chunk.map((d) => d.c.id));
     chunk = [];
@@ -266,13 +269,13 @@ export async function setCovers(changes: CoverChange[], journal: { batchId?: str
     if (row.cover_pinned) { skipped[c.id] = 'pinned'; continue; }
     if ((row.cover_image ?? null) !== c.expect) { skipped[c.id] = 'changed'; continue; }
     if (!acceptCover(c.url, row.type, c.origin)) { skipped[c.id] = 'rejected'; continue; }
-    if ((row.cover_image ?? null) === c.url && row.cover_origin === c.origin) continue; // nothing to do
+    if ((row.cover_image ?? null) === c.url && row.cover_origin === c.origin) { unchanged.push(c.id); continue; } // nothing to do
     const ok = await casWrite(uid, c.id, { cover_image: c.url, cover_origin: c.url === null ? null : c.origin }, c.expect);
     if (ok) chunk.push({ c, before: row }); else skipped[c.id] = 'changed';
     if (chunk.length >= COVER_JOURNAL_CHUNK) await flush();
   }
   await flush();
-  return { batchId: written.length ? batchId : null, written, skipped };
+  return { batchId: written.length ? batchId : null, written, skipped, unchanged };
 }
 
 /** One cover (the "Change cover…" pick, "Remove cover", a single fix). */

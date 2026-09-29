@@ -50,7 +50,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
 
   const report = (res: CoverWriteResult, asked: number) => {
     for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] });
-    const skipped = asked - res.written.length;
+    const skipped = asked - res.written.length - (res.unchanged?.length ?? 0);
     toast({
       title: res.written.length ? `Fixed ${res.written.length} cover${res.written.length === 1 ? '' : 's'}` : 'Nothing changed',
       description: skipped ? `${skipped} skipped (pinned or changed since)` : undefined,
