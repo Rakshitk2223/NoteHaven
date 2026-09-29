@@ -27,7 +27,14 @@ const KIND: Record<Exclude<Column, 'title' | 'type'>, Kind> = {
   rating: 'scalar', status: 'scalar', runtime: 'scalar',
 };
 
-export type CacheRow = { title: string; type: string } & Partial<Record<Column, unknown>>;
+/**
+ * Set on an incoming row whose status the source only guessed (Wikidata and
+ * Fanart always say 'completed'). Its status then ranks weak, like 'upcoming':
+ * it can fill an empty status but never replace a real one. Never written.
+ */
+export const STATUS_GUESS = '_status_guess';
+
+export type CacheRow = { title: string; type: string; [STATUS_GUESS]?: boolean } & Partial<Record<Column, unknown>>;
 
 export interface MergeOptions {
   /** Does this cover suit the row's medium? (index.ts passes coverFitsType.) */
@@ -41,7 +48,7 @@ const isEmpty = (v: unknown): boolean =>
 
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v));
 
-function rank(col: Column, v: unknown, type: string, opts: MergeOptions): 0 | 1 | 2 {
+function rank(col: Column, v: unknown, type: string, opts: MergeOptions, guessed = false): 0 | 1 | 2 {
   if (isEmpty(v)) return 0;
   switch (KIND[col as keyof typeof KIND]) {
     case 'image': {
@@ -56,7 +63,7 @@ function rank(col: Column, v: unknown, type: string, opts: MergeOptions): 0 | 1 
     case 'count':
       return num(v) > 0 ? 2 : 0; // mappers emit 0 for "unknown"
     case 'scalar':
-      if (col === 'status') return v === 'upcoming' ? 1 : 2; // the column default / mapper fallback
+      if (col === 'status') return guessed || v === 'upcoming' ? 1 : 2; // a guess / the column default
       return num(v) > 0 ? 2 : 0; // rating 0 and runtime 0 mean unknown
     default:
       return 2;
@@ -71,11 +78,11 @@ const size = (v: unknown): number =>
   typeof v === 'string' ? v.trim().length : Array.isArray(v) ? v.length : 0;
 
 /** The better of an existing and an incoming value for one column. */
-function better(col: Column, ex: unknown, inc: unknown, type: string, opts: MergeOptions): unknown {
+function better(col: Column, ex: unknown, inc: unknown, type: string, opts: MergeOptions, incGuessed: boolean): unknown {
   const re = rank(col, ex, type, opts);
-  const ri = rank(col, inc, type, opts);
+  const ri = rank(col, inc, type, opts, incGuessed);
   if (ri !== re) return ri > re ? inc : ex;
-  if (re === 0) return ex; // both empty: don't churn null ↔ '' ↔ []
+  if (re !== 2) return ex; // both empty, or both guesses: keep what's there (no churn)
   switch (KIND[col as keyof typeof KIND]) {
     case 'image':
     case 'id':
@@ -102,7 +109,7 @@ export function mergeCacheRow(existing: object | null | undefined, incoming: Cac
   const out = pick(existing) as Record<string, unknown>;
   for (const c of CACHE_COLUMNS) {
     if (c === 'title' || c === 'type' || !(c in inc)) continue;
-    out[c] = better(c, out[c], (inc as Record<string, unknown>)[c], incoming.type, opts);
+    out[c] = better(c, out[c], (inc as Record<string, unknown>)[c], incoming.type, opts, incoming[STATUS_GUESS] === true);
   }
   return out as CacheRow;
 }

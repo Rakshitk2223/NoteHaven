@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeCacheRow, mergeCacheRows, type CacheRow } from './cache-merge';
+import { mergeCacheRow, mergeCacheRows, STATUS_GUESS, type CacheRow } from './cache-merge';
 
 const ANILIST_COVER = 'https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx1.jpg';
 const MU_COVER = 'https://cdn.mangaupdates.com/image/i1.jpg';
@@ -58,6 +58,18 @@ describe('mergeCacheRow (media_metadata merge, BE1)', () => {
     expect(mergeCacheRow(rich, { ...rich, status: 'completed' }).status).toBe('completed');
   });
 
+  it('a guessed status (Wikidata / Fanart) fills an empty one but never beats a real one', () => {
+    const show: CacheRow = { title: 'The Bear', type: 'series', status: 'ongoing', cover_image: TMDB_STILL };
+    const wikidata: CacheRow = { title: 'The Bear', type: 'series', status: 'completed', [STATUS_GUESS]: true };
+    expect(mergeCacheRow(show, wikidata).status).toBe('ongoing');
+    expect(mergeCacheRow({ ...show, status: null }, wikidata).status).toBe('completed');
+    expect(mergeCacheRow(null, wikidata)).toEqual({ title: 'The Bear', type: 'series', status: 'completed' }); // flag never written
+    // Two guesses: keep what's there.
+    expect(mergeCacheRow({ ...show, status: 'upcoming' }, wikidata).status).toBe('upcoming');
+    // The same value from a source that knows it (TMDB "Ended") still goes through.
+    expect(mergeCacheRow(show, { ...wikidata, [STATUS_GUESS]: undefined }).status).toBe('completed');
+  });
+
   it('keeps a good cover and the first id (no slot machine), but replaces bad ones', () => {
     expect(mergeCacheRow(rich, { ...rich, cover_image: MU_COVER, anilist_id: 999 }))
       .toMatchObject({ cover_image: ANILIST_COVER, anilist_id: 101 });
@@ -106,6 +118,11 @@ describe('mergeCacheRows (batch)', () => {
     expect(out).toHaveLength(2); // neither is the cached row, so both insert as-is
     expect(out.every((r) => r.status === 'upcoming')).toBe(true);
     expect(mergeCacheRows([other], [poor])).toEqual([poor]);
+  });
+
+  it('a guessed status in a batch does not overwrite the cached real one', () => {
+    const cached: CacheRow = { title: 'The Bear', type: 'series', status: 'ongoing' };
+    expect(mergeCacheRows([cached], [{ title: 'The Bear', type: 'series', status: 'completed', [STATUS_GUESS]: true }])).toEqual([]);
   });
 
   it('merges duplicates within a batch instead of sending both', () => {

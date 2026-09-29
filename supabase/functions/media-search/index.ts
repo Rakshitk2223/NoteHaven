@@ -2,7 +2,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { handleV2 } from './v2.ts';
 import { hasAdultGenre, MU_EXCLUDE_GENRES } from './adult.ts';
-import { CACHE_COLUMNS, mergeCacheRows, type CacheRow } from './cache-merge.ts';
+import { CACHE_COLUMNS, mergeCacheRows, STATUS_GUESS, type CacheRow } from './cache-merge.ts';
 
 // CORS. Set ALLOWED_ORIGINS to a comma-separated allow-list (e.g.
 // "https://notehaven.example,http://localhost:8080"). Unset falls back to '*'
@@ -121,6 +121,15 @@ function cacheable<T extends { title?: string; type?: string }>(rows: T[]): T[] 
 // from a network that may block sources, so their thinner answers stay out.
 const CACHE_WRITES = Deno.env.get('EDGE_CACHE_WRITES') !== '0';
 
+// Wikidata and Fanart don't know a title's status: their mappers say 'completed'
+// only because the field needs a value. Their result objects are remembered here
+// (responses stay unchanged) so the cache merge treats that status as a guess.
+const STATUS_GUESSES = new WeakSet<object>();
+function statusGuessed<T extends object>(rows: T[]): T[] {
+  for (const r of rows) STATUS_GUESSES.add(r);
+  return rows;
+}
+
 // Keep a post-response write alive on the hosted runtime (a no-op locally).
 function inBackground(p: Promise<unknown>): void {
   (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(p);
@@ -133,7 +142,8 @@ function inBackground(p: Promise<unknown>): void {
  */
 async function writeMetadataCache<T extends { title?: string; type?: string }>(supabase: SupabaseClient, rows: T[]): Promise<void> {
   if (!CACHE_WRITES) return;
-  const incoming = cacheable(rows) as unknown as CacheRow[];
+  const tagged = rows.map((r) => (STATUS_GUESSES.has(r) ? { ...r, [STATUS_GUESS]: true } : r));
+  const incoming = cacheable(tagged) as unknown as CacheRow[];
   if (incoming.length === 0) return;
   const { data: existing, error: readError } = await supabase
     .from('media_metadata')
@@ -1132,7 +1142,7 @@ async function searchWikidata(query: string, type: string): Promise<MediaResult[
       const coverImage = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(fileName)}?width=500`;
       const mapped = type === 'movie' ? 'movie' : (type || 'series');
 
-      return [{
+      return statusGuessed([{
         title: candidate.label || query,
         alt_titles: altTitles(candidate.label, ...(candidate.aliases || [])),
         type: mapped,
@@ -1152,7 +1162,7 @@ async function searchWikidata(query: string, type: string): Promise<MediaResult[
         episodes_detail: null,
         cast_members: null,
         runtime: null,
-      }];
+      }]);
     }
     return [];
   } catch (error) {
@@ -1196,7 +1206,7 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
       '';
     if (!poster) return [];
 
-    return [{
+    return statusGuessed([{
       title: query,
       type: isMovie ? 'movie' : (type || 'series'),
       cover_image: poster,
@@ -1215,7 +1225,7 @@ async function searchFanart(query: string, type: string, tmdbKey: string, fanart
       episodes_detail: null,
       cast_members: null,
       runtime: null,
-    }];
+    }]);
   } catch (error) {
     console.error('Fanart error:', error);
     return [];
