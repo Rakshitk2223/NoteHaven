@@ -221,3 +221,62 @@ export function pickLink<C extends MatchCandidate>(
   if (band === 'auto' && rival && best.match - rival.match < 0.05) band = 'review';
   return { band, best, ranked };
 }
+
+// ---------------------------------------------------------------------------
+// "In library": is a search candidate already tracked? (Browse dedup)
+// ---------------------------------------------------------------------------
+// By source id first. Until Phase 2 links the library, most rows are unlinked,
+// so those also match on normalised title + type. Exact keys only (the title
+// and its singular): no season-stripped or "Main: Subtitle" variants, which
+// are near-misses; "Frieren" must not open the "Frieren Season 2" entry.
+
+export interface LibraryRow {
+  id: number;
+  title: string;
+  type: string;
+  source?: string | null;
+  source_id?: string | null;
+  link_status?: string | null;
+}
+
+export interface LibraryLookup {
+  byLink: Map<string, number>;
+  byTitle: Map<string, number>;
+}
+
+const libraryKeys = (raw: string) => {
+  const base = normalizeTitle(raw);
+  return base ? [...new Set([base, singular(base)])] : [];
+};
+
+export function buildLibraryLookup(rows: LibraryRow[]): LibraryLookup {
+  const byLink = new Map<string, number>();
+  const byTitle = new Map<string, number>();
+  for (const r of rows) {
+    if (r.source && r.source_id) byLink.set(`${r.source}:${r.source_id}`, r.id);
+    // A linked row is that source entry and nothing else: matched by id only.
+    if (r.link_status === 'linked' && r.source) continue;
+    for (const k of libraryKeys(r.title)) {
+      const key = `${r.type}::${k}`;
+      if (!byTitle.has(key)) byTitle.set(key, r.id);
+    }
+  }
+  return { byLink, byTitle };
+}
+
+/** The tracker id already holding `c` (as `type`), or undefined. */
+export function findInLibrary(
+  lookup: LibraryLookup,
+  c: Pick<Candidate, 'source' | 'source_id' | 'title' | 'alt_titles'>,
+  type: TrackerType,
+): number | undefined {
+  const linked = lookup.byLink.get(`${c.source}:${c.source_id}`);
+  if (linked !== undefined) return linked;
+  for (const t of [c.title, ...(c.alt_titles ?? [])]) {
+    for (const k of libraryKeys(t)) {
+      const id = lookup.byTitle.get(`${type}::${k}`);
+      if (id !== undefined) return id;
+    }
+  }
+  return undefined;
+}

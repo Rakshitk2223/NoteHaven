@@ -28,8 +28,8 @@ interface SourcePickerProps {
   lockType?: boolean;
   /** Mac: a column per source. Elsewhere: rows. */
   wide: boolean;
-  /** `${source}:${source_id}` → tracker id, for "In library". */
-  libraryIndex: Map<string, number>;
+  /** Tracker id already holding this candidate (source id, else title + type), for "In library". */
+  inLibrary: (c: Candidate, type: TrackerType) => number | undefined;
   /** The entry being re-linked (Fix match), to mark its current link. */
   linkedKey?: string | null;
   /** `query` = what the user typed (trimmed): an add keeps it as the display name. */
@@ -44,7 +44,7 @@ interface SourcePickerProps {
  * search; picking hands the candidate (with its own id) to the caller.
  */
 export function SourcePicker({
-  initialQuery = '', initialType = 'Manhwa', lockType, wide, libraryIndex, linkedKey, onPick, onAddUnlinked, autoFocus,
+  initialQuery = '', initialType = 'Manhwa', lockType, wide, inLibrary, linkedKey, onPick, onAddUnlinked, autoFocus,
 }: SourcePickerProps) {
   const [query, setQuery] = useState(initialQuery);
   const [type, setType] = useState<TrackerType>(initialType);
@@ -146,7 +146,7 @@ export function SourcePicker({
                   <ul className="space-y-1.5">
                     {g.items.map((c) => (
                       <li key={`${c.source}:${c.source_id}`}>
-                        <CandidateRow c={c} type={type} libraryIndex={libraryIndex} linkedKey={linkedKey} onPick={pick} />
+                        <CandidateRow c={c} type={type} inLibrary={inLibrary} linkedKey={linkedKey} onPick={pick} />
                       </li>
                     ))}
                   </ul>
@@ -154,7 +154,7 @@ export function SourcePicker({
                   <ul className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {g.items.map((c) => (
                       <li key={`${c.source}:${c.source_id}`} className="w-[124px] flex-shrink-0">
-                        <CandidateCard c={c} type={type} libraryIndex={libraryIndex} linkedKey={linkedKey} onPick={pick} />
+                        <CandidateCard c={c} type={type} inLibrary={inLibrary} linkedKey={linkedKey} onPick={pick} />
                       </li>
                     ))}
                   </ul>
@@ -191,15 +191,15 @@ export function SourcePicker({
 interface CandidateProps {
   c: Candidate;
   type: TrackerType;
-  libraryIndex: Map<string, number>;
+  inLibrary: SourcePickerProps['inLibrary'];
   linkedKey?: string | null;
   onPick: (c: Candidate, type: TrackerType) => void;
 }
 
-function Marker({ c, libraryIndex, linkedKey }: Pick<CandidateProps, 'c' | 'libraryIndex' | 'linkedKey'>) {
+function Marker({ c, type, inLibrary, linkedKey }: Pick<CandidateProps, 'c' | 'type' | 'inLibrary' | 'linkedKey'>) {
   const key = `${c.source}:${c.source_id}`;
   if (linkedKey === key) return <span className="inline-flex items-center gap-1 rounded-md bg-success/15 px-1.5 py-0.5 text-[11px] font-semibold text-success"><Check className="h-3 w-3" />Linked</span>;
-  if (libraryIndex.has(key)) return <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold text-primary">In library</span>;
+  if (inLibrary(c, type) !== undefined) return <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[11px] font-semibold text-primary">In library</span>;
   return null;
 }
 
@@ -211,7 +211,7 @@ function Thumb({ c, className }: { c: Candidate; className?: string }) {
   );
 }
 
-function CandidateCard({ c, type, libraryIndex, linkedKey, onPick }: CandidateProps) {
+function CandidateCard({ c, type, inLibrary, linkedKey, onPick }: CandidateProps) {
   const off = c.fit === 'mismatch';
   const line = candidateLine(c, type);
   return (
@@ -220,7 +220,7 @@ function CandidateCard({ c, type, libraryIndex, linkedKey, onPick }: CandidatePr
       className={cn('flex w-full flex-col gap-1 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', off && 'opacity-50')}>
       <span className="relative">
         <Thumb c={c} className="aspect-[2/3] w-full" />
-        <span className="absolute left-1 top-1"><Marker c={c} libraryIndex={libraryIndex} linkedKey={linkedKey} /></span>
+        <span className="absolute left-1 top-1"><Marker c={c} type={type} inLibrary={inLibrary} linkedKey={linkedKey} /></span>
       </span>
       <span className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground">{c.title}</span>
       {c.alt_titles[0] && <span className="line-clamp-1 text-xs text-muted-foreground">{c.alt_titles[0]}</span>}
@@ -231,7 +231,7 @@ function CandidateCard({ c, type, libraryIndex, linkedKey, onPick }: CandidatePr
   );
 }
 
-function CandidateRow({ c, type, libraryIndex, linkedKey, onPick }: CandidateProps) {
+function CandidateRow({ c, type, inLibrary, linkedKey, onPick }: CandidateProps) {
   const off = c.fit === 'mismatch';
   const line = candidateLine(c, type);
   return (
@@ -242,7 +242,7 @@ function CandidateRow({ c, type, libraryIndex, linkedKey, onPick }: CandidatePro
       <span className="min-w-0 flex-1">
         <span className="flex items-start justify-between gap-2">
           <span className="line-clamp-2 text-sm font-medium leading-snug text-foreground">{c.title}</span>
-          <Marker c={c} libraryIndex={libraryIndex} linkedKey={linkedKey} />
+          <Marker c={c} type={type} inLibrary={inLibrary} linkedKey={linkedKey} />
         </span>
         {c.alt_titles[0] && <span className="block truncate text-xs text-muted-foreground">{c.alt_titles[0]}</span>}
         <span className="block truncate text-xs text-muted-foreground">{[c.authors[0], c.year, c.format].filter(Boolean).join(' · ')}</span>

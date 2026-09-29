@@ -78,6 +78,7 @@ import { SourcePicker } from '@/components/media/SourcePicker';
 import { PickPreview, type PickChoice } from '@/components/media/PickPreview';
 import { HistoryView } from '@/components/media/HistoryView';
 import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type TrackerType } from '@/lib/media-sources';
+import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-match';
 import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned } from '@/lib/media-link';
 import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
@@ -1922,16 +1923,50 @@ const MediaTracker = () => {
   );
 
   // ---- Browse (search-and-pick) + Fix match -------------------------------
-  // `${source}:${source_id}` → tracker id, for "In library" in the picker.
-  const libraryIndex = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const i of mediaItems) if (i.source && i.source_id) m.set(`${i.source}:${i.source_id}`, i.id);
-    return m;
-  }, [mediaItems]);
   type PickState = { mode: 'add' | 'fix'; type: TrackerType; candidate: Candidate | null; title: string; forItem?: MediaItem };
   const [pick, setPick] = useState<PickState | null>(null);
   const [pickBusy, setPickBusy] = useState(false);
   const [fixFor, setFixFor] = useState<MediaItem | null>(null);
+
+  // "In library" in the picker: EVERY title (paged past 1000), not just the loaded
+  // grid pages, fetched only while Browse or Fix match is open. Most rows are
+  // still unlinked, so the lookup also matches on normalised title + type.
+  const { data: titleIndex = [] } = useQuery({
+    queryKey: ['mediaTitleIndex'],
+    enabled: section === 'browse' || !!fixFor,
+    staleTime: 60 * 1000,
+    queryFn: async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) return [] as LibraryRow[];
+      const BASE = 'id, title, type';
+      let cols = `${BASE}, source, source_id, link_status`;
+      const out: LibraryRow[] = [];
+      let from = 0;
+      for (;;) {
+        const { data, error } = await supabase.from('media_tracker').select(cols)
+          .eq('user_id', user.id).order('id').range(from, from + 999);
+        // Migration 28's link columns; title-only on a database without them.
+        if (error && (error.code === '42703' || error.code === 'PGRST204') && cols !== BASE) { cols = BASE; continue; }
+        if (error) throw error;
+        const rows = (data ?? []) as unknown as LibraryRow[];
+        out.push(...rows);
+        if (rows.length < 1000) break;
+        from += 1000;
+      }
+      return out;
+    },
+  });
+  const libraryLookup = useMemo(() => buildLibraryLookup([...titleIndex, ...mediaItems]), [titleIndex, mediaItems]);
+  const inLibrary = useCallback((c: Candidate, t: TrackerType) => findInLibrary(libraryLookup, c, t), [libraryLookup]);
+  // Open a title by id: from the loaded pages, else one row fetch. False if it's gone.
+  const openById = useCallback(async (id: number) => {
+    const it = itemsByIdRef.current.get(id);
+    if (it) { openDetails(it, 'view'); return true; }
+    const { data } = await supabase.from('media_tracker').select('*').eq('id', id).maybeSingle();
+    if (data) openDetails(normalizeMediaItem(data as unknown as MediaItem), 'view');
+    return !!data;
+  }, [openDetails]);
 
   const refreshRowInCaches = useCallback(async (id: number) => {
     const { data } = await supabase.from('media_tracker').select('*').eq('id', id).maybeSingle();
@@ -2001,6 +2036,7 @@ const MediaTracker = () => {
       queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
       queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
       queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
+      queryClient.invalidateQueries({ queryKey: ['mediaTitleIndex'] });
       setPick(null);
       setSection('library');
       const newId = created.id;
@@ -2015,6 +2051,7 @@ const MediaTracker = () => {
                 queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
                 queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
                 queryClient.invalidateQueries({ queryKey: ['mediaRails'] });
+                queryClient.invalidateQueries({ queryKey: ['mediaTitleIndex'] });
                 toast({ title: 'Removed', description: title });
               }
             });
@@ -2406,7 +2443,8 @@ const MediaTracker = () => {
               {fixFor && (
                 <SourcePicker
                   wide={pickerWide}
-                  libraryIndex={libraryIndex}
+                  // The entry being fixed isn't "in library" as some other title.
+                  inLibrary={(c, t) => { const id = inLibrary(c, t); return id === fixFor.id ? undefined : id; }}
                   initialQuery={fixFor.title}
                   initialType={(VALID_TYPES as readonly string[]).includes(fixFor.type) ? fixFor.type as TrackerType : 'Manhwa'}
                   lockType
@@ -2687,29 +2725,22 @@ const MediaTracker = () => {
               <div className="mx-auto max-w-6xl">
                 <SourcePicker
                   wide={pickerWide}
-                  libraryIndex={libraryIndex}
+                  inLibrary={inLibrary}
                   autoFocus={logPopover}
                   onPick={(c, type, typed) => {
-                    const inLib = libraryIndex.get(`${c.source}:${c.source_id}`);
-                    const it = inLib != null ? itemsByIdRef.current.get(inLib) : undefined;
-                    if (it) { setSection('library'); openDetails(it, 'view'); return; }
                     // The typed name stays the display name; the source title lives in source meta.
-                    setPick({ mode: 'add', type, candidate: c, title: typed || c.title });
+                    const add = () => setPick({ mode: 'add', type, candidate: c, title: typed || c.title });
+                    const inLib = inLibrary(c, type);
+                    if (inLib === undefined) { add(); return; }
+                    // Already tracked: open it. If it was deleted since the index loaded, add instead.
+                    void openById(inLib).then((found) => { if (found) setSection('library'); else add(); });
                   }}
                   onAddUnlinked={(title, type) => setPick({ mode: 'add', type, candidate: null, title })}
                 />
               </div>
             )}
             {section === 'history' && v2Schema.progressLog && (
-              <HistoryView
-                onOpen={(id) => {
-                  const it = itemsByIdRef.current.get(id);
-                  if (it) { openDetails(it, 'view'); return; }
-                  void supabase.from('media_tracker').select('*').eq('id', id).maybeSingle().then(({ data }) => {
-                    if (data) openDetails(normalizeMediaItem(data as unknown as MediaItem), 'view');
-                  });
-                }}
-              />
+              <HistoryView onOpen={(id) => { void openById(id); }} />
             )}
             {section === 'more' && (
               <MediaMoreView

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { scoreCandidate, rankCandidates, pickLink, matchBand, titleScore, typeFit, type MatchCandidate } from '@/lib/media-match';
+import { scoreCandidate, rankCandidates, pickLink, matchBand, titleScore, typeFit, buildLibraryLookup, findInLibrary, type MatchCandidate } from '@/lib/media-match';
+import type { Candidate } from '@/lib/media-sources';
 
 // Shapes as the edge's action=search returns them (captured live 2026-09-28).
 const mu = (title: string, alt: string[], format: string, medium: MatchCandidate['medium'], country: string | null,
@@ -106,5 +107,34 @@ describe('typeFit', () => {
     expect(typeFit({ medium: 'screen', format: 'TV', country: 'US' }, 'KDrama')).toBe('family');
     expect(typeFit({ medium: 'anime', format: 'TV', country: 'JP' }, 'Series')).toBe('mismatch');
     expect(typeFit({ medium: 'screen', format: 'Movie', country: 'US' }, 'Movie')).toBe('exact');
+  });
+});
+
+describe('findInLibrary (Browse "In library")', () => {
+  const lib = buildLibraryLookup([
+    { id: 1, title: 'Book eating magicians', type: 'Manhwa', link_status: 'unlinked' },
+    { id: 2, title: 'Solo Leveling', type: 'Manhwa', link_status: 'linked', source: 'anilist', source_id: '105398' },
+    { id: 3, title: 'Frieren Season 2', type: 'Anime', link_status: 'unlinked' },
+    { id: 4, title: '[audit] Omniscient Reader', type: 'Manhwa' },
+  ]);
+  const cand = (title: string, alt: string[] = [], source: Candidate['source'] = 'mangaupdates', source_id = 'x') =>
+    ({ source, source_id, title, alt_titles: alt });
+
+  it('matches an unlinked row on normalised title + type ("The", plural, case)', () => {
+    expect(findInLibrary(lib, cand('The Book Eating Magician'), 'Manhwa')).toBe(1);
+  });
+  it('matches through an alt title, and ignores bracketed tags', () => {
+    expect(findInLibrary(lib, cand('Jeonjijeok Dokja Sijeom', ['Omniscient Reader']), 'Manhwa')).toBe(4);
+  });
+  it('is gated on type', () => {
+    expect(findInLibrary(lib, cand('The Book Eating Magician'), 'Manga')).toBeUndefined();
+  });
+  it('matches a linked row by source id only, never by title', () => {
+    expect(findInLibrary(lib, cand('Solo Leveling', [], 'anilist', '105398'), 'Manhwa')).toBe(2);
+    expect(findInLibrary(lib, cand('Solo Leveling', [], 'mangadex', 'abc'), 'Manhwa')).toBeUndefined();
+  });
+  it('does not treat another season as the same entry', () => {
+    expect(findInLibrary(lib, cand('Frieren'), 'Anime')).toBeUndefined();
+    expect(findInLibrary(lib, cand('Frieren Season 2'), 'Anime')).toBe(3);
   });
 });
