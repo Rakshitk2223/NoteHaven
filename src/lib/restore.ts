@@ -75,6 +75,7 @@ export const IMPORT_MAP_TABLE = 'media_import_map';
 // and restore, never a failure. Every other table's failure stays loud.
 export const NOT_YET_MIGRATED: ReadonlySet<string> = new Set([
   'media_import_map', 'media_link_proposals', 'media_bulk_journal',
+  'media_cover_copies', // migration 30
 ]);
 
 /**
@@ -93,7 +94,9 @@ export function isNotSetUp(table: string, error: unknown): boolean {
 // be a tree of dead links), user_preferences (device-local layout), and
 // media_link_proposals / media_bulk_journal (migration 29: proposals are
 // rebuilt by re-running the resolver, and journal before-values describe rows
-// in the account they came from, so "undoing" them here would write stale data).
+// in the account they came from, so "undoing" them here would write stale data),
+// and media_cover_copies (migration 30: the cover-copy log behind the daily cap;
+// restoring it would skew the cap, and only the edge function may write it).
 
 type Row = Record<string, unknown>;
 type Id = string | number;

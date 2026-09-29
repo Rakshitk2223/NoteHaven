@@ -24,6 +24,8 @@ export const EXPORT_TABLES = [
   // are rebuilt by re-running the resolver, and the journal undoes changes in
   // THIS account, so restoring either would point at the wrong rows.
   'media_import_map', 'media_link_proposals', 'media_bulk_journal',
+  // Migration 30: the cover-copy log (daily cap + provenance). Exported, never restored.
+  'media_cover_copies',
   'subscriptions', 'subscription_categories',
   'ledger_entries', 'ledger_categories', 'ledger_accounts',
   'birthdays', 'countdowns', 'code_snippets', 'snippet_folders', 'tags',

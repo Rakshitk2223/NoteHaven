@@ -56,7 +56,7 @@ const supabase = createClient(supabaseUrl, (serviceKey || anonKey)!, {
 /** Tables RLS will hide from the anon key — an empty dump here is not a backup. */
 const USER_SCOPED = new Set([
   'media_tracker', 'media_tags', 'media_progress_log',
-  'media_import_map', 'media_link_proposals', 'media_bulk_journal',
+  'media_import_map', 'media_link_proposals', 'media_bulk_journal', 'media_cover_copies',
 ]);
 
 // Everything that would be painful or impossible to reconstruct.
@@ -68,6 +68,8 @@ const USER_SCOPED = new Set([
 const TABLES = [
   'media_tracker', 'media_metadata', 'media_tags', 'media_progress_log',
   'media_import_map', 'media_link_proposals', 'media_bulk_journal',
+  // Migration 30: the cover-copy log (where each stored cover came from).
+  'media_cover_copies',
 ] as const;
 
 // Migration-29 tables don't exist until he pastes 29, and that's "not set up
@@ -75,7 +77,7 @@ const TABLES = [
 // fails loudly. Same codes as isMissingTableError (src/lib/work.ts) and
 // isNotSetUp (src/lib/restore.ts); copied because this script can't import
 // src/ (the @/ alias and the app's Supabase client).
-const NOT_YET_MIGRATED = new Set(['media_import_map', 'media_link_proposals', 'media_bulk_journal']);
+const NOT_YET_MIGRATED = new Set(['media_import_map', 'media_link_proposals', 'media_bulk_journal', 'media_cover_copies']);
 const isNotSetUp = (table: string, error: { code?: string } | null) =>
   NOT_YET_MIGRATED.has(table) && (error?.code === 'PGRST205' || error?.code === '42P01');
 
