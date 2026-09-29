@@ -54,8 +54,7 @@ export function MediaDetailPanel({ open, onOpenChange, layout, title, subtitle, 
   const header = (TitleEl: typeof SheetTitle | 'h2', DescEl: typeof SheetDescription | 'div') => (
     <div className={cn(
       'flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4',
-      // The sheet's own close button sits top-right: keep the header clear of it (UX-23).
-      !pane && 'pr-14 sm:pr-14',
+      // The phone sheet is full screen: its header (and so its X) starts below the notch.
       layout === 'phone' && 'pt-[calc(0.75rem+env(safe-area-inset-top))]',
     )}>
       <div className="min-w-0 flex-1">
@@ -74,11 +73,10 @@ export function MediaDetailPanel({ open, onOpenChange, layout, title, subtitle, 
             </Button>
           </>
         )}
-        {pane && (
-          <Button size="icon" variant="ghost" className="h-10 w-10" onClick={() => onOpenChange(false)} aria-label="Close details" title="Close (Esc)">
-            <X className="h-4 w-4" />
-          </Button>
-        )}
+        {/* Our own X in every layout, in the header's flow (never over Edit, never under the notch). */}
+        <Button size="icon" variant="ghost" className="h-10 w-10" onClick={() => onOpenChange(false)} aria-label="Close details" title="Close (Esc)">
+          <X className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );
@@ -109,7 +107,8 @@ export function MediaDetailPanel({ open, onOpenChange, layout, title, subtitle, 
       <SheetContent
         side="right"
         className={cn(
-          'flex flex-col gap-0 p-0',
+          // [&>button]:hidden drops the sheet's built-in top-4 X; the header renders its own.
+          'flex flex-col gap-0 p-0 [&>button]:hidden',
           layout === 'phone' ? 'h-dvh w-full max-w-none sm:max-w-none' : 'w-full sm:max-w-xl',
         )}
       >
