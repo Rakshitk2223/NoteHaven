@@ -3,9 +3,6 @@
 //                                      carrying its own id. Nothing is persisted.
 //   GET  ?action=detail&source&id&type everything the source knows, by id; upserted
 //                                      into media_source_meta (service role).
-//   POST {action:'resolve', items[≤10]} candidates per item for "link your
-//                                      library"; the CLIENT scores them
-//                                      (src/lib/media-match.ts, Vitest-covered).
 //
 // Guarantees (the client relies on them, see src/lib/media-sources.ts):
 //   unknown = null (never 0 / '' / 'upcoming'), statuses normalised, adult
@@ -694,11 +691,9 @@ const asType = (t: string | null): TType | null => {
 
 export async function handleV2(
   action: string,
-  req: Request,
   url: URL,
   cors: Record<string, string>,
   d: V2Deps,
-  body?: Json | null,
 ): Promise<Response> {
   if (action === 'search') {
     const q = (url.searchParams.get('q') || '').trim().slice(0, 200);
@@ -729,20 +724,6 @@ export async function handleV2(
       if (code === 'error') console.error(`detail ${source}/${id} failed:`, e instanceof Error ? e.message : e);
       return json({ action, detail: null, error: code }, cors);
     }
-  }
-
-  if (action === 'resolve') {
-    const items = Array.isArray(body?.items) ? (body!.items as Json[]).slice(0, 10) : [];
-    const results: Array<{ id: number; candidates: Candidate[] }> = [];
-    for (const it of items) {
-      const id = Number(it?.id);
-      const title = typeof it?.title === 'string' ? it.title.trim().slice(0, 200) : '';
-      const type = asType(typeof it?.type === 'string' ? it.type : null);
-      if (!Number.isFinite(id) || !title || !type) continue;
-      const { candidates } = await searchAll(d, title, type, 5);
-      results.push({ id, candidates });
-    }
-    return json({ action, results }, cors);
   }
 
   return json({ error: `unknown action "${action}"` }, cors, 400);

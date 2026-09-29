@@ -1441,20 +1441,16 @@ Deno.serve(async (req) => {
     const source = searchParams.get('source');
     const refresh = ['1', 'true'].includes((searchParams.get('refresh') || '').toLowerCase());
 
-    // Media v2 actions (search | detail | resolve). The legacy q= / source= /
+    // Media v2 actions (search | detail). The legacy q= / source= /
     // batch paths below stay as they were: unlinked entries still use them.
     const v2Deps = { supabase, pacedFetch, env: (k: string) => Deno.env.get(k) || '', cacheWrites: CACHE_WRITES };
     const action = searchParams.get('action');
     if (action) {
-      return await handleV2(action, req, new URL(req.url), corsHeaders, v2Deps);
+      return await handleV2(action, new URL(req.url), corsHeaders, v2Deps);
     }
 
-    // Batch endpoint: POST with { items: [...] }  (or a v2 POST with { action })
+    // Batch endpoint: POST with { items: [...] }
     if (req.method === 'POST' && !query) {
-      const body = await req.clone().json().catch(() => null) as Record<string, unknown> | null;
-      if (body && typeof body.action === 'string') {
-        return await handleV2(body.action, req, new URL(req.url), corsHeaders, v2Deps, body);
-      }
       return await handleBatchSearch(req, supabase);
     }
 
