@@ -12,6 +12,8 @@ function builder(table: string) {
     _patch: null as Row | null,
     _filters: [] as Array<[string, string, unknown]>,
     _in: null as null | [string, unknown[]],
+    _head: false,
+    _limit: Infinity,
     update(patch: Row) { q._op = 'update'; q._patch = patch; return q; },
     delete() { q._op = 'delete'; return q; },
     insert(rows: Row[]) {
@@ -22,9 +24,12 @@ function builder(table: string) {
     eq(c: string, v: unknown) { q._filters.push(['eq', c, v]); return q; },
     is(c: string, v: unknown) { q._filters.push(['is', c, v]); return q; },
     in(c: string, v: unknown[]) { q._in = [c, v]; return q.run(); },
-    order() { return q; },
+    order(_c?: string, o?: { ascending?: boolean }) { if (o?.ascending === false) q._desc = true; return q; },
+    _desc: false,
+    limit(n: number) { q._limit = n; return q.run(); },
     range() { return q.run(); },
-    select() { return q._op === 'select' ? q : q.run(); },
+    select(_c?: string, o?: { head?: boolean }) { if (o?.head) q._head = true; return q._op === 'select' ? q : q.run(); },
+    then(res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) { return q.run().then(res, rej); },
     matches(r: Row) { return q._filters.every(([op, c, v]) => (op === 'is' ? (r[c] ?? null) === v : r[c] === v)); },
     run() {
       if (table === 'media_bulk_journal') {
@@ -32,7 +37,10 @@ function builder(table: string) {
           for (const r of journal) if ((q._in[1] as number[]).includes(r.id as number)) Object.assign(r, q._patch);
           return Promise.resolve({ error: null });
         }
-        return Promise.resolve({ data: journal.filter((r) => q.matches(r)), error: null });
+        let rows = journal.filter((r) => q.matches(r));
+        if (q._head) return Promise.resolve({ count: rows.length, error: null });
+        if (q._desc) rows = [...rows].reverse(); // insertion order = created_at order here
+        return Promise.resolve({ data: rows.slice(0, q._limit), error: null });
       }
       // media_tracker update / delete, guarded
       const hit = [...tracker.values()].filter((r) => q.matches(r));
@@ -51,7 +59,7 @@ const fake = {
 };
 vi.mock('@/integrations/supabase/client', () => ({ supabase: fake }));
 
-const { writeJournal, undoBatch } = await import('../media-bulk');
+const { writeJournal, undoBatch, latestUndoableBatch } = await import('../media-bulk');
 
 beforeEach(() => { tracker.clear(); journal = []; logs.length = 0; });
 
@@ -124,5 +132,22 @@ describe('bulk journal + undo', () => {
     expect(tracker.get(2)!.current_chapter).toBe(20);
     const again = await undoBatch('new');
     expect(again).toEqual({ restored: 0, removed: 0, skipped: 0, failed: 0 });
+  });
+
+  it('a single cover pick after an import does not take over "Undo last bulk change"', async () => {
+    tracker.set(1, { id: 1, user_id: 'u', current_chapter: 40 });
+    tracker.set(2, { id: 2, user_id: 'u', current_chapter: 9 });
+    await writeJournal('imp', 'import', [
+      { media_id: 1, op: 'update', before: { current_chapter: 10 }, after: { current_chapter: 40 } },
+      { media_id: 2, op: 'update', before: { current_chapter: 3 }, after: { current_chapter: 9 } },
+    ]);
+    await writeJournal('pick', 'cover', [{ media_id: 1, op: 'update', before: { cover_image: null }, after: { cover_image: 'x', cover_pinned: false } }]);
+    expect(await latestUndoableBatch()).toMatchObject({ batch_id: 'imp', kind: 'import', rows: 2 });
+    // A real bulk cover fix (2+ rows) is a bulk change and does show.
+    await writeJournal('fix', 'cover', [
+      { media_id: 1, op: 'update', before: { cover_image: 'x' }, after: { cover_image: 'y' } },
+      { media_id: 2, op: 'update', before: { cover_image: null }, after: { cover_image: 'z' } },
+    ]);
+    expect(await latestUndoableBatch()).toMatchObject({ batch_id: 'fix', kind: 'cover', rows: 2 });
   });
 });

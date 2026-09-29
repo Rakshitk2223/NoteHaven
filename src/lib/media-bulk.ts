@@ -70,23 +70,38 @@ export async function writeJournal(batchId: string, kind: BulkKind, entries: Jou
   }
 }
 
-/** The newest bulk change that hasn't been undone, or null. */
+/**
+ * The newest BULK change that hasn't been undone, or null. A one-row 'cover'
+ * batch is a single pick or single fix ("Change cover…", "Use this"): it has its
+ * own toast Undo and must not take over "Undo last bulk change" from the import
+ * or link batch behind it (whose Undo would then skip the now-pinned cover).
+ */
 export async function latestUndoableBatch(): Promise<BulkBatch | null> {
   const { data, error } = await supabase
     .from('media_bulk_journal' as never)
     .select('batch_id, kind, created_at')
     .is('undone_at', null)
     .order('created_at', { ascending: false })
-    .limit(1);
+    .limit(200);
   if (error || !data?.length) return null;
-  const top = data[0] as unknown as Omit<BulkBatch, 'rows'>;
-  const { count } = await supabase
-    .from('media_bulk_journal' as never)
-    .select('id', { count: 'exact', head: true })
-    .eq('batch_id', top.batch_id)
-    .is('undone_at', null);
-  return { ...top, rows: count ?? 0 };
+  const seen = new Set<string>();
+  for (const r of data as unknown as Array<Omit<BulkBatch, 'rows'>>) {
+    if (seen.has(r.batch_id)) continue;
+    seen.add(r.batch_id);
+    const { count } = await supabase
+      .from('media_bulk_journal' as never)
+      .select('id', { count: 'exact', head: true })
+      .eq('batch_id', r.batch_id)
+      .is('undone_at', null);
+    const rows = count ?? 0;
+    if (isSingleCoverChange(r.kind, rows)) continue;
+    return { ...r, rows };
+  }
+  return null;
 }
+
+/** A one-title cover change (a pick or a single fix): not a "bulk change". */
+export const isSingleCoverChange = (kind: BulkKind, rows: number) => kind === 'cover' && rows <= 1;
 
 // Structural type for a filter chain whose column names are runtime values.
 type Guarded = {
