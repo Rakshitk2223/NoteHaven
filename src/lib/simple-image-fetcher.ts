@@ -108,7 +108,7 @@ async function fetchFromMediaMetadata(
 
 // Main function - FAST!
 export async function fetchImagesFromSupabase(
-  items: Array<{ id: number; title: string; type: string }>
+  items: Array<{ id: number; title: string; type: string; linked?: boolean }>
 ): Promise<BatchImageResponse> {
   if (items.length === 0) {
     return { found: 0, notFound: 0, fetchedFromAPI: 0, results: [] };
@@ -125,10 +125,13 @@ export async function fetchImagesFromSupabase(
   const cached = readImageCache();
   const cacheHits = new Map<number, string>();
   const cacheSources = new Map<number, string>();
-  const needsDbCheck: Array<{ id: number; title: string; type: string }> = [];
+  const needsDbCheck: Array<{ id: number; title: string; type: string; linked?: boolean }> = [];
 
   if (cached) {
     items.forEach(item => {
+      // A LINKED row reads only its stored cover: the cache may still hold a cover
+      // an old by-title lookup found for it (a junk legacy row's art).
+      if (item.linked) { needsDbCheck.push(item); return; }
       const hit = cached.images.get(item.id);
       if (hit) {
         cacheHits.set(item.id, hit);
@@ -144,7 +147,9 @@ export async function fetchImagesFromSupabase(
 
   // Step 2: Check media_tracker.cover_image (fastest - direct column)
   const { images: trackerImages, found: trackerFound } = await fetchFromMediaTracker(needsDbCheck);
-  const stillNeedMetadata = needsDbCheck.filter(item => !trackerFound.has(item.id));
+  // Linked rows never take a cover looked up BY TITLE (the page falls back to the
+  // source's own art, judged); unlinked rows keep the legacy lookup for now.
+  const stillNeedMetadata = needsDbCheck.filter(item => !trackerFound.has(item.id) && !item.linked);
 
   // Step 3: Check media_metadata (cross-table lookup)
   const { images: metaImages, sources: metaSources } = await fetchFromMediaMetadata(stillNeedMetadata);

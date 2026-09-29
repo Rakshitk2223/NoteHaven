@@ -390,7 +390,7 @@ export async function readSourceMeta(source: MediaSource, sourceId: string): Pro
  * per-episode lists, cast and banner stay for the detail view (readSourceMeta).
  */
 export const SOURCE_META_SLIM =
-  'source, source_id, title, genres, status, score, chapters, episodes, total_seasons, seasons, latest_chapter, description, runtime, next_airing';
+  'source, source_id, title, genres, status, score, chapters, episodes, total_seasons, seasons, latest_chapter, description, runtime, next_airing, cover';
 
 export async function readSourceMetaBatch(
   pairs: Array<{ source: MediaSource; source_id: string }>,

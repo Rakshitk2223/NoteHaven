@@ -86,6 +86,7 @@ import { holdReload } from '@/lib/app-update';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { SOURCE_META_SLIM, detectMediaV2Schema, linkEntry, readSourceMeta, readSourceMetaBatch, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
 import { buildMetaIndex, detailToMeta, linkedMeta, plausibleMeta } from '@/components/media/source-meta';
+import { coverVerdict } from '@/lib/cover-medium';
 import { isUsableCover } from '@/lib/cover-medium';
 import { cleanResumeUrl, isShelved, progressFieldOf, statusOptionsFor, type MediaFormData } from '@/components/media/types';
 import { CoverArt } from '@/components/media/CoverArt';
@@ -681,7 +682,7 @@ const MediaTracker = () => {
 
     devLog(`lazy loading ${unloaded.length} visible covers...`);
     fetchImagesFromSupabaseBatch(
-      unloaded.map(item => ({ id: item.id, title: item.title, type: item.type }))
+      unloaded.map(item => ({ id: item.id, title: item.title, type: item.type, linked: item.link_status === 'linked' }))
     ).then((response) => {
       const newUrlMap = new Map<number, string | null>();
       response.results.forEach(result => {
@@ -709,7 +710,7 @@ const MediaTracker = () => {
     if (none.size) setImageUrls(prev => new Map([...prev, ...none]));
     if (initialItems.length === 0) return;
     fetchImagesFromSupabaseBatch(
-      initialItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
+      initialItems.map(item => ({ id: item.id, title: item.title, type: item.type, linked: item.link_status === 'linked' }))
     ).then((response) => {
       const newUrlMap = new Map<number, string | null>();
       response.results.forEach(result => {
@@ -786,27 +787,35 @@ const MediaTracker = () => {
   // Linked titles: the source's own metadata (media_source_meta, a slim select),
   // merged over legacy in metaById below. Keyed on the link, so a Fix match refetches.
   const [sourceMetaMap, setSourceMetaMap] = useState<Map<number, MediaMeta>>(() => new Map());
+  // A linked title with no stored cover shows its source's own art (judged), never a by-title guess.
+  const [sourceCoverMap, setSourceCoverMap] = useState<Map<number, string>>(() => new Map());
   const sourceMetaAttemptedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!v2Schema.sourceLinks) return;
-    const todo = new Map<string, { id: number; source: MediaSource; source_id: string }>();
+    const todo = new Map<string, { id: number; type: string; noCover: boolean; source: MediaSource; source_id: string }>();
     for (const i of [...mediaItems, ...railItems]) {
       if (i.link_status !== 'linked' || !i.source || !i.source_id) continue;
       const key = `${i.id}:${i.source}:${i.source_id}`;
       if (sourceMetaAttemptedRef.current.has(key)) continue;
       sourceMetaAttemptedRef.current.add(key);
-      todo.set(key, { id: i.id, source: i.source as MediaSource, source_id: i.source_id });
+      todo.set(key, { id: i.id, type: i.type, noCover: wantsNoCover(i), source: i.source as MediaSource, source_id: i.source_id });
     }
     if (todo.size === 0) return;
     const wanted = [...todo.values()];
     readSourceMetaBatch(wanted.map(({ source, source_id }) => ({ source, source_id })), SOURCE_META_SLIM)
       .then((details) => {
         const got = new Map<number, MediaMeta>();
+        const covers = new Map<number, string>();
         for (const w of wanted) {
           const d = details.get(`${w.source}:${w.source_id}`);
-          if (d) got.set(w.id, detailToMeta(d));
+          if (!d) continue;
+          got.set(w.id, detailToMeta(d));
+          // "Remove cover" (pinned + none) stays none; wrong-kind / unloadable art never shows.
+          const v = d.cover && !w.noCover ? coverVerdict(d.cover, w.type, 'source') : null;
+          if (d.cover && v && v !== 'wrong-medium' && v !== 'blocked') covers.set(w.id, d.cover);
         }
         if (got.size) setSourceMetaMap((prev) => new Map([...prev, ...got]));
+        if (covers.size) setSourceCoverMap((prev) => new Map([...prev, ...covers]));
       })
       .catch((err) => console.error('Source metadata load error:', err));
   }, [mediaItems, railItems, v2Schema.sourceLinks]);
@@ -815,6 +824,15 @@ const MediaTracker = () => {
     () => buildMetaIndex(metadataMap, sourceMetaMap, [...mediaItems, ...railItems]),
     [metadataMap, sourceMetaMap, mediaItems, railItems],
   );
+  /** What each cover slot shows: the resolved cover, else (linked rows) the source's judged art. */
+  const displayCovers = useMemo(() => {
+    if (sourceCoverMap.size === 0) return imageUrls;
+    const out = new Map(imageUrls);
+    for (const [id, url] of sourceCoverMap) if (!out.get(id)) out.set(id, url);
+    return out;
+  }, [imageUrls, sourceCoverMap]);
+  const displayCoversRef = useRef(displayCovers);
+  displayCoversRef.current = displayCovers;
 
   // Persist a light projection of the metadata map so revisits are instant.
   useEffect(() => {
@@ -844,7 +862,7 @@ const MediaTracker = () => {
     if (none.size) setImageUrls((prev) => new Map([...prev, ...none]));
     if (todo.length === 0) return;
     todo.forEach((i) => railCoversRef.current.add(i.id));
-    fetchImagesFromSupabaseBatch(todo.map((i) => ({ id: i.id, title: i.title, type: i.type })))
+    fetchImagesFromSupabaseBatch(todo.map((i) => ({ id: i.id, title: i.title, type: i.type, linked: i.link_status === 'linked' })))
       .then((response) => {
         const urls = new Map<number, string | null>();
         response.results.forEach((r) => urls.set(r.id, r.imageUrl));
@@ -1030,7 +1048,7 @@ const MediaTracker = () => {
     // cover loads (the old jarring behaviour). The resolver effect below fills
     // the in-scope set so the list is complete without scrolling.
     if (needsCoverOnly) {
-      base = base.filter((i) => !i.cover_image && imageUrls.get(i.id) === null);
+      base = base.filter((i) => !i.cover_image && imageUrls.get(i.id) === null && !displayCovers.get(i.id));
     }
 
     // "What should I watch?" quick filter.
@@ -1050,7 +1068,7 @@ const MediaTracker = () => {
     }
 
     return base;
-  }, [categoryFilteredItems, needsCoverOnly, imageUrls, progressFilter, sortBy, sortOrder, metaById, selectedGenres]);
+  }, [categoryFilteredItems, needsCoverOnly, imageUrls, displayCovers, progressFilter, sortBy, sortOrder, metaById, selectedGenres]);
 
   // When "Needs cover" is on, resolve covers for the in-scope set (not just the
   // visible rows), in chunks, so every item actually missing artwork surfaces.
@@ -1059,7 +1077,7 @@ const MediaTracker = () => {
     const unresolved = categoryFilteredItems.filter((i) => !imageUrls.has(i.id)).slice(0, 200);
     if (unresolved.length === 0) return;
     let cancelled = false;
-    fetchImagesFromSupabaseBatch(unresolved.map((i) => ({ id: i.id, title: i.title, type: i.type })))
+    fetchImagesFromSupabaseBatch(unresolved.map((i) => ({ id: i.id, title: i.title, type: i.type, linked: i.link_status === 'linked' })))
       .then((response) => {
         if (cancelled) return;
         const urls = new Map<number, string | null>();
@@ -2097,7 +2115,7 @@ const MediaTracker = () => {
     const next = !item.cover_pinned;
     // Pinning a cover that's only on screen (looked up by title, cover_image still empty)
     // saves it too; otherwise the pin would lock in "no cover". Undo restores both.
-    const shown = imageUrlsRef.current.get(item.id);
+    const shown = displayCoversRef.current.get(item.id);
     const saveShown = next && !item.cover_image && !!shown;
     const res = await setCoverPinned(item.id, next, saveShown ? { cover: shown } : {});
     if (res.ok === false) { toast({ title: 'Could not change the pin', description: res.message || res.reason, variant: 'destructive' }); return; }
@@ -3049,7 +3067,7 @@ const MediaTracker = () => {
               <>
                 <ContinueShelf
                   entries={continueQueue}
-                  covers={imageUrls}
+                  covers={displayCovers}
                   onAdvance={advanceQueueEntry}
                   onOpen={(id) => {
                     // railItems first: a rail entry is frequently outside the
@@ -3061,7 +3079,7 @@ const MediaTracker = () => {
                 />
                 <AiringSoon
                   episodes={airingSoon}
-                  covers={imageUrls}
+                  covers={displayCovers}
                   onOpen={(id) => {
                     const target = railItems.find((m) => m.id === id) ?? mediaItems.find((m) => m.id === id);
                     if (target) openDetails(target, 'view');
@@ -3144,7 +3162,7 @@ const MediaTracker = () => {
                     size={gridSize}
                     paneOpen={paneOpen}
                     activeId={paneOpen ? editingItem?.id : null}
-                    covers={imageUrls}
+                    covers={displayCovers}
                     metas={metaById}
                     selectedIds={selectedIds}
                     selectMode={inSelectMode}
@@ -3161,7 +3179,7 @@ const MediaTracker = () => {
                       <MediaListRow
                         key={item.id}
                         item={item}
-                        cover={imageUrls.get(item.id)}
+                        cover={displayCovers.get(item.id)}
                         meta={metaById.get(item.id) ?? null}
                         isUpdating={updatingIds.has(item.id)}
                         onScheduleLoad={scheduleImageLoad}
@@ -3203,7 +3221,7 @@ const MediaTracker = () => {
               </Button>
               <MediaActionsMenu
                 item={editingItem}
-                hasCover={!!(imageUrls.get(editingItem.id) ?? editingItem.cover_image)}
+                hasCover={!!(displayCovers.get(editingItem.id) ?? editingItem.cover_image)}
                 onTogglePin={v2Schema.sourceLinks ? togglePin : undefined}
                 // One cover pipeline (migration 29): pick from source / reader / web, with Undo.
                 onChangeCover={v2Schema.importLink ? (i) => setChangeCoverFor(i) : undefined}
@@ -3225,7 +3243,7 @@ const MediaTracker = () => {
             <MediaDetailView
               item={editingItem}
               meta={detailMeta}
-              cover={imageUrls.get(editingItem.id)}
+              cover={displayCovers.get(editingItem.id)}
               tags={editingItemTags}
               busy={updatingIds.has(editingItem.id)}
               onPatch={patchMedia}
