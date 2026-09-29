@@ -42,9 +42,50 @@ export async function fixInChunks(
       out.written.push(...res.written);
       Object.assign(out.skipped, res.skipped);
     } catch (e) {
+      // setCovers' CoverJournalError says what it DID journal in this call (safe to Undo).
+      const landed = (e as { result?: CoverWriteResult }).result;
+      if (landed) {
+        out.batchId = out.batchId ?? landed.batchId;
+        out.written.push(...landed.written);
+        Object.assign(out.skipped, landed.skipped);
+      }
       throw Object.assign(e instanceof Error ? e : new Error(String(e)), { partial: out });
     }
     onProgress?.(Math.min(i + 5, fixable.length), fixable.length);
   }
   return out;
+}
+
+export interface PickDeps {
+  setCover: (id: number, url: string | null, origin: CoverOrigin, opts: { expect: string | null }) => Promise<CoverWriteResult>;
+  setCoverPinned: (id: number, pinned: boolean) => Promise<{ ok: true; undo: () => Promise<boolean> } | { ok: false; reason: string; message?: string }>;
+  undoBatch: (batchId: string) => Promise<{ restored: number }>;
+}
+
+export type PickOutcome =
+  | { ok: true; pinned: boolean; undo: () => Promise<boolean> }
+  | { ok: false; reason: string };
+
+/**
+ * A "Change cover…" pick is HIS pick, and his pick always wins (PLAN §D): write
+ * the cover through the one writer (compare-and-swap on the cover he saw), then
+ * PIN it, so no later link or "Fix all" replaces it. Picking the current cover
+ * just pins it. Undo reverses both, pin first: the cover's own journal entry
+ * only restores while the row is unpinned (the guard that protects a later pin).
+ */
+export async function pickCover(row: CoverRow, url: string, origin: CoverOrigin, deps: PickDeps): Promise<PickOutcome> {
+  let batchId: string | null = null;
+  if (url !== row.cover_image) {
+    const res = await deps.setCover(row.id, url, origin, { expect: row.cover_image });
+    if (!res.written.includes(row.id)) return { ok: false, reason: res.skipped[row.id] ?? 'not-found' };
+    batchId = res.batchId;
+  }
+  const undoCover = async () => (batchId ? (await deps.undoBatch(batchId)).restored > 0 : true);
+  const pin = await deps.setCoverPinned(row.id, true);
+  if (pin.ok === false) return { ok: true, pinned: false, undo: undoCover };
+  return {
+    ok: true,
+    pinned: true,
+    undo: async () => (await pin.undo()) && undoCover(),
+  };
 }

@@ -2637,10 +2637,10 @@ const MediaTracker = () => {
               <ChangeCover
                 item={changeCoverFor}
                 onOpenChange={(o) => { if (!o) setChangeCoverFor(null); }}
-                onChanged={(url, origin) => {
+                onChanged={(url, origin, pinned) => {
                   const id = changeCoverFor.id;
                   setImageUrls((prev) => new Map([...prev, [id, url]]));
-                  patchCachedItem(id, { cover_image: url ?? undefined, ...(origin ? { cover_origin: origin } : {}) } as Partial<MediaItem>);
+                  patchCachedItem(id, { cover_image: url ?? undefined, cover_pinned: pinned, ...(origin ? { cover_origin: origin } : {}) } as Partial<MediaItem>);
                   void queryClient.invalidateQueries({ queryKey: ['mediaWrongCovers'] });
                 }}
               />

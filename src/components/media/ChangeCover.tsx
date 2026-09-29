@@ -8,7 +8,8 @@ import { cn } from '@/lib/utils';
 import { undoBatch } from '@/lib/media-bulk';
 import type { CoverOrigin } from '@/lib/cover-medium';
 import { coverCandidates, setCover, type CoverOption } from '@/lib/media-cover';
-import { coverRowOf } from './cover-row';
+import { setCoverPinned } from '@/lib/media-link';
+import { coverRowOf, pickCover } from './cover-row';
 import { SOURCE_LABEL, type MediaSource } from '@/lib/media-sources';
 import { CoverArt } from './CoverArt';
 import type { MediaItem } from './types';
@@ -30,8 +31,8 @@ const VERDICT_NOTE: Record<string, string | null> = {
 export default function ChangeCover({ item, onOpenChange, onChanged }: {
   item: MediaItem;
   onOpenChange: (open: boolean) => void;
-  /** After a write (or its Undo): the cover now stored. */
-  onChanged: (url: string | null, origin: CoverOrigin | null) => void;
+  /** After a write (or its Undo): the cover now stored, and whether it's pinned. */
+  onChanged: (url: string | null, origin: CoverOrigin | null, pinned: boolean) => void;
 }) {
   const { toast } = useToast();
   const row = coverRowOf(item);
@@ -65,32 +66,32 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
   };
 
   const pick = async (o: CoverOption) => {
-    if (o.url === row.cover_image) { onOpenChange(false); return; }
     setSaving(o.url);
     try {
-      const res = await setCover(row.id, o.url, o.origin, { expect: row.cover_image });
-      if (!res.written.includes(row.id)) {
-        const why = res.skipped[row.id];
+      // His pick always wins: the cover goes in AND gets pinned (see pickCover).
+      const res = await pickCover(row, o.url, o.origin, { setCover, setCoverPinned, undoBatch });
+      if (res.ok === false) {
         toast({
           title: 'Cover not changed',
-          description: why === 'pinned' ? 'It’s pinned: unpin it first.'
-            : why === 'changed' ? 'It changed since you opened this. Try again.'
-            : why === 'rejected' ? 'That image isn’t the right kind of art for this title.'
+          description: res.reason === 'pinned' ? 'It’s pinned: unpin it first.'
+            : res.reason === 'changed' ? 'It changed since you opened this. Try again.'
+            : res.reason === 'rejected' ? 'That image isn’t the right kind of art for this title.'
             : 'This title couldn’t be found.',
           variant: 'destructive',
         });
         return;
       }
-      onChanged(o.url, o.origin);
+      onChanged(o.url, o.url === row.cover_image ? row.cover_origin : o.origin, res.pinned);
       onOpenChange(false);
-      const was = { url: row.cover_image, origin: row.cover_origin };
+      const was = { url: row.cover_image, origin: row.cover_origin, pinned: !!row.cover_pinned };
       toast({
-        title: 'Cover changed',
-        action: res.batchId ? (
+        title: res.pinned ? 'Cover changed and pinned' : 'Cover changed',
+        description: res.pinned ? 'Linking and cover fixes will keep it.' : 'It couldn’t be pinned; unpinned covers can be replaced by fixes.',
+        action: (
           <ToastAction altText="Undo cover change" onClick={() => {
-            void undoBatch(res.batchId!).then((u) => { if (u.restored) onChanged(was.url, was.origin); });
+            void res.undo().then((ok) => { if (ok) onChanged(was.url, was.origin, was.pinned); });
           }}>Undo</ToastAction>
-        ) : undefined,
+        ),
       });
     } catch (e) {
       toast({ title: 'Couldn’t change the cover', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
