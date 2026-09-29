@@ -29,6 +29,8 @@ export interface ApplyOutcome {
   stoppedEarly: boolean;
   /** Of that chunk, changes the rollback could NOT put back (live, with no Undo). */
   notPutBack: number;
+  /** Import-map keys that couldn't be saved: not a failure (the next import re-matches by title). */
+  mapNotSaved: number;
 }
 
 // Rows written before their journal entry lands: a small crash window (iOS can
@@ -156,13 +158,21 @@ async function applyRowParts(
   return skipped;
 }
 
-async function upsertMap(writes: ImportMapWrite[], userId: string): Promise<void> {
+/** Save the import-map keys; returns how many couldn't be saved (never throws). */
+async function upsertMap(writes: ImportMapWrite[], userId: string): Promise<number> {
+  let notSaved = 0;
   for (let i = 0; i < writes.length; i += 500) {
-    const rows = writes.slice(i, i + 500).map((w) => ({ ...w, user_id: userId, origin: 'tachimanga', last_seen_at: new Date().toISOString() }));
-    const { error } = await supabase.from('media_import_map' as never).upsert(rows as never, { onConflict: 'user_id,origin,origin_key' });
-    // The map only speeds up the next import's matching: never fail the import over it.
-    if (error) console.warn('media_import_map upsert failed:', error.message);
+    const chunk = writes.slice(i, i + 500);
+    const rows = chunk.map((w) => ({ ...w, user_id: userId, origin: 'tachimanga', last_seen_at: new Date().toISOString() }));
+    try {
+      const { error } = await supabase.from('media_import_map' as never).upsert(rows as never, { onConflict: 'user_id,origin,origin_key' });
+      // The map only speeds up the next import's matching: reported, never an import failure.
+      if (error) { console.warn('media_import_map upsert failed:', error.message); notSaved += chunk.length; }
+    } catch {
+      notSaved += chunk.length;
+    }
   }
+  return notSaved;
 }
 
 /**
@@ -175,7 +185,7 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
   if (!userId) throw new Error('Not signed in');
 
   const batchId = newBatchId();
-  const out: ApplyOutcome = { batchId, updated: 0, added: 0, skipped: 0, failed: 0, stoppedEarly: false, notPutBack: 0 };
+  const out: ApplyOutcome = { batchId, updated: 0, added: 0, skipped: 0, failed: 0, stoppedEarly: false, notPutBack: 0, mapNotSaved: 0 };
   const snap = new Map((rows as Snapshot[]).map((r) => [r.id, r]));
   const mapWrites: ImportMapWrite[] = [];
 
@@ -249,6 +259,6 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
     if (!(await flush(entries))) return out;
   }
 
-  await upsertMap(mapWrites, userId);
+  out.mapNotSaved = await upsertMap(mapWrites, userId);
   return out;
 }

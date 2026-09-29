@@ -181,6 +181,13 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
           }}>Undo</ToastAction>
         ) : undefined,
       });
+      // Separate from the result: a lost match key costs a title-match next time, nothing more.
+      if (r.mapNotSaved) {
+        toast({
+          title: `Couldn’t remember ${r.mapNotSaved} match${r.mapNotSaved === 1 ? '' : 'es'}`,
+          description: 'The next import will match them by title again.',
+        });
+      }
       onClose();
     } catch (e) {
       toast({ title: 'Import failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });

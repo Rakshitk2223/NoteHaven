@@ -8,6 +8,7 @@ let journal: Row[] = [];
 const logs: Row[] = [];
 const importMap: Row[] = [];
 let failJournal = false;
+let failMap = false;
 let failUpdate: ((patch: Row) => boolean) | null = null;
 const mediaTags: Row[] = [];
 let nextId = 100;
@@ -30,7 +31,7 @@ function builder(table: string) {
       }
       q._op = 'insert'; q._rows = rows; return q;
     },
-    upsert(rows: Row[]) { importMap.push(...rows); return Promise.resolve({ error: null }); },
+    upsert(rows: Row[]) { if (failMap) return Promise.resolve({ error: { message: 'map down' } }); importMap.push(...rows); return Promise.resolve({ error: null }); },
     eq(c: string, v: unknown) { q._filters.push(['eq', c, v]); return q; },
     is(c: string, v: unknown) { q._filters.push(['is', c, v]); return q; },
     in(c: string, v: unknown[]) { q._in = [c, v]; return q.run(); },
@@ -97,7 +98,7 @@ const plan = (over: Partial<ImportPlan> = {}): ImportPlan => ({
 });
 const put = (s: PlanTrackerRow) => tracker.set(s.id, { ...s, user_id: 'u', current_season: null, current_episode: null });
 
-beforeEach(() => { tracker.clear(); journal = []; logs.length = 0; importMap.length = 0; mediaTags.length = 0; failJournal = false; failUpdate = null; });
+beforeEach(() => { tracker.clear(); journal = []; logs.length = 0; importMap.length = 0; mediaTags.length = 0; failJournal = false; failMap = false; failUpdate = null; });
 
 describe('applyImport', () => {
   it('moves progress forward with the reader latest in the same write, journals it, logs History and maps the key', async () => {
@@ -224,5 +225,15 @@ describe('applyImport', () => {
     const second = await applyImport(p2, initialSelection(p2), [s2]);
     expect(second).toMatchObject({ updated: 0, added: 0, skipped: 0, failed: 0 });
     expect(journal.length).toBe(journaled);
+  });
+
+  it('reports import-map keys it couldn’t save, without calling the import failed', async () => {
+    const s1 = snap(1); put(s1);
+    failMap = true;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const p = plan({ forward: [planRow(1)] });
+    const r = await applyImport(p, initialSelection(p), [s1]);
+    expect(r).toMatchObject({ updated: 1, failed: 0, mapNotSaved: 1 });
+    expect(tracker.get(1)!.current_chapter).toBe(20);
   });
 });
