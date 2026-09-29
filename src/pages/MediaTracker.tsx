@@ -275,17 +275,18 @@ const MediaListRow = ({
 
       {/* Title + source meta + synopsis */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        {/* Two lines before the ellipsis: at 390 one line kept ~10 characters, so similar titles blurred (UX-20). */}
+        <div className="flex items-start gap-2">
           <button
             type="button"
             onClick={() => onOpenDetails(item, 'view')}
-            className="truncate text-left text-sm font-semibold transition-colors hover:text-primary"
+            className="line-clamp-2 min-w-0 break-words text-left text-sm font-semibold leading-snug transition-colors hover:text-primary"
             title={item.title}
           >
             {item.title}
           </button>
           {airing && (
-            <Badge className={cn('hidden border-0 text-[10px] sm:inline-flex', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>
+            <Badge className={cn('hidden flex-shrink-0 border-0 text-[10px] sm:inline-flex', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>
           )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
