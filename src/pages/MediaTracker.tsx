@@ -401,6 +401,14 @@ const MediaListRow = ({
   );
 };
 
+// "Remove cover" = pinned + null: the letter tile, never a cover looked up by title.
+const wantsNoCover = (i: Pick<MediaItem, 'cover_pinned' | 'cover_image'>) => !!i.cover_pinned && !i.cover_image;
+/** Split lazy-cover work: pinned-empty titles resolve to null (no fetch), the rest get fetched. */
+const splitNoCover = <T extends Pick<MediaItem, 'id' | 'cover_pinned' | 'cover_image'>>(items: T[]) => ({
+  fetch: items.filter((i) => !wantsNoCover(i)),
+  none: new Map<number, string | null>(items.filter(wantsNoCover).map((i) => [i.id, null])),
+});
+
 const tagKey = (tags: Tag[]) => tags.map((t) => t.name.toLowerCase()).sort().join('\u0000');
 
 const MediaTracker = () => {
@@ -667,7 +675,8 @@ const MediaTracker = () => {
     if (mediaItems.length === 0) return;
 
     const visible = mediaItems.filter(item => visibleItemsRef.current.has(item.id));
-    const unloaded = visible.filter(item => !imageUrlsRef.current.has(item.id));
+    const { fetch: unloaded, none } = splitNoCover(visible.filter(item => !imageUrlsRef.current.has(item.id)));
+    if (none.size) setImageUrls(prev => new Map([...prev, ...none]));
 
     if (unloaded.length === 0) return;
 
@@ -700,7 +709,9 @@ const MediaTracker = () => {
   useEffect(() => {
     if (mediaItems.length === 0 || imageUrls.size > 0) return;
 
-    const initialItems = mediaItems.slice(0, 30);
+    const { fetch: initialItems, none } = splitNoCover(mediaItems.slice(0, 30));
+    if (none.size) setImageUrls(prev => new Map([...prev, ...none]));
+    if (initialItems.length === 0) return;
     fetchImagesFromSupabaseBatch(
       initialItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
     ).then((response) => {
@@ -734,9 +745,10 @@ const MediaTracker = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) return [] as MediaItem[];
-      const { data, error } = await supabase
+      const BASE = 'id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, has_new_content, last_known_total_episodes, last_known_total_seasons';
+      const run = (cols: string) => supabase
         .from('media_tracker')
-        .select('id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, has_new_content, last_known_total_episodes, last_known_total_seasons')
+        .select(cols)
         .eq('user_id', user.id)
         .neq('status', 'Completed')
         // last_activity_at is null for rows untouched since migration 11a, so
@@ -744,8 +756,11 @@ const MediaTracker = () => {
         .order('last_activity_at', { ascending: false, nullsFirst: false })
         .order('updated_at', { ascending: false, nullsFirst: false })
         .limit(150);
+      // cover_pinned is migration 28's; retry without it on a database that lacks it.
+      let { data, error } = await run(`${BASE}, cover_pinned`);
+      if (error && (error.code === '42703' || error.code === 'PGRST204')) ({ data, error } = await run(BASE));
       if (error) throw error;
-      return (data || []) as MediaItem[];
+      return (data || []) as unknown as MediaItem[];
     },
     staleTime: 60 * 1000,
   });
@@ -808,9 +823,10 @@ const MediaTracker = () => {
   // not grid rows), so without this the Continue shelf shows letter tiles.
   const railCoversRef = useRef<Set<number>>(new Set());
   useEffect(() => {
-    const todo = railItems.filter(
+    const { fetch: todo, none } = splitNoCover(railItems.filter(
       (i) => !i.cover_image && !imageUrlsRef.current.has(i.id) && !railCoversRef.current.has(i.id),
-    );
+    ));
+    if (none.size) setImageUrls((prev) => new Map([...prev, ...none]));
     if (todo.length === 0) return;
     todo.forEach((i) => railCoversRef.current.add(i.id));
     fetchImagesFromSupabaseBatch(todo.map((i) => ({ id: i.id, title: i.title, type: i.type })))
@@ -1813,7 +1829,7 @@ const MediaTracker = () => {
   // — so "refresh all Anime" sweeps every Anime, not just the loaded page. Tag
   // filters aren't DB-queryable here, so those fall back to the loaded set.
   const getSweepItems = useCallback(async () => {
-    const toSweep = (rows: Array<Pick<MediaItem, 'id' | 'title' | 'type' | 'cover_image' | 'current_season' | 'current_episode' | 'current_chapter' | 'last_known_total_episodes' | 'last_known_total_seasons' | 'link_status' | 'source' | 'source_id'>>) =>
+    const toSweep = (rows: Array<Pick<MediaItem, 'id' | 'title' | 'type' | 'cover_image' | 'current_season' | 'current_episode' | 'current_chapter' | 'last_known_total_episodes' | 'last_known_total_seasons' | 'link_status' | 'source' | 'source_id' | 'cover_pinned'>>) =>
       rows.map((i) => ({
         id: i.id,
         title: i.title,
@@ -1829,6 +1845,8 @@ const MediaTracker = () => {
         link_status: i.link_status ?? null,
         source: i.source ?? null,
         source_id: i.source_id ?? null,
+        // Left undefined on a pre-28 database so refresh skips the pin guard there.
+        cover_pinned: i.cover_pinned,
       }));
 
     // Genre filtering is client-side over cached metadata and can't be expressed
@@ -1852,7 +1870,7 @@ const MediaTracker = () => {
     const chunk = 1000;
     const BASE_COLS = 'id, title, type, cover_image, current_season, current_episode, current_chapter, last_known_total_episodes, last_known_total_seasons';
     // Migration 28's link columns; dropped once if this database doesn't have them.
-    let cols = `${BASE_COLS}, link_status, source, source_id`;
+    let cols = `${BASE_COLS}, link_status, source, source_id, cover_pinned`;
     let from = 0;
     for (;;) {
       let q = supabase

@@ -30,7 +30,9 @@ interface MediaActionsMenuProps {
  */
 export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onTogglePin, onRefreshCover, onRemoveCover, onDelete, className }: MediaActionsMenuProps) {
   const linked = item.link_status === 'linked' && !!item.source;
-  const coverActions = !!(onTogglePin || (onRefreshCover && !linked) || (onRemoveCover && hasCover && !item.cover_pinned));
+  // A pinned cover is kept as-is: Unpin first to refresh or remove it.
+  const canRefresh = !!onRefreshCover && !linked && !item.cover_pinned;
+  const coverActions = !!(onTogglePin || canRefresh || (onRemoveCover && hasCover && !item.cover_pinned));
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -55,8 +57,8 @@ export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onToggleP
             <Pin className="mr-2 h-4 w-4" /> {item.cover_pinned ? 'Unpin cover' : 'Pin cover'}
           </DropdownMenuItem>
         )}
-        {onRefreshCover && !linked && (
-          <DropdownMenuItem className="min-h-10" onSelect={() => onRefreshCover(item)}>
+        {canRefresh && (
+          <DropdownMenuItem className="min-h-10" onSelect={() => onRefreshCover!(item)}>
             <RefreshCw className="mr-2 h-4 w-4" /> Refresh cover
           </DropdownMenuItem>
         )}

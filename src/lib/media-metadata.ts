@@ -343,6 +343,8 @@ export interface SweepItem {
   link_status?: string | null;
   source?: string | null;
   source_id?: string | null;
+  /** Pinned (incl. "Remove cover" = pinned + null): refresh never fills or replaces its cover. */
+  cover_pinned?: boolean | null;
 }
 
 export type ItemOutcome = 'updated' | 'failed' | 'skipped';
@@ -581,7 +583,8 @@ async function refreshOne(
   // already returned; otherwise force a live search (refresh: 1 skips the DB).
   // isUsableCover() refuses wrong-medium art (a donghua poster for a manhua, a
   // TV poster for a manhwa) and MangaDex hotlinks, which render broken.
-  if (opts.covers && !item.cover_image && userId) {
+  // A pinned cover is the user's call — including "no cover wanted" (pinned + null).
+  if (opts.covers && !item.cover_image && !item.cover_pinned && userId) {
     attempted = true;
     try {
       let cover = metaCover;
@@ -596,12 +599,15 @@ async function refreshOne(
       }
       if (cover) {
         // .is(null): only fill a still-empty cover, never overwrite one set meanwhile.
-        const { error } = await supabase
+        let q = supabase
           .from('media_tracker')
           .update({ cover_image: cover })
           .eq('id', item.id)
           .eq('user_id', userId)
           .is('cover_image', null);
+        // …and never one pinned meanwhile (only when this database has the column).
+        if (item.cover_pinned !== undefined) q = q.eq('cover_pinned', false);
+        const { error } = await q;
         if (error) errored = true;
         else applied = true;
       }
