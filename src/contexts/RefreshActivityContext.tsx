@@ -4,12 +4,13 @@
 
 import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  refreshLibrary,
-  type RefreshOptions,
-  type RefreshProgress,
-  type RefreshItemResult,
-  type SweepItem,
+// Types only: this provider is app-wide (entry chunk), and media-metadata is big.
+// The sweep loads it on demand at its two call sites below.
+import type {
+  RefreshOptions,
+  RefreshProgress,
+  RefreshItemResult,
+  SweepItem,
 } from '@/lib/media-metadata';
 
 interface StartArgs {
@@ -64,7 +65,7 @@ export function RefreshActivityProvider({ children }: { children: ReactNode }) {
         const list = await args.fetchItems();
         setProgress({ ...zero, total: list.length });
         if (list.length > 0) {
-          await refreshLibrary(
+          await (await import('@/lib/media-metadata')).refreshLibrary(
             args.opts,
             list,
             (p) => setProgress({ ...p, failedTitles: [...p.failedTitles] }),
@@ -94,7 +95,7 @@ export function RefreshActivityProvider({ children }: { children: ReactNode }) {
       try {
         const sweep: SweepItem[] = targets.map((t) => ({ id: t.id, title: t.title, type: t.type }));
         // Update each retried row in place as its fresh result comes back.
-        await refreshLibrary(optsRef.current!, sweep, undefined, (r) => {
+        await (await import('@/lib/media-metadata')).refreshLibrary(optsRef.current!, sweep, undefined, (r) => {
           setItems((prev) => prev.map((it) => (it.id === r.id ? r : it)));
         });
         queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
