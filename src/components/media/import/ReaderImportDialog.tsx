@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ToastAction } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
+import { undoBatch } from '@/lib/media-bulk';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { parseReaderBackup } from '@/lib/tachimanga/parse';
 import type {
   CategoryMap, ImportPlan, NoteHavenStatus, PlanImportMapRow, PlanTrackerRow, ReaderBackup, ReaderParseStage,
 } from '@/lib/tachimanga/types';
-import { loadImportMap, loadPlanner, loadTrackerRows, readCategoryMap, saveCategoryMap } from './import-inputs';
+import { type FullExport, type Planner, loadFullExport, loadImportMap, loadPlanner, loadTrackerRows, readCategoryMap, saveCategoryMap } from './import-inputs';
 import { ImportPreview } from './ImportPreview';
-import { type ImportSelection, initialSelection } from './selection';
+import { applyImport } from './apply';
+import { type ImportSelection, addsMissingType, initialSelection, selectedCount, withPicks } from './selection';
+
+// Every query an import can change, refreshed after Approve and after its Undo.
+const TOUCHED_QUERIES = ['mediaItems', 'mediaRails', 'groupCounts', 'mediaTitleIndex', 'mediaHistory', 'mediaBulkLatest'];
 
 interface ReaderImportDialogProps {
   file: File | null;
@@ -58,6 +66,37 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
   const [showNsfw, setShowNsfw] = useState(false);
   const [, setThumbStats] = useState({ loaded: 0, tried: 0 });
   const abortRef = useRef<AbortController | null>(null);
+  const plannerRef = useRef<Planner | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  // Backup gate: Approve waits for a COMPLETE in-app full export in this session.
+  const [exporter, setExporter] = useState<FullExport | null>(null);
+  const [backedUp, setBackedUp] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportFailed, setExportFailed] = useState<string[]>([]);
+  const [applying, setApplying] = useState(false);
+  useEffect(() => {
+    void loadFullExport().then((x) => { setExporter(x); setBackedUp(!!x?.doneThisSession()); });
+  }, []);
+
+  const runExport = async () => {
+    if (!exporter || exporting) return;
+    setExporting(true);
+    try {
+      const r = await exporter.run();
+      setExportFailed(r.failed);
+      setBackedUp(exporter.doneThisSession());
+      if (r.failed.length) {
+        toast({ title: 'Export incomplete', description: `Couldn’t read: ${r.failed.join(', ')}. Approve stays off until a full export works.`, variant: 'destructive' });
+      } else {
+        toast({ title: 'Backup downloaded', description: r.fileName + (r.skipped.length ? ` · not set up yet: ${r.skipped.join(', ')}` : '') });
+      }
+    } catch (e) {
+      toast({ title: 'Export failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // 1. Parse in the Worker as soon as a file is picked.
   useEffect(() => {
@@ -82,8 +121,9 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
   const runPlan = useCallback(async (b: ReaderBackup, map: CategoryMap, nsfw: boolean) => {
     setStep({ kind: 'planning' });
     try {
-      const planner = await loadPlanner();
+      const planner = plannerRef.current ?? await loadPlanner();
       if (!planner) { setStep({ kind: 'no-planner' }); return; }
+      plannerRef.current = planner;
       const inp = inputs ?? { rows: await loadTrackerRows(), map: await loadImportMap() };
       setInputs(inp);
       const p = planner(b.titles, inp.rows, inp.map, { categoryMap: map, showNsfw: nsfw });
@@ -101,7 +141,47 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step.kind, backup]);
 
-  const cancel = () => { abortRef.current?.abort(); onClose(); };
+  const cancel = () => { if (applying) return; abortRef.current?.abort(); onClose(); };
+
+  // 3. Approve: re-plan with his "Needs a match" picks as map entries, then apply.
+  const approve = async () => {
+    if (!plan || !sel || !backup || !inputs || !plannerRef.current || !backedUp || applying) return;
+    setApplying(true);
+    try {
+      let finalPlan = plan;
+      let finalSel = sel;
+      if (sel.matches.size) {
+        const picks = [...sel.matches].map(([origin_key, media_id]) => ({ origin_key, media_id, reader_cover: null }));
+        finalPlan = plannerRef.current(backup.titles, inputs.rows, [...inputs.map, ...picks], { categoryMap: catMap, showNsfw });
+        finalSel = withPicks(finalPlan, sel, new Set(sel.matches.keys()));
+      }
+      const r = await applyImport(finalPlan, finalSel, inputs.rows);
+      for (const key of TOUCHED_QUERIES) void queryClient.invalidateQueries({ queryKey: [key] });
+      const changed = r.updated + r.added;
+      toast({
+        title: r.stoppedEarly ? 'Import stopped' : changed ? `Updated ${r.updated}${r.added ? ` · added ${r.added}` : ''}` : 'Nothing to update',
+        description: [
+          r.skipped ? `skipped ${r.skipped} (changed since)` : '',
+          r.failed ? `${r.failed} failed` : '',
+          r.stoppedEarly ? 'the undo record couldn’t be saved, so the last batch was put back' : '',
+        ].filter(Boolean).join(' · ') || undefined,
+        variant: r.failed || r.stoppedEarly ? 'destructive' : undefined,
+        action: changed ? (
+          <ToastAction altText="Undo import" onClick={() => {
+            void undoBatch(r.batchId).then((u) => {
+              for (const key of TOUCHED_QUERIES) void queryClient.invalidateQueries({ queryKey: [key] });
+              toast({ title: 'Import undone', description: u.skipped ? `${u.skipped} left as they are (changed since)` : undefined });
+            });
+          }}>Undo</ToastAction>
+        ) : undefined,
+      });
+      onClose();
+    } catch (e) {
+      toast({ title: 'Import failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
+    } finally {
+      setApplying(false);
+    }
+  };
 
   const title = step.kind === 'preview' ? 'Review the import' : 'Import from Tachimanga';
   const body = (() => {
@@ -175,6 +255,42 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
     }
     if (step.kind === 'parsing' || step.kind === 'planning') {
       return <Button variant="outline" className="h-11" onClick={cancel}>Cancel</Button>;
+    }
+    if (step.kind === 'preview' && plan && sel) {
+      const count = selectedCount(plan, sel);
+      const needType = addsMissingType(sel);
+      if (count === 0 && plan.writes === 0 && !plan.needsMatch.length && !plan.notInNoteHaven.length) {
+        return (
+          <div className="flex w-full items-center justify-between gap-3">
+            <span className="text-sm text-muted-foreground">Nothing to update: NoteHaven already matches.</span>
+            <Button variant="outline" className="h-11" onClick={onClose}>Close</Button>
+          </div>
+        );
+      }
+      return (
+        <div className="flex w-full flex-col gap-2">
+          {!backedUp && (
+            <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Back up first.</span> Approve turns on after a full export downloads.
+              {exportFailed.length > 0 && <span className="block text-destructive">Last try couldn’t read: {exportFailed.join(', ')}.</span>}
+              <span className="block">Also run <code className="rounded bg-muted px-1">npm run backup:media</code> on your Mac for a second copy.</span>
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" className="h-11" onClick={onClose} disabled={applying}>Close</Button>
+            {!backedUp && (
+              <Button variant="outline" className="h-11" onClick={() => void runExport()} disabled={!exporter || exporting}>
+                {exporting ? 'Exporting…' : 'Back up now'}
+              </Button>
+            )}
+            <Button variant="gradient" className="h-11" onClick={() => void approve()}
+              disabled={!backedUp || applying || count === 0 || needType > 0}
+              title={needType ? `Pick a type for ${needType} new title${needType === 1 ? '' : 's'}` : undefined}>
+              {applying ? 'Applying…' : `Approve ${count.toLocaleString()}`}
+            </Button>
+          </div>
+        </div>
+      );
     }
     return <Button variant="outline" className="h-11" onClick={onClose}>Close</Button>;
   })();

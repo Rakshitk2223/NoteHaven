@@ -105,6 +105,54 @@ interface StoredEntry extends JournalEntry {
   kind: BulkKind;
 }
 
+/**
+ * Put one entry back, compare-and-swap: 'restored' (update), 'removed' (insert),
+ * or 'skipped' (changed since, or nothing to guard on). Throws on a request error.
+ */
+export async function restoreEntry(e: JournalEntry, kind: BulkKind, userId: string): Promise<'restored' | 'removed' | 'skipped'> {
+  // Never act without a guard (a row written before hasGuard existed, say).
+  if (!hasGuard(e.after)) return 'skipped';
+  if (e.op === 'insert') {
+    // The change created this title: remove it, unless it's been touched since.
+    const q = guardOn(
+      supabase.from('media_tracker').delete().eq('id', e.media_id).eq('user_id', userId) as unknown as Guarded,
+      e.after,
+    );
+    const { data, error } = await q.select('id');
+    if (error) throw error;
+    return data?.length ? 'removed' : 'skipped';
+  }
+  const q = guardOn(
+    supabase.from('media_tracker').update(e.before as never).eq('id', e.media_id).eq('user_id', userId) as unknown as Guarded,
+    e.after,
+  );
+  const { data, error } = await q.select('id');
+  if (error) throw error;
+  if (!data?.length) return 'skipped';
+  // History is append-only: a progress restore gets its own undo rows.
+  if (PROGRESS_COLS.some((c) => c in e.after)) {
+    const pick = (o: Record<string, unknown>) =>
+      Object.fromEntries(PROGRESS_COLS.filter((c) => c in e.after).map((c) => [c, (o[c] ?? null) as number | null]));
+    void appendProgressLog(
+      { id: e.media_id, user_id: userId },
+      posOf(pick(e.after)),
+      posOf(pick(e.before)),
+      'undo',
+      kind === 'import' ? 'tachimanga' : undefined,
+    );
+  }
+  return 'restored';
+}
+
+/** Roll back changes that never reached the journal (e.g. its insert failed). Best-effort, CAS. */
+export async function restoreEntries(entries: JournalEntry[], kind: BulkKind, userId: string): Promise<UndoOutcome> {
+  const out: UndoOutcome = { restored: 0, removed: 0, skipped: 0, failed: 0 };
+  for (const e of entries) {
+    try { out[await restoreEntry(e, kind, userId)] += 1; } catch { out.failed += 1; }
+  }
+  return out;
+}
+
 /** Undo one batch, row by row, compare-and-swap. */
 export async function undoBatch(batchId: string): Promise<UndoOutcome> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -130,41 +178,10 @@ export async function undoBatch(batchId: string): Promise<UndoOutcome> {
   const handled: number[] = [];
   for (const e of entries) {
     try {
-      // Never act without a guard (a row written before hasGuard existed, say).
-      if (!hasGuard(e.after)) { out.skipped += 1; handled.push(e.id); continue; }
-      if (e.op === 'insert') {
-        // The change created this title: remove it, unless it's been touched since.
-        // (Its journal row goes with it: ON DELETE CASCADE.)
-        const q = guardOn(
-          supabase.from('media_tracker').delete().eq('id', e.media_id).eq('user_id', userId) as unknown as Guarded,
-          e.after,
-        );
-        const { data, error } = await q.select('id');
-        if (error) throw error;
-        if (data?.length) out.removed += 1; else { out.skipped += 1; handled.push(e.id); }
-        continue;
-      }
-      const q = guardOn(
-        supabase.from('media_tracker').update(e.before as never).eq('id', e.media_id).eq('user_id', userId) as unknown as Guarded,
-        e.after,
-      );
-      const { data, error } = await q.select('id');
-      if (error) throw error;
-      handled.push(e.id);
-      if (!data?.length) { out.skipped += 1; continue; }
-      out.restored += 1;
-      // History is append-only: a progress restore gets its own undo rows.
-      if (PROGRESS_COLS.some((c) => c in e.after)) {
-        const pick = (o: Record<string, unknown>) =>
-          Object.fromEntries(PROGRESS_COLS.filter((c) => c in e.after).map((c) => [c, (o[c] ?? null) as number | null]));
-        void appendProgressLog(
-          { id: e.media_id, user_id: userId },
-          posOf(pick(e.after)),
-          posOf(pick(e.before)),
-          'undo',
-          e.kind === 'import' ? 'tachimanga' : undefined,
-        );
-      }
+      const r = await restoreEntry(e, e.kind, userId);
+      out[r] += 1;
+      // Removed rows took their journal row with them (ON DELETE CASCADE).
+      if (r !== 'removed') handled.push(e.id);
     } catch (err) {
       console.error('Bulk undo failed for one row:', err);
       out.failed += 1;

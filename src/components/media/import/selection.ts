@@ -48,14 +48,39 @@ export const addIsReady = (row: NewTitleRow, sel: ImportSelection): boolean =>
 export const addsMissingType = (sel: ImportSelection): number =>
   [...sel.adds.values()].filter((t) => !t).length;
 
+// Mirrors lib/media-bulk UNGUARDED_COLUMNS (kept here so this module stays pure).
+const TIMESTAMP_ONLY = new Set(['reader_checked_at', 'last_activity_at']);
+export const hasUndoableAuto = (r: PlanRow): boolean => Object.keys(r.auto).some((k) => !TIMESTAMP_ONLY.has(k));
+
 /** How many rows apply would touch, for the Approve button. */
 export function selectedCount(plan: ImportPlan, sel: ImportSelection): number {
   const ids = new Set<number>();
   for (const r of matchedRows(plan)) {
-    const autoWrites = Object.keys(r.auto).length > 0 || r.map.length > 0;
     const picked = sel.progress.has(r.media_id) || sel.status.has(r.media_id) || sel.cover.has(r.media_id);
-    // A row he ticked also carries its automatic writes (latest, platform-if-empty).
-    if (picked || (autoWrites && r.ticked)) ids.add(r.media_id);
+    // Automatic fields go with the row whenever the change is real and undoable
+    // (reader latest / platform; a timestamp alone isn't written) — as apply does.
+    if (picked || hasUndoableAuto(r)) ids.add(r.media_id);
   }
   return ids.size + sel.matches.size + [...sel.adds.values()].filter(Boolean).length;
+}
+
+/**
+ * After re-planning with his "Needs a match" picks as import-map entries: rows
+ * he already saw keep his ticks; rows the picks matched take the planner's
+ * defaults (he chose the match knowing the reader's chapter). Adds carry over.
+ */
+export function withPicks(finalPlan: ImportPlan, prev: ImportSelection, pickedKeys: Set<string>): ImportSelection {
+  const init = initialSelection(finalPlan);
+  const picked = new Set(matchedRows(finalPlan)
+    .filter((r) => r.readers.some((x) => pickedKeys.has(x.origin_key)))
+    .map((r) => r.media_id));
+  const merge = (mine: Set<number>, planner: Set<number>) =>
+    new Set([...[...mine].filter((id) => !picked.has(id)), ...[...planner].filter((id) => picked.has(id))]);
+  return {
+    progress: merge(prev.progress, init.progress),
+    status: merge(prev.status, init.status),
+    cover: merge(prev.cover, init.cover),
+    matches: new Map(),
+    adds: new Map(prev.adds),
+  };
 }

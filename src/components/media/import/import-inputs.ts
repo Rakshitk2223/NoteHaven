@@ -103,3 +103,22 @@ export async function loadPlanner(): Promise<Planner | null> {
     return null;
   }
 }
+
+// ---- the full-export gate (backend's src/lib/full-export.ts, BE5) -------------------
+export interface FullExport {
+  run: () => Promise<{ failed: string[]; skipped: string[]; fileName: string }>;
+  doneThisSession: () => boolean;
+}
+
+/**
+ * The in-app full export that gates Approve (the same one Settings → Data runs).
+ * Null only if its chunk fails to load: Approve then stays disabled.
+ */
+export async function loadFullExport(): Promise<FullExport | null> {
+  try {
+    const m = await import('@/lib/full-export');
+    return { run: m.runFullExport, doneThisSession: m.hasFullExportThisSession };
+  } catch {
+    return null;
+  }
+}

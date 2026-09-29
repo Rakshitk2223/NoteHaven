@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ImportPlan, PlanRow, ReaderTitle } from '@/lib/tachimanga/types';
-import { addsMissingType, initialSelection, selectedCount } from '../import/selection';
+import { addsMissingType, initialSelection, selectedCount, withPicks } from '../import/selection';
 
 const reader = (key: string): ReaderTitle => ({
   origin_key: key.padEnd(64, '0'), title: '[audit] x', alt: [], source_name: null, source_lang: null, nsfw: false,
@@ -46,5 +46,19 @@ describe('import selection defaults (exactly the planner’s proposals)', () => 
     s.matches.set('b', 9);
     expect(addsMissingType(s)).toBe(0);
     expect(selectedCount(p, s)).toBe(3); // row 1 + one match + one add; row 2 was never ticked
+  });
+});
+
+describe('withPicks (his "Needs a match" choices, re-planned)', () => {
+  it('keeps his ticks on rows he saw and gives picked rows the planner defaults', () => {
+    const before = initialSelection(plan({ forward: [row(1)] }));
+    before.progress.delete(1); // he unticked row 1
+    before.adds.set('n', 'Manga');
+    const picked = row(7, { readers: [reader('pick')] });
+    const final = plan({ forward: [row(1), picked] });
+    const s = withPicks(final, before, new Set([reader('pick').origin_key]));
+    expect([...s.progress]).toEqual([7]);         // row 1 stays unticked, the picked row is ticked
+    expect(s.adds.get('n')).toBe('Manga');
+    expect(s.matches.size).toBe(0);
   });
 });
