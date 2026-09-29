@@ -2790,12 +2790,9 @@ const MediaTracker = () => {
           <LibraryStatsDialog
             open={statsOpen}
             onOpenChange={setStatsOpen}
-            items={mediaItems}
             metaMap={metadataMap}
-            onOpenItem={(id) => {
-              const target = mediaItems.find((m) => m.id === id);
-              if (target) openDetails(target, 'view');
-            }}
+            // Any title in the library, loaded in the grid or not.
+            onOpenItem={(id) => { setStatsOpen(false); void openById(id); }}
           />
 
           {/* Refresh Library sweep (covers / seasons / descriptions / ratings / status) */}

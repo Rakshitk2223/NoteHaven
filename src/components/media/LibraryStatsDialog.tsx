@@ -1,4 +1,8 @@
 import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { fetchAllRows } from '@/lib/fetch-all';
+import { fetchMediaMetadataBatch } from '@/lib/media-metadata';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -12,9 +16,35 @@ import {
 interface LibraryStatsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  items: InsightItem[];
+  /** Metadata already loaded for the grid: reused, the rest is fetched. */
   metaMap: MetaMap;
   onOpenItem: (id: number) => void;
+}
+
+const STATS_COLS = 'id, user_id, title, type, status, rating, current_season, current_episode, current_chapter, cover_image, created_at, updated_at, last_activity_at, has_new_content, last_known_total_episodes, last_known_total_seasons';
+
+/**
+ * The WHOLE library, not the grid's loaded pages (the dialog used to say "200
+ * titles" and change as you scrolled). Rows paged past 1000; metadata in chunks
+ * (one request for every title overflowed the URL and came back empty).
+ */
+async function loadWholeLibrary(known: MetaMap): Promise<{ items: InsightItem[]; metaMap: MetaMap }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return { items: [], metaMap: new Map() };
+  const items = await fetchAllRows<InsightItem>(() =>
+    supabase.from('media_tracker').select(STATS_COLS).eq('user_id', userId).order('id') as never);
+  const metaMap: MetaMap = new Map();
+  const missing: InsightItem[] = [];
+  for (const i of items) {
+    const m = known.get(i.id);
+    if (m) metaMap.set(i.id, m); else missing.push(i);
+  }
+  for (let k = 0; k < missing.length; k += 150) {
+    const got = await fetchMediaMetadataBatch(missing.slice(k, k + 150).map((i) => ({ id: i.id, title: i.title, type: i.type })));
+    for (const [id, m] of got) metaMap.set(id, m);
+  }
+  return { items, metaMap };
 }
 
 function Stat({ label, value, sub, icon: Icon }: {
@@ -57,16 +87,42 @@ function BarRow({ label, count, max }: { label: string; count: number; max: numb
  * memory, so opening this costs nothing.
  */
 export function LibraryStatsDialog({
-  open, onOpenChange, items, metaMap, onOpenItem,
+  open, onOpenChange, metaMap, onOpenItem,
 }: LibraryStatsDialogProps) {
-  // Only compute while open: this walks the whole library.
-  const stats = useMemo(
-    () => (open ? buildLibraryStats(items, metaMap) : null),
-    [open, items, metaMap],
-  );
-  const duplicates = useMemo(() => (open ? findDuplicates(items) : []), [open, items]);
+  // Fetched when opened (and kept a minute), over every title.
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['mediaStatsAll'],
+    enabled: open,
+    staleTime: 60 * 1000,
+    queryFn: () => loadWholeLibrary(metaMap),
+  });
+  const stats = useMemo(() => (open && data ? buildLibraryStats(data.items, data.metaMap) : null), [open, data]);
+  const duplicates = useMemo(() => (open && data ? findDuplicates(data.items) : []), [open, data]);
 
-  if (!stats) return null;
+  if (!open) return null;
+  if (!stats) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="gradient-text text-xl">Your library</DialogTitle>
+            <DialogDescription>{isError ? 'Couldn’t load your library.' : 'Counting every title…'}</DialogDescription>
+          </DialogHeader>
+          {isError ? (
+            <button type="button" onClick={() => void refetch()} className="min-h-11 rounded-lg border border-border px-4 text-sm font-medium text-foreground hover:bg-secondary">Try again</button>
+          ) : isLoading && (
+            <div className="space-y-4" aria-hidden="true">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[0, 1, 2, 3].map((i) => <div key={i} className="loading-shimmer h-20 rounded-xl" />)}
+              </div>
+              <div className="loading-shimmer h-3 rounded-full" />
+              <div className="loading-shimmer h-32 rounded-xl" />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   const maxType = Math.max(1, ...stats.byType.map((t) => t.count));
   const maxGenre = Math.max(1, ...stats.topGenres.map((g) => g.count));
@@ -172,13 +228,15 @@ export function LibraryStatsDialog({
           {stats.ratedCount > 0 && (
             <div>
               <h3 className="mb-3 text-sm font-semibold text-foreground">How you rate</h3>
-              <div className="flex h-24 items-end gap-1.5">
+              <div className="flex h-24 items-stretch gap-1.5">
                 {stats.ratingHistogram.map((n, i) => (
-                  <div key={i} className="flex flex-1 flex-col items-center gap-1">
-                    <div className="flex w-full flex-1 items-end">
+                  <div key={i} className="flex h-full flex-1 flex-col items-center gap-1">
+                    {/* The bar is absolute in a definite-height box: a % height inside an
+                        auto-height flex child resolved to 0, so the chart rendered empty. */}
+                    <div className="relative w-full flex-1">
                       <div
                         className={cn(
-                          'w-full rounded-t bg-gradient-to-t from-primary to-accent-2 transition-all',
+                          'absolute inset-x-0 bottom-0 rounded-t bg-gradient-to-t from-primary to-accent-2 transition-all',
                           n === 0 && 'opacity-20',
                         )}
                         style={{ height: `${Math.max(3, (n / maxRating) * 100)}%` }}
