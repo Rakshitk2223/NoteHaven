@@ -81,6 +81,8 @@ import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type
 import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-match';
 import { latestUndoableBatch, undoBatch, type BulkKind } from '@/lib/media-bulk';
 import { IMPORT_ACCEPT, sniffFile } from '@/components/media/import/sniff';
+import { useLinkRun } from '@/components/media/link/useLinkRun';
+import { LinkBar } from '@/components/media/link/LinkBar';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { SOURCE_META_SLIM, detectMediaV2Schema, linkEntry, readSourceMeta, readSourceMetaBatch, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
 import { buildMetaIndex, detailToMeta, mergeMeta } from '@/components/media/source-meta';
@@ -398,6 +400,8 @@ const splitNoCover = <T extends Pick<MediaItem, 'id' | 'cover_pinned' | 'cover_i
 
 // Tachimanga import: the dialog pulls in the Worker (sql.js + jszip), so it loads only when a .tmb is picked.
 const ReaderImportDialog = lazy(() => import('@/components/media/import/ReaderImportDialog'));
+// "Needs a pick" queue: lazy, like the import.
+const LinkQueue = lazy(() => import('@/components/media/link/LinkQueue'));
 
 const BULK_KIND_LABEL: Record<BulkKind, string> = { import: 'Import', link: 'Linking', cover: 'Cover change' };
 
@@ -2078,6 +2082,12 @@ const MediaTracker = () => {
     staleTime: 30 * 1000,
     queryFn: latestUndoableBatch,
   });
+  // "Link your library" (migration 29): the resolver run, its pill and the review queue.
+  const linkRun = useLinkRun(v2Schema.importLink);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const [linkPicks, setLinkPicks] = useState<Map<number, number>>(() => new Map());
+  const linkLive = ['running', 'waiting', 'paused'].includes(linkRun.progress?.state ?? '') || linkRun.intent === 'paused';
+
   const [undoBulkOpen, setUndoBulkOpen] = useState(false);
   const [undoingBulk, setUndoingBulk] = useState(false);
   const runUndoBulk = useCallback(async () => {
@@ -2812,6 +2822,11 @@ const MediaTracker = () => {
               });
             }}
           />
+          {queueOpen && (
+            <Suspense fallback={null}>
+              <LinkQueue open={queueOpen} onOpenChange={setQueueOpen} run={linkRun} phone={!tabletUp} picks={linkPicks} onPicks={setLinkPicks} approve={null} />
+            </Suspense>
+          )}
           {readerFile && (
             <Suspense fallback={null}>
               <ReaderImportDialog file={readerFile} onClose={() => setReaderFile(null)} phone={!tabletUp} />
@@ -2933,6 +2948,10 @@ const MediaTracker = () => {
                 onExportJson={handleExportJson}
                 onExportCsv={handleExportCsv}
                 onExportTxt={() => setTxtExportDialogOpen(true)}
+                linkLibrary={v2Schema.importLink && linkRun.ready && linkRun.unlinked > 0 && !linkLive && !linkRun.progress?.runningElsewhere ? {
+                  hint: `${linkRun.unlinked.toLocaleString()} title${linkRun.unlinked === 1 ? ' isn’t' : 's aren’t'} linked to a source yet`,
+                  onClick: () => { linkRun.start(); setSection('library'); },
+                } : null}
                 undoBulk={v2Schema.importLink && lastBatch && lastBatch.rows > 0 ? {
                   hint: `${BULK_KIND_LABEL[lastBatch.kind]} · ${lastBatch.rows.toLocaleString()} title${lastBatch.rows === 1 ? '' : 's'} · ${formatDistanceToNowStrict(new Date(lastBatch.created_at), { addSuffix: true })}`,
                   busy: undoingBulk,
@@ -2942,6 +2961,7 @@ const MediaTracker = () => {
             )}
             {/* Library stays mounted while More is open: scroll, pages and covers survive. */}
             <div hidden={section !== 'library'}>
+            {v2Schema.importLink && <LinkBar run={linkRun} onOpenQueue={() => setQueueOpen(true)} />}
             {/* Search — mobile/tablet only (desktop search lives in the command bar) */}
             <div className="mb-3 flex items-center gap-2 lg:hidden">
               <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />

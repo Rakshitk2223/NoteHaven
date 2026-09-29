@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, LayoutGrid, RefreshCw, RotateCcw, SlidersHorizontal, Upload,
+  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, LayoutGrid, RefreshCw, Replace, RotateCcw, SlidersHorizontal, Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -24,6 +24,8 @@ interface MediaMoreViewProps {
   onExportJson: () => void;
   onExportCsv: () => void;
   onExportTxt: () => void;
+  /** "Link your library": only while unlinked titles exist and no run is going. Null hides it. */
+  linkLibrary?: { hint: string; onClick: () => void } | null;
   /** Only while an un-undone bulk change exists (migration 29); null hides the row. */
   undoBulk?: { hint: string; busy: boolean; onUndo: () => void } | null;
 }
@@ -111,6 +113,9 @@ export function MediaMoreView(p: MediaMoreViewProps) {
       </Group>
 
       <Group title="Details & covers">
+        {p.linkLibrary && (
+          <Row icon={Replace} label="Link your library" hint={p.linkLibrary.hint} onClick={p.linkLibrary.onClick} />
+        )}
         <Row icon={RefreshCw} label="Refresh library…" hint="Fetch missing covers, synopses and totals" onClick={p.onRefreshLibrary} />
       </Group>
 
