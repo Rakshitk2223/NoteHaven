@@ -7,8 +7,11 @@ import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { undoBatch } from '@/lib/media-bulk';
-import { fixWrongCovers, loadWrongCovers, setCover, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
+import { loadWrongCovers, setCover, setCovers, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
+import { useBackupGate } from './import/useBackupGate';
+import { BackupNote } from './import/BackupNote';
 import { CoverArt } from './CoverArt';
+import { fixInChunks } from './cover-row';
 
 const PROBLEM: Record<WrongCover['problem'], string> = {
   'wrong-medium': 'Wrong kind of art',
@@ -34,6 +37,9 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState<number | 'all' | null>(null);
+  // "Fix all" is a bulk write: the same backup gate as the import and linking.
+  const gate = useBackupGate();
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const q = useQuery({ queryKey: ['mediaWrongCovers'], queryFn: loadWrongCovers, enabled: open, staleTime: 60 * 1000 });
   const items = q.data ?? [];
   const fixable = items.filter((w) => w.suggestion);
@@ -57,6 +63,22 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
     try { report(await work(), asked); } catch (e) {
       toast({ title: 'Couldn’t fix covers', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
     } finally { setBusy(null); }
+  };
+
+  // Fix all (bulk): behind the backup gate, in chunks with n/N (see fixInChunks).
+  const fixAll = async () => {
+    if (busy || !gate.check()) return;
+    setBusy('all');
+    try {
+      report(await fixInChunks(fixable, setCovers, (done, total) => setProgress({ done, total })), fixable.length);
+    } catch (e) {
+      const partial = (e as { partial?: CoverWriteResult }).partial;
+      if (partial?.written.length) report(partial, fixable.length);
+      toast({ title: 'Stopped fixing covers', description: `${e instanceof Error ? e.message : 'Error'}. The last few were put back; the rest can be undone.`, variant: 'destructive' });
+    } finally {
+      setBusy(null);
+      setProgress(null);
+    }
   };
 
   return (
@@ -114,10 +136,18 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
           )}
         </div>
         {fixable.length > 1 && (
-          <div className={cn('flex justify-end gap-2 border-t border-border px-4 py-3 sm:px-6', phone && 'pb-[calc(0.75rem+env(safe-area-inset-bottom))]')}>
-            <Button variant="gradient" className="h-11" disabled={!!busy} onClick={() => void run('all', () => fixWrongCovers(fixable), fixable.length)}>
-              {busy === 'all' ? 'Fixing…' : `Fix all ${fixable.length.toLocaleString()}`}
-            </Button>
+          <div className={cn('flex flex-col gap-2 border-t border-border px-4 py-3 sm:px-6', phone && 'pb-[calc(0.75rem+env(safe-area-inset-bottom))]')}>
+            <BackupNote gate={gate} />
+            <div className="flex flex-wrap justify-end gap-2">
+              {!gate.backedUp && (
+                <Button variant="outline" className="h-11" onClick={() => void gate.runExport()} disabled={!gate.available || gate.exporting || !!busy}>
+                  {gate.exporting ? 'Exporting…' : 'Back up now'}
+                </Button>
+              )}
+              <Button variant="gradient" className="h-11" disabled={!!busy || !gate.backedUp} onClick={() => void fixAll()}>
+                {busy === 'all' && progress ? `Fixing ${progress.done.toLocaleString()}/${progress.total.toLocaleString()}…` : `Fix all ${fixable.length.toLocaleString()}`}
+              </Button>
+            </div>
           </div>
         )}
       </SheetContent>

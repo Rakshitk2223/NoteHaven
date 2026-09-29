@@ -76,7 +76,7 @@ export function MediaMoreView(p: MediaMoreViewProps) {
     <div className="mx-auto max-w-xl pb-6">
       <Group title="Library">
         <Row icon={BarChart3} label="Library stats" hint={`${p.totalTitles.toLocaleString()} titles`} onClick={p.onStats} />
-        <Row icon={CheckSquare} label="Select titles" hint="Change status, refresh covers or delete several at once" onClick={p.onSelect} />
+        <Row icon={CheckSquare} label="Select titles" hint="Change status or delete several at once" onClick={p.onSelect} />
         <Row
           icon={Eye}
           label="Continue & Airing soon"

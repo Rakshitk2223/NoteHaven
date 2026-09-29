@@ -2097,7 +2097,7 @@ const MediaTracker = () => {
     patchCachedItem(item.id, saveShown ? { cover_pinned: next, cover_image: shown! } : { cover_pinned: next });
     toast({
       title: next ? 'Cover pinned' : 'Cover unpinned',
-      description: next ? 'Refreshes and links will keep this cover.' : 'Refreshes may replace it again.',
+      description: next ? 'Linking and cover fixes will keep this cover.' : 'Linking or Wrong covers may suggest a new one.',
       action: (
         <ToastAction altText="Undo" onClick={() => { void res.undo().then((ok) => { if (ok) patchCachedItem(item.id, saveShown ? { cover_pinned: !next, cover_image: undefined } : { cover_pinned: !next }); }); }}>
           Undo

@@ -31,7 +31,7 @@ interface MediaActionsMenuProps {
  */
 export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onTogglePin, onChangeCover, onRemoveCover, onDelete, className }: MediaActionsMenuProps) {
   const linked = item.link_status === 'linked' && !!item.source;
-  // A pinned cover is kept as-is: Unpin first to refresh or remove it.
+  // A pinned cover is kept as-is: Unpin first to change or remove it.
   const canChange = !!onChangeCover && !item.cover_pinned;
   // Pinning nothing would lock the title coverless; "Remove cover" is the deliberate way to do that.
   // Unpin stays on any pinned title (incl. pinned + no cover) so a cover can come back.

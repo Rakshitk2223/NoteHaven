@@ -13,9 +13,8 @@ interface AiringSoonProps {
  * Upcoming episodes for titles you track, read straight out of the cached
  * `episodes_detail` air dates.
  *
- * TMDB and TVmaze have always returned full episode lists with air dates, and
- * the refresh sweep has always stored them — nothing ever read them back. This
- * is that data finally showing up.
+ * TMDB and TVmaze return full episode lists with air dates (cached metadata, or a
+ * linked title's source); this rail is where they show up.
  */
 export function AiringSoon({ episodes, covers, onOpen }: AiringSoonProps) {
   // Nothing upcoming: stay quiet (the library-update pass keeps linked titles current).
