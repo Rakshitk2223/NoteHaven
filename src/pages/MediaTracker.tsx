@@ -918,10 +918,14 @@ const MediaTracker = () => {
   const editingItemId = editingItem?.id;
   openIdRef.current = editingItemId;
   useEffect(() => {
+    // Only the latest title's answer lands: stepping ← / → fast could otherwise let a
+    // slower, older response paint the previous title's tags on this one.
+    let cancelled = false;
     const loadEditingItemTags = async () => {
       if (editingItemId) {
         try {
           const tags = await fetchMediaTags(editingItemId);
+          if (cancelled) return;
           setEditingItemTags(tags);
           editTagsSnapshotRef.current = tagKey(tags);
         } catch (err) {
@@ -930,6 +934,7 @@ const MediaTracker = () => {
       }
     };
     loadEditingItemTags();
+    return () => { cancelled = true; };
   }, [editingItemId]);
 
   // Tag filtering was removed with the tag filter UI — media_tags has never held
@@ -1643,21 +1648,17 @@ const MediaTracker = () => {
         throw error;
       }
 
-      // Save tags for edited media item
-      if (editingItemTags.length > 0) {
-        const tagsToSave: Tag[] = [];
-        for (const tag of editingItemTags) {
-          if (tag.id < 0) {
-            const created = await createTag(tag.name, tag.color);
-            tagsToSave.push(created);
-          } else {
-            tagsToSave.push(tag);
-          }
-        }
-        await setMediaTags(editingItem.id, tagsToSave.map(t => t.id));
-      } else {
-        await setMediaTags(editingItem.id, []);
+      // Save tags for edited media item (placeholders get created first).
+      const savedTags: Tag[] = [];
+      for (const tag of editingItemTags) {
+        savedTags.push(tag.id < 0 ? await createTag(tag.name, tag.color) : tag);
       }
+      await setMediaTags(editingItem.id, savedTags.map(t => t.id));
+      // What was saved is now the truth everywhere: the open view's chips, the discard
+      // snapshot, and every cached copy of the row. Nothing waits on a refetch.
+      setEditingItemTags(savedTags);
+      editTagsSnapshotRef.current = tagKey(savedTags);
+      patchCachedItem(editingItem.id, { tags: savedTags });
 
       setDetailsOpen(false);
       setEditingItem(null);
