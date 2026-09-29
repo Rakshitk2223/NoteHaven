@@ -11,8 +11,10 @@ import { parseReaderBackup } from '@/lib/tachimanga/parse';
 import type {
   CategoryMap, ImportPlan, NoteHavenStatus, PlanImportMapRow, PlanTrackerRow, ReaderBackup, ReaderParseStage,
 } from '@/lib/tachimanga/types';
-import { type FullExport, type Planner, loadFullExport, loadImportMap, loadPlanner, loadTrackerRows, readCategoryMap, saveCategoryMap } from './import-inputs';
+import { type Planner, loadImportMap, loadPlanner, loadTrackerRows, readCategoryMap, saveCategoryMap } from './import-inputs';
 import { ImportPreview } from './ImportPreview';
+import { useBackupGate } from './useBackupGate';
+import { BackupNote } from './BackupNote';
 import { applyImport } from './apply';
 import { type ImportSelection, addsMissingType, initialSelection, selectedCount, withPicks } from './selection';
 
@@ -69,36 +71,9 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
   const plannerRef = useRef<Planner | null>(null);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  // Backup gate: Approve waits for a COMPLETE in-app full export in this session.
-  const [exporter, setExporter] = useState<FullExport | null>(null);
-  const [backedUp, setBackedUp] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportFailed, setExportFailed] = useState<string[]>([]);
-  const [exportedAt, setExportedAt] = useState<Date | null>(null);
+  // Backup gate: Approve waits for a COMPLETE in-app full export in this session (the shared gate).
+  const gate = useBackupGate();
   const [applying, setApplying] = useState(false);
-  useEffect(() => {
-    void loadFullExport().then((x) => { setExporter(x); setBackedUp(!!x?.doneThisSession()); });
-  }, []);
-
-  const runExport = async () => {
-    if (!exporter || exporting) return;
-    setExporting(true);
-    try {
-      const r = await exporter.run();
-      setExportFailed(r.failed);
-      setBackedUp(exporter.doneThisSession());
-      if (!r.failed.length) setExportedAt(new Date());
-      if (r.failed.length) {
-        toast({ title: 'Export incomplete', description: `Couldn’t read: ${r.failed.join(', ')}. Approve stays off until a full export works.`, variant: 'destructive' });
-      } else {
-        toast({ title: 'Backup downloaded', description: r.fileName + (r.skipped.length ? ` · not set up yet: ${r.skipped.join(', ')}` : '') });
-      }
-    } catch (e) {
-      toast({ title: 'Export failed', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
-    } finally {
-      setExporting(false);
-    }
-  };
 
   // 1. Parse in the Worker as soon as a file is picked.
   useEffect(() => {
@@ -147,7 +122,7 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
 
   // 3. Approve: re-plan with his "Needs a match" picks as map entries, then apply.
   const approve = async () => {
-    if (!plan || !sel || !backup || !inputs || !plannerRef.current || !backedUp || applying) return;
+    if (!plan || !sel || !backup || !inputs || !plannerRef.current || !gate.check() || applying) return;
     setApplying(true);
     try {
       let finalPlan = plan;
@@ -168,7 +143,7 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
           // Only claim a rollback that happened; name what didn't, and where it's safe.
           r.stoppedEarly && !r.notPutBack ? 'the undo record couldn’t be saved, so the last batch was put back' : '',
           r.notPutBack
-            ? `${r.notPutBack} change${r.notPutBack === 1 ? '' : 's'} couldn’t be put back; your backup${exportedAt ? ` from ${exportedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' from this session'} has the earlier values`
+            ? `${r.notPutBack} change${r.notPutBack === 1 ? '' : 's'} couldn’t be put back; your backup${gate.exportedAt ? ` from ${gate.exportedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' from this session'} has the earlier values`
             : '',
         ].filter(Boolean).join(' · ') || undefined,
         variant: r.failed || r.stoppedEarly ? 'destructive' : undefined,
@@ -282,22 +257,16 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
       }
       return (
         <div className="flex w-full flex-col gap-2">
-          {!backedUp && (
-            <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Back up first.</span> Approve turns on after a full export downloads.
-              {exportFailed.length > 0 && <span className="block text-destructive">Last try couldn’t read: {exportFailed.join(', ')}.</span>}
-              <span className="block">Also run <code className="rounded bg-muted px-1">npm run backup:media</code> on your Mac for a second copy.</span>
-            </div>
-          )}
+          <BackupNote gate={gate} />
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" className="h-11" onClick={onClose} disabled={applying}>Close</Button>
-            {!backedUp && (
-              <Button variant="outline" className="h-11" onClick={() => void runExport()} disabled={!exporter || exporting}>
-                {exporting ? 'Exporting…' : 'Back up now'}
+            {!gate.backedUp && (
+              <Button variant="outline" className="h-11" onClick={() => void gate.runExport()} disabled={!gate.available || gate.exporting}>
+                {gate.exporting ? 'Exporting…' : 'Back up now'}
               </Button>
             )}
             <Button variant="gradient" className="h-11" onClick={() => void approve()}
-              disabled={!backedUp || applying || count === 0 || needType > 0}
+              disabled={!gate.backedUp || applying || count === 0 || needType > 0}
               title={needType ? `Pick a type for ${needType} new title${needType === 1 ? '' : 's'}` : undefined}>
               {applying ? 'Applying…' : `Approve ${count.toLocaleString()}`}
             </Button>

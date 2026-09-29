@@ -10,7 +10,7 @@ const n = (v: number) => v.toLocaleString();
  * paused), and "Needs a pick · N" once the resolver has uncertain matches.
  * Renders nothing when there's nothing to say.
  */
-export function LinkBar({ run, onOpenQueue }: { run: LinkRun; onOpenQueue: () => void }) {
+export function LinkBar({ run, onOpenQueue, onOpenAuto }: { run: LinkRun; onOpenQueue: () => void; onOpenAuto: () => void }) {
   const p = run.progress;
   const state = p?.state ?? 'idle';
   const live = state === 'running' || state === 'waiting';
@@ -28,7 +28,8 @@ export function LinkBar({ run, onOpenQueue }: { run: LinkRun; onOpenQueue: () =>
   else if (paused) label = `Linking paused · ${counts}`;
 
   const picks = run.queue.length;
-  if (!label && picks === 0) return null;
+  const autos = run.autoMatched.length;
+  if (!label && picks === 0 && autos === 0) return null;
 
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2" aria-live="polite">
@@ -50,6 +51,12 @@ export function LinkBar({ run, onOpenQueue }: { run: LinkRun; onOpenQueue: () =>
             ) : null
           )}
         </div>
+      )}
+      {autos > 0 && (
+        <button type="button" onClick={onOpenAuto}
+          className="min-h-11 rounded-full bg-success/15 px-4 text-sm font-semibold text-success transition-colors hover:bg-success/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          Auto-matched · {n(autos)}
+        </button>
       )}
       {picks > 0 && (
         <button type="button" onClick={onOpenQueue}

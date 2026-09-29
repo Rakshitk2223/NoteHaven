@@ -8,6 +8,8 @@ import type { TrackerType } from '@/lib/media-sources';
 import { ReviewCard } from '../ReviewCard';
 import { candidateLine } from '../picker-utils';
 import { decide } from './link-data';
+import { BackupNote } from '../import/BackupNote';
+import { useLinkApprove } from './useLinkApprove';
 import type { LinkRun } from './useLinkRun';
 
 interface LinkQueueProps {
@@ -18,8 +20,6 @@ interface LinkQueueProps {
   /** media_id → the candidate index he picked; applied by Approve. */
   picks: Map<number, number>;
   onPicks: (next: Map<number, number>) => void;
-  /** Approve the picks (the backup gate + apply live with the caller). Null hides the button. */
-  approve?: { label: string; disabled: boolean; onClick: () => void; note?: string | null } | null;
 }
 
 /**
@@ -27,8 +27,18 @@ interface LinkQueueProps {
  * works side by side). Skip / Not listed are saved as he taps; picks wait for
  * Approve, which links them with the same backup gate and Undo as the rest.
  */
-export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPicks, approve }: LinkQueueProps) {
+export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPicks }: LinkQueueProps) {
   const { toast } = useToast();
+  const { gate, approve, busy: linking } = useLinkApprove(run);
+  // Only picks still in the queue (one decided elsewhere drops out).
+  const picked = run.queue.filter(({ row }) => picks.has(row.id));
+  const linkPicks = () => void approve(picked.map(({ row, proposal }) => ({
+    mediaId: row.id, candidate: proposal.candidates[picks.get(row.id)!], expect: { title: row.title, type: row.type },
+  }))).then(() => {
+    const next = new Map(picks);
+    for (const { row } of picked) next.delete(row.id);
+    onPicks(next);
+  });
   const [busy, setBusy] = useState<number | null>(null);
 
   const record = async (mediaId: number, decision: 'skipped' | 'not_listed') => {
@@ -92,15 +102,22 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
             </div>
           )}
         </div>
-        {approve && (
-          <div className={cn('flex flex-col gap-2 border-t border-border px-4 py-3 sm:px-6', phone && 'pb-[calc(0.75rem+env(safe-area-inset-bottom))]')}>
-            {approve.note && <p className="text-xs text-muted-foreground">{approve.note}</p>}
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" className="h-11" onClick={() => onOpenChange(false)}>Close</Button>
-              <Button variant="gradient" className="h-11" disabled={approve.disabled} onClick={approve.onClick}>{approve.label}</Button>
-            </div>
+        <div className={cn('flex flex-col gap-2 border-t border-border px-4 py-3 sm:px-6', phone && 'pb-[calc(0.75rem+env(safe-area-inset-bottom))]')}>
+          {picked.length > 0 && <BackupNote gate={gate} />}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" className="h-11" onClick={() => onOpenChange(false)} disabled={linking}>Close</Button>
+            {picked.length > 0 && !gate.backedUp && (
+              <Button variant="outline" className="h-11" onClick={() => void gate.runExport()} disabled={!gate.available || gate.exporting}>
+                {gate.exporting ? 'Exporting…' : 'Back up now'}
+              </Button>
+            )}
+            {picked.length > 0 && (
+              <Button variant="gradient" className="h-11" disabled={!gate.backedUp || linking} onClick={linkPicks}>
+                {linking ? 'Linking…' : `Link ${picked.length.toLocaleString()} picked`}
+              </Button>
+            )}
           </div>
-        )}
+        </div>
       </SheetContent>
     </Sheet>
   );

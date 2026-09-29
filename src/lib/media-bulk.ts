@@ -39,8 +39,9 @@ export interface UndoOutcome {
 // Timestamps come back from Postgres in another text form than the one we wrote,
 // so an equality guard on them would always miss. They're bookkeeping, not user
 // values; they're restored, but not compared.
+// JSON columns (alt_ids) can't be equality-guarded through PostgREST either.
 export const UNGUARDED_COLUMNS = new Set([
-  'last_activity_at', 'reader_checked_at', 'latest_checked_at', 'latest_changed_at', 'linked_at', 'updated_at',
+  'last_activity_at', 'reader_checked_at', 'latest_checked_at', 'latest_changed_at', 'linked_at', 'updated_at', 'alt_ids',
 ]);
 
 const CHUNK = 500;

@@ -402,6 +402,7 @@ const splitNoCover = <T extends Pick<MediaItem, 'id' | 'cover_pinned' | 'cover_i
 const ReaderImportDialog = lazy(() => import('@/components/media/import/ReaderImportDialog'));
 // "Needs a pick" queue: lazy, like the import.
 const LinkQueue = lazy(() => import('@/components/media/link/LinkQueue'));
+const AutoMatched = lazy(() => import('@/components/media/link/AutoMatched'));
 
 const BULK_KIND_LABEL: Record<BulkKind, string> = { import: 'Import', link: 'Linking', cover: 'Cover change' };
 
@@ -2085,6 +2086,7 @@ const MediaTracker = () => {
   // "Link your library" (migration 29): the resolver run, its pill and the review queue.
   const linkRun = useLinkRun(v2Schema.importLink);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [autoOpen, setAutoOpen] = useState(false);
   const [linkPicks, setLinkPicks] = useState<Map<number, number>>(() => new Map());
   const linkLive = ['running', 'waiting', 'paused'].includes(linkRun.progress?.state ?? '') || linkRun.intent === 'paused';
 
@@ -2822,9 +2824,14 @@ const MediaTracker = () => {
               });
             }}
           />
+          {autoOpen && (
+            <Suspense fallback={null}>
+              <AutoMatched open={autoOpen} onOpenChange={setAutoOpen} run={linkRun} phone={!tabletUp} />
+            </Suspense>
+          )}
           {queueOpen && (
             <Suspense fallback={null}>
-              <LinkQueue open={queueOpen} onOpenChange={setQueueOpen} run={linkRun} phone={!tabletUp} picks={linkPicks} onPicks={setLinkPicks} approve={null} />
+              <LinkQueue open={queueOpen} onOpenChange={setQueueOpen} run={linkRun} phone={!tabletUp} picks={linkPicks} onPicks={setLinkPicks} />
             </Suspense>
           )}
           {readerFile && (
@@ -2961,7 +2968,7 @@ const MediaTracker = () => {
             )}
             {/* Library stays mounted while More is open: scroll, pages and covers survive. */}
             <div hidden={section !== 'library'}>
-            {v2Schema.importLink && <LinkBar run={linkRun} onOpenQueue={() => setQueueOpen(true)} />}
+            {v2Schema.importLink && <LinkBar run={linkRun} onOpenQueue={() => setQueueOpen(true)} onOpenAuto={() => setAutoOpen(true)} />}
             {/* Search — mobile/tablet only (desktop search lives in the command bar) */}
             <div className="mb-3 flex items-center gap-2 lg:hidden">
               <Search className="h-4 w-4 text-muted-foreground flex-shrink-0" />
