@@ -15,9 +15,11 @@ and polish to existing features are always in scope.
 
 ## Open
 
-- 🔲 **Vitest smoke tests for the `lib/*` data layer.** The only test today is `npm run test:insights`,
-  which covers pure media helpers. The data modules have none, and past drift (RLS policies, type errors)
-  was caught only by manual audits. There's no runner yet — set one up explicitly.
+- ✅ **Vitest for `lib/*`: runner in place** (Media v2 branch, 2026-09-28). `npm test` runs
+  `src/**/*.test.ts` and `supabase/functions/**/*.test.ts` (`vitest.config.ts`, node environment); CI
+  runs it. It covers the pure Media v2 logic (`media-match`, `nextProgress`, `media-link` against a
+  stubbed client) and the edge adult filter. The older data modules (ledger, tags, restore, …) still have
+  no tests: add them here as they're touched. `npm run test:insights` stays as the `tsx` script.
 - 🔲 **Extract Notes autosave** (`src/pages/Notes.tsx`, deferred on purpose). Saving is spread across
   refs (`hasLocalChangesRef`, `lastSavedUpdatedAtRef`, `lastLoadedNoteIdRef`, pending title/content
   refs), per-field debounced saves and realtime echo suppression — a likely home for subtle "my edit
@@ -31,16 +33,19 @@ and polish to existing features are always in scope.
   them): turn on leaked-password protection (Authentication → Sign In / Providers → Passwords) and apply
   the pending Postgres security patch (Settings → Infrastructure). Not confirmed done.
 
+## In flight: Media v2
+
+Branch `media-v2`, not merged. Design in `docs/media-v2/PLAN.md`, live state in
+`docs/media-v2/HANDOFF.md`. Phase 1 (link by search-and-pick, fetch by id, fast logging, History) is
+finishing its browser gate. Migration 28 is on production; the edge function's v2 actions are **not
+deployed** and go out in one redeploy when Phase 1 ships. Phase 2 (link the whole library, with a review
+queue) and Phase 3 (Updates / "N behind", platform + resume link) follow. Push notifications and
+recommendations stay declined.
+
 ## Known limitations
 
-- **The baseline can't build an empty project.** Section 15 of `00_baseline_schema.sql` reads
-  `subscriptions.ledger_entry_id` before section 18 adds the column, so a fresh run aborts and rolls back.
-- **`00` and `20` aren't safe to re-run.** `00` fails on existing policies; `20`'s orphan-tag cleanup
-  would delete tags used only by work projects.
-- **No SQL enables realtime on `notes`.** A new project needs it switched on in the dashboard.
-- **JSON restore is broken** (Settings → Data) for ledger entries (`to_account_id` isn't remapped),
-  subscriptions (`category_id` isn't remapped) and categories (they collide with the signup-seeded
-  defaults). The export itself is complete.
-- **`npm run backfill:metadata` gets 401s.** It calls the edge function without a user token.
-- **`docs/audit/AUDIT_ONE_SHOT.sql` fails as a whole**: its section 13 queries the dropped
-  `ledger_buckets`. Its tag checks also ignore `work_project_tags`.
+- **`00` and `20` aren't safe to re-run.** `00` fails on existing policies (and, if forced, would
+  re-create `ledger_buckets`); `20`'s orphan-tag cleanup would delete tags used only by work projects.
+- **JSON restore** (Settings → Data, `lib/restore.ts`) inserts new rows and remaps foreign keys; it never
+  updates or deletes. Vault rows and `user_preferences` are deliberately never restored, and duplicates
+  are possible when restoring into an account that already holds the same items.

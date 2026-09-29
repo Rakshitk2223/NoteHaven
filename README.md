@@ -39,8 +39,9 @@ cp .env.example .env
 |---|---|---|
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | the app | Supabase → Project Settings → API. Public by design; Vite bakes them into the build |
 | `VITE_SUPABASE_PROJECT_ID` | — | in the template, unused by the code |
+| `VITE_MEDIA_SEARCH_URL` | dev builds only | optional; points the app at the local edge function (`http://127.0.0.1:8787`). Production builds ignore it |
 | `SUPABASE_SERVICE_ROLE_KEY` | maintenance scripts | bypasses RLS — never put it in client code |
-| `TMDB_API_KEY`, `OMDB_API_KEY` | `backfill:covers` script | optional; the deployed edge function gets its keys from Supabase secrets, not from `.env` |
+| `TMDB_API_KEY`, `OMDB_API_KEY` | `backfill:covers`; `TMDB_API_KEY` also for `edge:dev` and `link:dry-run` | optional; the deployed edge function gets its keys from Supabase secrets, not from `.env` |
 
 ### 3. Database
 
@@ -52,18 +53,16 @@ In the Supabase SQL editor, run the files in `supabase/migrations/` **in filenam
 4. `22_security_lint.sql`
 5. `22_wishlist.sql`
 6. `23_work_projects.sql`
+7. `24_share_owner_check.sql` … `27_notes_realtime.sql` (fix batch 1: share-owner check, calendar RPC,
+   tag counts, notes realtime)
+8. `28_media_source_links.sql` — Media v2 source links, `media_source_meta`, `media_progress_log`
 
-There is no migration runner — don't use `supabase db push`. Run each file once; `00` and `20` are not
-safe to re-run.
+There is no migration runner — don't use `supabase db push`. `00` and `20` are not safe to re-run;
+`21` onwards are idempotent.
 
-> **Known limitation:** `00_baseline_schema.sql` can't currently build an empty project (it references
-> `subscriptions.ledger_entry_id` before the column is created). It's tracked in `docs/BACKLOG.md`.
-
-Then, in the Supabase dashboard:
-- **Database → Publications → `supabase_realtime`:** enable the `notes` table. Notes syncs open tabs over
-  realtime, and no migration turns this on.
-- **Authentication:** enable leaked-password protection, and decide whether public sign-up should be on
-  (the app has a `/signup` page).
+Then, in the Supabase dashboard, under **Authentication**: enable leaked-password protection, and decide
+whether public sign-up should be on (the app has a `/signup` page). Realtime for `notes` is handled by
+`27_notes_realtime.sql`.
 
 ### 4. Edge function
 
@@ -88,7 +87,21 @@ that JWT verification is **on** — the function holds the service-role key.
 
 ```bash
 npm run dev    # http://localhost:8080
+npm test       # Vitest (src/**/*.test.ts + the edge function's pure helpers)
 ```
+
+**Local edge function (Media v2).** To work on `supabase/functions/media-search/` without deploying,
+run it locally in real Deno (fetched through npx; no Docker, no Supabase CLI) and point a dev build at it:
+
+```bash
+npm run edge:dev                                            # terminal 1: http://127.0.0.1:8787, reads .env
+VITE_MEDIA_SEARCH_URL=http://127.0.0.1:8787 npm run dev     # terminal 2 (or put the variable in .env.local)
+```
+
+`edge:dev` needs `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`
+(TMDB titles also need `TMDB_API_KEY`). It binds to loopback only and checks every bearer token against
+Supabase Auth, as the hosted gateway would. It talks to the **production database**, so its cache writes
+are real. The override is dev-only: production builds ignore `VITE_MEDIA_SEARCH_URL`.
 
 ## Build and deploy
 
@@ -97,30 +110,37 @@ npm run build     # typecheck, then vite build → dist/
 npm run preview   # serve dist/ locally
 ```
 
-- **Frontend:** `dist/` is a static site. `public/_redirects` (`/* /index.html 200`) is the Netlify-style
-  SPA fallback; any other static host needs the same rewrite. The repo contains no other hosting config.
-  The app is a PWA whose service worker updates automatically.
+- **Frontend:** `dist/` is a static site. Production is on Netlify, which deploys every push to `main`.
+  `public/_redirects` (`/* /index.html 200`) is the SPA fallback; any other static host needs the same
+  rewrite. The repo contains no other hosting config. The app is a PWA whose service worker updates
+  automatically.
 - **Edge function:** redeploy with `./deploy-edge-function.sh` whenever
-  `supabase/functions/media-search/` changes.
+  `supabase/functions/media-search/` changes. (The Media v2 actions on the `media-v2` branch are not
+  deployed yet; they go out in one redeploy when that branch merges.)
 - **Database:** new migrations are applied by hand in the SQL editor, like step 3.
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on every pull
-  request: `npm ci`, `npm run lint`, `npm run test:insights`, `npm run build`, and an esbuild parse of
-  the edge function. It needs no secrets.
+  request: `npm ci`, `npm run lint`, `npm run test:insights`, `npm test`, `npm run build`, and an esbuild
+  parse of the edge function. It needs no secrets.
 
 ## Maintenance scripts
 
-All run locally with `tsx` and read `./.env`. The ones that touch the database need
+All run locally (with `tsx`, apart from `edge:dev`) and read `./.env`. The ones that touch the database need
 `SUPABASE_SERVICE_ROLE_KEY`; with only the anon key, RLS hides every row.
 
 | Command | What it does |
 |---|---|
 | `npm run backfill:covers` | fills missing `media_tracker.cover_image`, calling AniList, Kitsu, Jikan, MangaDex, MangaUpdates, TVmaze, TMDB and OMDB directly |
-| `npm run backfill:metadata` | fills `media_metadata` through the deployed edge function (`--force`, `--limit N`). **Currently fails with 401** — it doesn't send an auth token (`docs/BACKLOG.md`) |
+| `npm run backfill:metadata` | fills `media_metadata` through the deployed edge function, authenticated with the service-role key (`--force`, `--limit N`) |
 | `npm run backfill:releases` | fills `media_tracker.release_date` from cached episode data; dry run by default, `--apply` writes |
 | `npm run backup:media` | dumps the media tables to `./backups/<timestamp>/` with row counts and SHA-256 checksums |
+| `npm run backup:vault` | read-only: downloads every Vault file plus its rows to `./backups/vault-<stamp>/`, with a SHA-256 manifest and `RESTORE.md` |
+| `npm run audit:covers -- <export.json> [--list]` | offline: counts (and lists) covers that are the wrong medium, from a Settings → Data export |
+| `npm run link:dry-run [-- <export.json>] [--fresh \| --rescore \| --retry-errors]` | Media v2: proposes a source link for every title in an export and reports auto / review / unlinked counts. **Writes nothing** to any database; output goes to `backups/link-dry-run/`. `--rescore` re-scores stored candidates offline |
+| `npm run edge:dev` | the local edge function (see Setup, step 5) |
 | `npm run audit:coverage` | read-only report of metadata coverage per media type (`--list <type>`) |
 | `npm run smoke:apis` | hits the upstream media APIs to check the fields the edge function relies on (`--rounds N`) |
 | `npm run test:insights` | assertion script for the pure media-insight helpers (also run by CI) |
+| `npm test` | Vitest: match scoring, progress rollover, linking rules, the edge adult filter (also run by CI) |
 
 ## Troubleshooting
 
@@ -132,8 +152,8 @@ Supabase client throws `supabaseUrl is required.` at startup. Check `.env`, then
 check that the function is deployed, its `TMDB_API_KEY` secret is set (movies and series), and
 `ALLOWED_ORIGINS` includes the origin you're browsing from (the browser console shows CORS errors).
 
-**The edge function returns 401.** Expected without a user session: it accepts only a signed-in user's
-access token, and rejects the anon key and the service-role key. Never deploy it with `--no-verify-jwt`
+**The edge function returns 401.** Expected without a user session: it accepts a signed-in user's access
+token (or the service-role key, for the maintenance scripts) and rejects the anon key. Never deploy it with `--no-verify-jwt`
 or turn JWT verification off. To test it by hand, pass a user's access token:
 
 ```bash
@@ -143,11 +163,12 @@ curl -H "apikey: $VITE_SUPABASE_ANON_KEY" -H "Authorization: Bearer <user access
 
 **Work or Wishlist says "tables not set up".** Run `23_work_projects.sql` or `22_wishlist.sql`.
 
-**Notes don't sync between tabs.** Enable realtime for the `notes` table (Setup, step 3).
+**Notes don't sync between tabs.** Run `27_notes_realtime.sql`, which adds `notes` to the realtime
+publication.
 
 **Signed out on every reload.** Clear the `sb-<project-ref>-auth-token` localStorage entry and sign in
 again. The app uses a single Supabase client that stores its session in localStorage.
 
 ## Before you push
 
-Run what CI runs: `npm run lint` (zero errors), `npm run test:insights`, `npm run build`.
+Run what CI runs: `npm run lint` (zero errors), `npm run test:insights`, `npm test`, `npm run build`.

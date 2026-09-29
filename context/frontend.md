@@ -47,7 +47,7 @@ which shows a pulse card while auth loads, then redirects to `/login` when there
 | `/notes/share/:shareId` | `SharedNote` | | — | utils | RPCs `get_shared_note`, `update_shared_note` only |
 | `/dashboard` | `Dashboard` | 🔒 | PS | dashboard, tags, subscriptions, ledger | inline `tasks`, `notes`, `media_tracker`, `prompts`, `countdowns`, `birthdays`; `user_preferences`; RPCs `get_upcoming_renewals`, `get_monthly_ledger_summary` |
 | `/library` (alias `/prompts`) | `Library` | 🔒 | PS | tags, codeSnippets, commands | `prompts`, `prompt_tags` inline; `code_snippets`, `snippet_folders`, `commands`, tag junctions |
-| `/media` | `MediaTracker` | 🔒 | B | edge-function, simple-image-fetcher, media-refresh, media-metadata, media-insights, tags | `media_tracker` (inline), `media_metadata`, `media_tags`; edge function |
+| `/media` | `MediaTracker` | 🔒 | B | edge-function, media-sources, media-link, media-match, media-progress, media-metadata, media-refresh, simple-image-fetcher, media-insights, cover-medium, tags (+ `hooks/media/*`) | `media_tracker` (inline + hooks), `media_metadata`, `media_tags`, `media_source_meta` (read), `media_progress_log`; edge function |
 | `/tasks` | `Tasks` | 🔒 | PS | tags, date-utils | `tasks`, `task_tags` inline |
 | `/notes` | `Notes` | 🔒 | B | tags | `notes`, `note_tags`, `shared_notes` inline; realtime on `notes` |
 | `/calendar` | `Calendar` | 🔒 | B | calendar, date-utils (`hooks/useCalendar`) | RPC `get_calendar_events`; quick-add inserts `tasks` / `birthdays` / `countdowns` |
@@ -64,7 +64,8 @@ which shows a pulse card while auth loads, then redirects to `/login` when there
 | `/settings` | `Settings` | 🔒 | PS | preferences, themes, dashboard, image-cache, media-metadata | `auth.updateUser`, Storage bucket `avatars`, every user table (backup), `user_preferences` |
 | `*` | `NotFound` | | — | — | links to `/dashboard` when signed in, otherwise `/login` |
 
-**Deep links:** `/notes?new=1`, `/tasks?new=1`, `/tasks?task=ID`, `/media?new=1`, `/work?new=1`,
+**Deep links:** `/notes?new=1`, `/tasks?new=1`, `/tasks?task=ID`, `/media?new=1` (opens Browse),
+`/media?media=ID` (opens that title's detail, fetched by id if not loaded), `/work?new=1`,
 `/library?tab=prompts|snippets|commands`, `/library?prompt=ID`, `/library?snippet=ID`,
 `/settings?section=<id>`. The command palette uses the `?new=1` and `?tab=` forms.
 
@@ -103,17 +104,62 @@ items appended automatically.
   and secret masking for any language (`lib/secret-mask.ts`).
   *Commands* (`components/library/CommandsTab.tsx`): grouped by project folder, then by free-text
   category; reordered within a category via `reorderCommands`.
-- **MediaTracker:** `useInfiniteQuery` over `media_tracker` (200 per page, intersection-observer scroll,
-  key `['mediaItems', …]`) plus `['mediaRails']` and `['groupCounts']` queries. Types: Movie, Series,
-  Anime, Manga, Manhwa, Manhua, KDrama, JDrama; statuses: Watching, Reading, Plan to Watch, Plan to Read,
-  Completed. Grid (grouped Active / Planned / Completed) or list view; custom type groups
-  (`CustomGroupBuilder`); rails (`ContinueShelf`, `AiringSoon`, `GenreRail`, toggled by `mediaShowRails`);
-  genre, progress (all / behind / new) and needs-cover filters; debounced search; sort. Quick add is a
-  Dialog; the right-hand Sheet is the details/edit panel. Optimistic episode/chapter increments and
-  status changes; bulk status, delete and cover refresh; JSON import; JSON / CSV / TXT export.
-  `LibraryStatsDialog` shows breakdowns; `RefreshLibraryDialog` starts a background metadata sweep
-  (`RefreshActivityContext`) that fills missing covers and metadata but never overwrites. The tag
-  *filter* is gone (genres replaced it); the edit form still has a tag selector.
+- **MediaTracker** (Media v2 on the `media-v2` branch: a Mihon-style library; design in
+  `docs/media-v2/PLAN.md`). Bespoke page, still ~3,200 lines, with pieces extracted into
+  `components/media/*` and `hooks/media/*`.
+  - **Sections** (`MediaSectionNav`): Library · History · Browse · More. History appears only when
+    migration 28 is detected (`detectMediaV2Schema` in `lib/media-link.ts`: `limit(0)` probes, a missing
+    table hides the tab rather than showing it empty). There is **no Updates tab** yet (Phase 3). Section
+    and per-section scroll are in-memory state (every visit starts on Library); Library stays mounted and
+    hidden, while the other sections mount on open. Bottom bar (fixed, safe-area padded) below 768 px and
+    in portrait; top tabs at ≥1280 px or ≥768 px landscape. The page headers switch at Tailwind `lg`
+    (1024 px); the PageShell-style hamburger stays on mobile.
+  - **Library:** `LibraryGrid` (cover tiles; the log number or the Movies `WatchedToggle` under each
+    cover; a behind badge only when a latest chapter is known; long-press 450 ms to select) or the list
+    view (`MediaListRow`, 44 px controls, ⋮ `MediaActionsMenu`). Grid size S / M / L (`grid-size.ts`,
+    default M; 3 columns on phone up to 8 at `xl`; narrower set while the Mac pane is open). Type pills
+    and custom groups (`CustomGroupBuilder`), status, sort, debounced search, genre chips (`GenreRail`,
+    AND), a "More filters" sheet (all / behind / new, needs cover), removable filter chips. Rails
+    (`ContinueShelf`, `AiringSoon`) show when `mediaShowRails` is on and no filter is active. The grid is
+    flat (no Active / Planned / Completed grouping).
+  - **Detail** (`MediaDetailPanel` framing `MediaDetailView` / `MediaEditForm`): phone = full-screen
+    right Sheet (`h-dvh`, safe-area padded); iPad (768–1279) = right Sheet, `sm:max-w-xl` (576 px); Mac
+    (≥1280) = a sticky 420 px `<aside>` beside the grid with ‹ › buttons, ← / → stepping through the
+    visible items (prefetching the next page) and Esc to close. Keys are ignored in inputs, with
+    modifiers, or while another dialog is open; no stepping in edit mode. The panel draws its own X and
+    has no footer Close. View mode shows Edit + ⋮; linked titles show source metadata (`['sourceMeta']`,
+    `media_source_meta` first, else a `detail` fetch). Any open / close / step with unsaved edits goes
+    through `guardEdits` → "Discard changes?".
+  - **Logging** (`ProgressControl`, `LogNumberButton` → `LogSheet` / `LogPanel`): a bottom sheet
+    everywhere except `(min-width:1280px) and (pointer:fine)`, where it's a popover; number input,
+    +1 / +5 / +10 / +50 chips, "Caught up (N)" when a latest is known, one write, Undo toast.
+    `useProgressMutation` is the **only progress writer**: cancel in-flight list / rail reads, patch
+    every cached copy, compare-and-swap `UPDATE media_tracker … WHERE <col> = base` (3 attempts; ±N
+    re-plans on a miss, an explicit set or Undo raises "Changed on another device"), then a best-effort
+    `media_progress_log` insert. Undo is a reverse CAS that appends `kind = 'undo'` rows. Status /
+    rating patches, the Watched toggle, the Edit form (writes progress only when it changed), bulk
+    actions and the starting progress on add are plain updates and aren't logged.
+  - **Browse** (`SourcePicker` → `PickPreview`): search-and-pick across the type-correct sources
+    (`lib/media-sources.ts` → edge `action=search`), 350 ms debounce with abort, grouped by source (a
+    column per source at ≥1280, horizontal rows below), per-source status, "different type" dimming,
+    "Linked" / "In library" markers (from loaded items only). A pick of a loaded in-library title opens
+    it; otherwise PickPreview sets status + starting progress, inserts `media_tracker`, then
+    `linkEntry(…, { isNew: true })`; Undo deletes the new row. **"Add without linking"** is always
+    offered once there's a query. This replaces the old Quick Add dialog; the header Add button, the
+    empty state and `?new=1` all open Browse.
+  - **Fix match / Link source** (a detail action-row button, only with migration 28): the same picker
+    in a Dialog with the type locked and the title prefilled; PickPreview can offer "Use this entry's
+    cover" when the title isn't pinned. **Pin / Unpin cover** and **Remove cover** (with 28: a pinned
+    null cover, with Undo) live in the ⋮ menu; Refresh cover is hidden for linked titles.
+  - **History** (`HistoryView`): `media_progress_log` with the embedded tracker row, newest first, 50 per
+    page, grouped by day, undo rows marked ↺; tapping opens the title.
+  - **More** (`MediaMoreView`): grid size, rails toggle, type tabs, select titles (bulk status, cover
+    refresh, delete), Library stats (`LibraryStatsDialog`), Refresh library… (`RefreshLibraryDialog` →
+    `RefreshActivityContext` sweep; linked items refresh by id through a lazy import of
+    `refreshLinked`), Import JSON, export JSON / CSV / TXT.
+  - Types: Movie, Series, Anime, Manga, Manhwa, Manhua, KDrama, JDrama; statuses: Watching, Reading,
+    Plan to Watch, Plan to Read, Completed. The tag *filter* is gone (genres replaced it); the edit form
+    still has a tag selector.
 - **Calendar:** Month, Week and Agenda (rolling 30 days, phone-first) views over `get_calendar_events`,
   filtered client-side (filters in `localStorage.calendar_filters`). `DayDetailModal` → `DayDetail` deep
   links to the source rows; `QuickAddDialog` creates tasks, birthdays or countdowns.
@@ -156,7 +202,7 @@ items appended automatically.
   | Sidebar | collapse, drag-reorder the nav |
   | Keyboard | shortcut list; opens the palette |
   | Security | change password (re-authenticates with the current one first) |
-  | Data | JSON backup of every user table + tag junctions (paged past PostgREST's 1000-row cap); restore (**known-broken** for ledger entries, subscriptions and categories — `docs/BACKLOG.md`); Vault usage; clear the cover cache |
+  | Data | JSON backup of every user table in `EXPORT_TABLES` + tag junctions (paged past PostgREST's 1000-row cap); restore through `lib/restore.ts` (new rows, FKs remapped; Vault and preferences skipped); Vault usage; clear the cover cache |
   | Sync activity | live view of the media refresh sweep: progress, per-item results, retry |
   | About | version, environment, external link |
 
@@ -172,24 +218,31 @@ items appended automatically.
 | `commands.ts` | Commands tab CRUD and reorder (projects = `snippet_folders`) | `commands` |
 | `dashboard.ts` | widget types, metadata, default layout, load / save / reset | `user_preferences` (`dashboard_widgets`) |
 | `date-utils.ts` | local `YYYY-MM-DD` helpers: `dateToYMD`, `parseYMD`, `formatDateForDisplay`, `formatDateDDMMYYYY`, `isToday`, `addDays` | — |
-| `edge-function.ts` | `mediaSearchGet` / `mediaSearchUrl`: authenticated GET to `media-search`; `null` on no session, non-2xx or network error | edge function |
+| `cover-medium.ts` | pure: the medium a cover URL shows (comic / anime / screen), `isUsableCover` (also refuses MangaDex hotlinks), `coverFitsType` | — |
+| `edge-function.ts` | `mediaSearchGet` / `mediaSearchPost` / `mediaSearchUrl`: authenticated calls to `media-search`; `null` on no session, non-2xx or network error. Dev builds honour `VITE_MEDIA_SEARCH_URL` (the local `edge:dev` server); production folds it away | edge function |
+| `fetch-all.ts` | `fetchAllRows`: page any query past PostgREST's 1000-row cap (needs a fresh, fully ordered query per page) | — |
 | `image-cache.ts` | localStorage cover cache with a 24 h TTL, merge-on-write | — |
 | `ledger.ts` | entries CRUD, monthly summary (RPC + derived subscription charges), CSV/JSON export, `formatCurrency` | `ledger_entries`, `subscriptions`; RPC `get_monthly_ledger_summary` |
 | `logger.ts` | `devLog` (dev-only logging) | — |
 | `media-insights.ts` | pure derivations: continue queue, airing soon, genres, library stats, duplicates (unit-tested) | — |
-| `media-metadata.ts` | reads the metadata cache, runs the Refresh Library sweep, acknowledges new content | `media_metadata`, `media_tracker`; edge function |
-| `media-progress.ts` | pure progress types + `computeProgress` (kept apart so tests don't import the client) | — |
+| `media-link.ts` | Media v2 binding: `linkEntry` (link fields + latest-chapter mirror + cover rules; never a pinned cover), `unlinkEntry`, `setCoverPinned`, `refreshLinked` (by id; never the cover or a user field), `readSourceMeta[Batch]`, `detectMediaV2Schema`. Every write returns an `undo()`; a missing migration returns `needs-migration`. Kept off first paint (the sweep imports it lazily) | `media_tracker` link columns, `media_source_meta` (read), `media_progress_log` (probe); edge function |
+| `media-match.ts` | pure match scoring: title vs all alt titles, type / country gate, year, plausibility; `AUTO_LINK_MIN` 0.9, `REVIEW_MIN` 0.6; near-tie (≤0.05) demotes auto → review only against a *different* work (the same work on two sources isn't a rival). Used by `media-sources`, the dry-run script and tests | — |
+| `media-metadata.ts` | reads the metadata cache, runs the Refresh Library sweep (linked items refresh by id via a lazy `refreshLinked`), acknowledges new content | `media_metadata`, `media_tracker`; edge function |
+| `media-progress.ts` | pure progress types, `computeProgress`, and `nextProgress` (chapter clamp to latest / total; episode season rollover both ways; season floor 1) | — |
+| `media-sources.ts` | typed v2 edge wrappers: `searchSources`, `fetchSourceDetail`, `resolveBatch` (no caller yet; Phase 2), `sourcesForType`, `SOURCE_LABEL`; a missing edge action degrades to per-source `unavailable` | edge function (`action=search|detail|resolve`) |
 | `media-refresh.ts` | per-item cover cycling through sources by type | AniList, Kitsu, Jikan, TVmaze direct; TMDB, Wikidata, Fanart via the edge function; writes `media_tracker.cover_image` + `media_metadata` |
 | `pantry-match.ts` | "cook with what I have" scoring (pure) | — |
 | `preferences.ts` | the `AppPreferences` blob, light/dark/system mode, `applyPreferencesToDOM` | localStorage + `user_preferences` (`app_preferences`) |
 | `recipe-parse.ts` | free-text → recipe parser (pure) | — |
 | `recipes.ts` | recipes and folders, TheMealDB search / import, image suggestions | `recipes`, `recipe_folders`; TheMealDB; Openverse |
+| `restore.ts` | JSON-backup restore: inserts new rows parents-first, remaps every FK and tag link through old → new ids, maps natural-key clashes onto existing rows; never updates or deletes; skips Vault and `user_preferences` | every restorable user table |
 | `route-prefetch.ts` | `prefetchRoute`: warm a lazy route chunk on nav hover / focus | — |
 | `secret-mask.ts` | pure secret masking for the snippet viewer | — |
 | `simple-image-fetcher.ts` | batched cover lookup: cache → `media_tracker.cover_image` → `media_metadata` → edge function (10 at a time, chunked `IN`) | `media_tracker`, `media_metadata`; edge function |
 | `subscriptions.ts` | subscriptions and categories, renewal maths, summary, status labels; `getUpcomingRenewals` (Dashboard) | `subscriptions`, `subscription_categories`; RPC `get_upcoming_renewals` |
 | `tags.ts` | tag CRUD, validation, palette, per-entity `set*Tags`, `searchByTag` | `tags` + the six junctions |
 | `themes.ts` | theme families and `applyTheme` / `getCurrentTheme` / `saveTheme` | — |
+| `title-match.ts` | pure: `titleSimilarity` (bigram Dice), `hitMatchesTitle`, `TITLE_MATCH_MIN` 0.6 — a cover / metadata hit must match the typed title | — |
 | `utils.ts` | `cn`, `sanitizeHtml`, `sanitizePreview`, `getContrastTextColor` | — |
 | `vault.ts` | folder tree, uploads, rename / move / star / delete, signed URLs, zip downloads; `MAX_FILE_BYTES` 25 MB | `vault_folders`, `vault_files`; Storage `vault` |
 | `wishlist.ts` | wishlist CRUD, price history, deal detection, `isMissingTableError` | `wishlist_items` |
@@ -211,6 +264,12 @@ refresh), `integrations/supabase/types.ts` (schema types), `types/calendar.ts`.
 | `contexts/SidebarContext.tsx` | collapse state in `notehaven_sidebar_collapsed`, synced across tabs; collapsed by default under 1024 px |
 | `contexts/RefreshActivityContext.tsx` | the global media sweep runner (`start`, `retry`, `clear`, progress, items); one sweep at a time; invalidates `['groupCounts']` and `['mediaItems']` when done |
 | `pages/settings/useProfile.ts` | display name, email and avatar from the auth user's metadata |
+| `hooks/media/useMediaLibrary.ts` | the paged library: `useInfiniteQuery` `['mediaItems', status, search, sortBy, sortOrder]` over `media_tracker` + tags, 200 per page, exact count, `keepPreviousData` |
+| `hooks/media/useProgressMutation.ts` | the only progress writer (compare-and-swap + `media_progress_log` + Undo; see MediaTracker above) |
+
+Other Media query keys: `['mediaRails']` (150 active rows by activity, 60 s), `['groupCounts', groups]`
+(type / status counts, paged, 30 s), `['sourceMeta', source, id]` (linked detail, 10 min),
+`['mediaHistory']` (History, infinite, 30 s). Covers and legacy metadata are `useState` maps, not queries.
 
 ## Components
 
@@ -226,8 +285,12 @@ refresh), `integrations/supabase/types.ts` (schema types), `types/calendar.ts`.
   its own), `MasonryItem`, `CircularProgress`, `widgets/*`.
 - **`ledger/`:** `AccountsManager`, `LedgerCharts`, `LedgerEntryForm`.
 - **`library/`:** `CommandsTab` (+ `MoveToCommandsDialog`).
-- **`media/`:** `MediaCard`, `CustomGroupBuilder`, `ContinueShelf`, `AiringSoon`, `GenreRail`,
-  `LibraryStatsDialog`, `RefreshLibraryDialog`, `media-style.ts`.
+- **`media/`:** sections `MediaSectionNav`, `LibraryGrid`, `HistoryView`, `MediaMoreView`; detail
+  `MediaDetailPanel`, `MediaDetailView`, `MediaEditForm`, `MediaActionsMenu`; logging `ProgressControl`,
+  `LogSheet` (+ `LogNumberButton`), `LogPanel`, `WatchedToggle`; Browse `SourcePicker`, `PickPreview`;
+  rails and dialogs `ContinueShelf`, `AiringSoon`, `GenreRail`, `CustomGroupBuilder`, `LibraryStatsDialog`,
+  `RefreshLibraryDialog`; helpers `types.ts` (`MediaItem` incl. the migration 28 fields), `grid-size.ts`,
+  `progress-view.ts` (pure), `source-meta.ts`, `picker-utils.ts`, `media-style.ts`. `MediaCard` is gone.
 - **`recipes/`:** `DictateParse`, `PantryPanel`. **`settings/`:** `primitives.tsx`.
 - **`vault/`:** `VaultFileCard`, `VaultFolderCard`, `FilePreviewModal`, `MoveToFolderDialog`, `DuplicateResolveDialog`.
 - **`work/`:** `ProjectCard`, `ProjectTable`, `PeopleInput`.
@@ -276,6 +339,7 @@ No `sessionStorage` is used.
 | `calendar_filters` | `hooks/useCalendar.ts` |
 | `library-active-tab` | `Library`, `settings/BehaviorSection` |
 | `mediaTrackerViewMode`, `mediaTrackerActiveCategory`, `mediaTrackerVisibleTypeTabs`, `mediaTrackerCustomGroups`, `mediaTrackerSortBy`, `mediaTrackerSortOrder`, `mediaShowRails`, `media_meta_light_v1` | `MediaTracker` (view mode and sort also set from Behavior) |
+| `mediaGridSize` (`S` / `M` / `L`) | `media/grid-size.ts` |
 | `media_refresh_options_v1` | `media/RefreshLibraryDialog` |
 | `media_images_v2`, `media_image_sources_v2`, `media_images_stamp_v2` | `lib/image-cache.ts` |
 | `ledgerLastAccountId`, `ledgerSelectedMonth`, `ledgerSelectedYear` | `MoneyLedger` |
@@ -304,7 +368,10 @@ No `sessionStorage` is used.
   `tsconfig.json` only holds references (`files: []`), so run `npm run typecheck`, not bare `tsc`.
 - **ESLint** (`eslint.config.js`, flat config): JS + typescript-eslint recommended, react-hooks
   recommended, `react-refresh/only-export-components` as a warning, `@typescript-eslint/no-unused-vars` off.
-- **Tests:** `scripts/__tests__/media-insights.test.ts` (`npm run test:insights`) — plain `tsx` with
-  hand-rolled assertions over `lib/media-insights` and `lib/media-progress`. No test framework.
+- **Tests:** Vitest (`npm test`, `vitest.config.ts`: node environment, `@/` alias, separate from
+  `vite.config.ts`) runs `src/**/*.test.ts` and `supabase/functions/**/*.test.ts`: `lib/__tests__/`
+  `media-match`, `media-progress` (`nextProgress`), `media-link` (stubbed client) and the edge
+  `adult.test.ts`. `scripts/__tests__/media-insights.test.ts` (`npm run test:insights`) stays a plain
+  `tsx` script over `lib/media-insights` and `lib/media-progress`.
 - **CI:** `.github/workflows/ci.yml` (GitHub Actions, Node 20): `npm ci` → lint → `test:insights` →
-  build → esbuild parse of the edge function.
+  `npm test` → build → esbuild parse of the edge function.
