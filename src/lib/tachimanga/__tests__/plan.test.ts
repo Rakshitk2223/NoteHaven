@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import initSqlJs from 'sql.js';
 import { parseBackupBytes, type SqlJsStatic } from '../parse-core';
-import { buildFixtureTmb } from '../__fixtures__/make-fixture';
+import { buildFixtureTmb, FIXTURE_SEEDS, FIXTURE_SOURCES, FIXTURE_TITLES } from '../__fixtures__/make-fixture';
 import { planImport, rowWrites } from '../plan';
 import type { ImportPlan, PlanImportMapRow, PlanRow, PlanTrackerRow, ReaderTitle } from '../types';
 
@@ -22,17 +22,17 @@ const reader = (title: string, over: Partial<ReaderTitle> = {}): ReaderTitle => 
   title, alt: [], source_name: '[audit] Source A', source_lang: 'en', nsfw: false, in_library: true,
   read_max: 10, latest_max: 12, distinct_chapters: 12, last_read_at: null, thumbnail_url: null, categories: [], ...over,
 });
-const find = (plan: ImportPlan, title: string): PlanRow | undefined =>
-  [...plan.forward, ...plan.same, ...plan.noteHavenAhead].find((p) => p.title === title);
+const matchedRows = (plan: ImportPlan): PlanRow[] => [...plan.forward, ...plan.same, ...(plan.latestOnly ?? []), ...plan.noteHavenAhead];
+const find = (plan: ImportPlan, title: string): PlanRow | undefined => matchedRows(plan).find((p) => p.title === title);
 
 /**
  * What apply would do with the ticked parts (frontend owns the real one). It
  * skips rows where rowWrites() is false; `stamps: false` models an apply whose
  * timestamps come from elsewhere (a trigger stamping now()), never copied.
  */
-function applyPlan(plan: ImportPlan, rows: PlanTrackerRow[], map: PlanImportMapRow[], { stamps = true } = {}) {
+function applyPlan(plan: ImportPlan, rows: PlanTrackerRow[], map: PlanImportMapRow[], { stamps = true, mapWrites = true } = {}) {
   const byId = new Map(rows.map((r) => [r.id, r]));
-  for (const p of [...plan.forward, ...plan.same, ...plan.noteHavenAhead]) {
+  for (const p of matchedRows(plan)) {
     if (!rowWrites(p)) continue;
     const r = byId.get(p.media_id)!;
     if (p.progress && p.ticked) r.current_chapter = p.progress.current_chapter!;
@@ -41,7 +41,7 @@ function applyPlan(plan: ImportPlan, rows: PlanTrackerRow[], map: PlanImportMapR
     if (p.auto.reader_latest_chapter !== undefined) r.reader_latest_chapter = p.auto.reader_latest_chapter;
     if (p.auto.platform) r.platform = p.auto.platform;
     if (stamps && p.auto.last_activity_at) r.last_activity_at = p.auto.last_activity_at;
-    for (const m of p.map) {
+    if (mapWrites) for (const m of p.map) {
       const i = map.findIndex((x) => x.origin_key === m.origin_key);
       if (i >= 0) map[i] = m; else map.push(m);
     }
@@ -83,8 +83,10 @@ describe('planImport · the synthetic fixture, end to end', () => {
     expect(plan.noteHavenAhead).toContain(behind);
     expect(behind).toMatchObject({ from: 45, to: 40, ticked: false }); // only with "Set back"
 
-    expect(plan.same.map((p) => p.title)).toEqual(expect.arrayContaining([
-      '[audit] Equal Progress', '[audit] Scanlator Dupes', '[audit] Zero Read', '[audit] 한글 제목',
+    // Same progress + a pre-ticked cover → same; same progress + only a new latest → latestOnly.
+    expect(plan.same.map((p) => p.title)).toEqual(expect.arrayContaining(['[audit] 한글 제목']));
+    expect(plan.latestOnly!.map((p) => p.title)).toEqual(expect.arrayContaining([
+      '[audit] Equal Progress', '[audit] Scanlator Dupes', '[audit] Zero Read',
     ]));
     expect(find(plan, '[audit] Scanlator Dupes')).toMatchObject({ to: 12, progress: null }); // 12.5 floors to 12
     expect(find(plan, '[audit] Zero Read')).toMatchObject({ to: null, progress: null });
@@ -95,7 +97,7 @@ describe('planImport · the synthetic fixture, end to end', () => {
     expect(find(plan, '[audit] Forward Bump')!.auto).toMatchObject({ reader_latest_chapter: 70, reader_checked_at: NOW, platform: '[audit] Source A' });
     expect(find(plan, '[audit] Scanlator Dupes')!.auto.reader_latest_chapter).toBe(13);
     expect(find(plan, '[audit] Plural Variant')!.auto.platform).toBeUndefined(); // he typed one
-    for (const p of [...plan.forward, ...plan.same, ...plan.noteHavenAhead]) {
+    for (const p of matchedRows(plan)) {
       expect(Object.keys(p.auto)).not.toEqual(expect.arrayContaining(['resume_url']));
       expect(p.auto).not.toHaveProperty('rating');
       expect(p.auto).not.toHaveProperty('title');
@@ -130,7 +132,7 @@ describe('planImport · the synthetic fixture, end to end', () => {
     const plan = planImport(readers, seed(), [], { now: NOW });
     const started = find(plan, '[audit] Started Reading')!;
     expect(started.status).toMatchObject({ from: 'Plan to Read', to: 'Reading', reason: 'started', ticked: true });
-    const others = [...plan.forward, ...plan.same, ...plan.noteHavenAhead].filter((p) => p !== started);
+    const others = matchedRows(plan).filter((p) => p !== started);
     expect(others.every((p) => p.status === null)).toBe(true);
     expect(plan.statusChanges).toBe(1);
   });
@@ -176,7 +178,7 @@ describe('planImport · the synthetic fixture, end to end', () => {
     const again = planImport(readers, rows, map, { now: '2026-09-30T08:00:00.000Z' });
     expect(again.writes).toBe(0);
     expect(again.forward).toEqual([]);
-    expect([...again.same, ...again.noteHavenAhead].every((p) => p.via === 'map')).toBe(true);
+    expect(matchedRows(again).every((p) => p.via === 'map')).toBe(true);
   });
 });
 
@@ -202,13 +204,13 @@ describe('planImport · writes (BE4d: timestamps never count on their own)', () 
     const again = planImport(readers, rows, map, { now: '2026-10-01T09:00:00.000Z' });
     expect(again.writes).toBe(0);
     // The reader's last read is still "later" than NoteHaven's activity, but that alone writes nothing.
-    for (const p of [...again.forward, ...again.same, ...again.noteHavenAhead]) {
+    for (const p of matchedRows(again)) {
       expect(rowWrites(p)).toBe(false);
       // No option left at all → no timestamp either. (A row still offering an
       // UNTICKED option, like an alternative cover, keeps its stamp for if he ticks it.)
       if (!p.progress && !p.status && !p.cover) expect(p.auto).toEqual({});
     }
-    expect([...again.same].filter((p) => !p.cover).length).toBeGreaterThan(0); // the check above really ran
+    expect(matchedRows(again).filter((p) => !p.progress && !p.status && !p.cover).length).toBeGreaterThan(0); // the check above really ran
   });
 
   it('a latest-only bump (a new chapter out, same progress) → exactly 1 write, stamped', () => {
@@ -219,6 +221,8 @@ describe('planImport · writes (BE4d: timestamps never count on their own)', () 
     const plan = planImport(bumped, rows, map, { now: '2026-10-01T09:00:00.000Z' });
     expect(plan.writes).toBe(1);
     const p = find(plan, '[audit] Equal Progress')!;
+    expect(plan.latestOnly).toContain(p); // visible in its own group
+    expect(p.latest).toEqual({ from: 25, to: 26 });
     expect(p.auto).toMatchObject({ reader_latest_chapter: 26, reader_checked_at: '2026-10-01T09:00:00.000Z' });
     expect(p.progress).toBeNull();
   });
@@ -229,6 +233,7 @@ describe('planImport · writes (BE4d: timestamps never count on their own)', () 
     const plan = planImport([rd], [r], [{ origin_key: rd.origin_key, media_id: r.id, reader_cover: null }], { now: NOW });
     expect(plan.writes).toBe(0);
     expect(plan.same[0].auto).toEqual({});
+    expect(plan.latestOnly).toEqual([]);
   });
 
   it('timestamps ride along with a real change', () => {
@@ -237,6 +242,26 @@ describe('planImport · writes (BE4d: timestamps never count on their own)', () 
     const p = planImport([rd], [r], [], { now: NOW }).forward[0];
     expect(rowWrites(p)).toBe(true);
     expect(p.auto.last_activity_at).toBe('2026-09-01T00:00:00.000Z');
+  });
+
+  it('BE4e: a map-key-only change is NOT a write (it rides along with a real one)', () => {
+    const r = row('[audit] Map Only', { current_chapter: 10, reader_latest_chapter: 12, platform: '[audit] Source A' });
+    const rd = reader('[audit] Map Only', { read_max: 10, latest_max: 12, thumbnail_url: null });
+    const plan = planImport([rd], [r], [], { now: NOW }); // no map yet → a new key would be written
+    expect(plan.same[0].map).toHaveLength(1);
+    expect(rowWrites(plan.same[0])).toBe(false);
+    expect(plan.writes).toBe(0);
+  });
+
+  it('BE4e: the fixture re-imported after its map writes were BLOCKED → still 0 writes', () => {
+    const rows = seed();
+    const map: PlanImportMapRow[] = [];
+    applyPlan(planImport(readers, rows, map, { now: NOW }), rows, map, { mapWrites: false });
+    expect(map).toEqual([]); // nothing remembered
+    const again = planImport(readers, rows, map, { now: '2026-10-01T09:00:00.000Z' });
+    expect(again.writes).toBe(0);
+    expect(matchedRows(again).length).toBe(4); // title matching re-found every row
+    expect(matchedRows(again).some((p) => p.map.length > 0)).toBe(true); // keys still offered, riding along
   });
 
   it('unticking the only real change makes the row write nothing (rowWrites follows the UI ticks)', () => {
@@ -318,5 +343,34 @@ describe('planImport · matching rules', () => {
     const ms = performance.now() - t0;
     expect(plan.forward.length + plan.same.length + plan.needsMatch.length + plan.notInNoteHaven.length).toBeGreaterThan(0);
     expect(ms).toBeLessThan(4000);
+  });
+});
+
+describe('the fixture describes itself (FIXTURE_SEEDS × planExpect)', () => {
+  it('every scenario lands in the group its planExpect names', async () => {
+    const SQL = (await initSqlJs()) as unknown as SqlJsStatic;
+    const r = await parseBackupBytes(await buildFixtureTmb({ variant: 'extra' }), SQL);
+    if ('error' in r) throw new Error(r.error.code);
+    const rows = FIXTURE_SEEDS.map((sd) => row(sd.title, { type: sd.type, status: sd.status, current_chapter: sd.current_chapter, cover_image: sd.cover_image }));
+    const plan = planImport(r.backup.titles, rows, [], { now: NOW });
+    const groupOf = (t: ReaderTitle): string => {
+      for (const g of ['forward', 'same', 'latestOnly', 'noteHavenAhead'] as const) {
+        if ((plan[g] ?? []).some((p) => p.readers.includes(t))) return g;
+      }
+      if (plan.needsMatch.some((n) => n.reader === t)) return 'needsMatch';
+      if (plan.notInNoteHaven.some((n) => n.reader === t)) return 'notInNoteHaven';
+      return 'hidden';
+    };
+    const sha = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))), (b) => b.toString(16).padStart(2, '0')).join('');
+    const got: Record<string, string> = {};
+    const want: Record<string, string> = {};
+    for (const f of FIXTURE_TITLES) {
+      want[f.key] = f.planExpect;
+      const key = await sha(`${FIXTURE_SOURCES[f.source].id}:${f.url}`);
+      const t = r.backup.titles.find((x) => x.origin_key === key);
+      got[f.key] = t ? groupOf(t) : 'absent';
+    }
+    expect(got).toEqual(want);
+    expect(plan.needsMatch.find((n) => n.reader.title === '[audit] Twin Title')!.candidates).toHaveLength(2);
   });
 });

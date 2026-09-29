@@ -119,13 +119,15 @@ const STAMPS: ReadonlySet<string> = new Set(['reader_checked_at', 'last_activity
 
 /**
  * Does applying this row (with its CURRENT ticks) change anything real:
- * progress, status, cover, reader_latest_chapter, platform, or an import-map key?
- * Apply must skip the row when this is false; when true, `auto`'s timestamps go
- * with it. `ImportPlan.writes` counts exactly these rows, so re-uploading the same
- * file says "Nothing to update" instead of re-stamping every matched row.
+ * progress, status, cover, reader_latest_chapter or platform? Apply must skip
+ * the row when this is false; when true, `auto`'s timestamps AND its `map` keys
+ * go with it. Map keys never count on their own: they only help a renamed title
+ * be found again, and title matching re-finds the rest. `ImportPlan.writes`
+ * counts exactly these rows, so re-uploading the same file says "Nothing to
+ * update" instead of re-stamping (or re-mapping) every matched row.
  */
 export function rowWrites(p: PlanRow): boolean {
-  return !!((p.progress && p.ticked) || p.status?.ticked || p.cover?.ticked || p.map.length
+  return !!((p.progress && p.ticked) || p.status?.ticked || p.cover?.ticked
     || Object.keys(p.auto).some((k) => !STAMPS.has(k)));
 }
 
@@ -212,6 +214,7 @@ export function planImport(
   // ---- per matched row: what apply would write -------------------------------
   const forward: PlanRow[] = [];
   const same: PlanRow[] = [];
+  const latestOnly: PlanRow[] = [];
   const noteHavenAhead: PlanRow[] = [];
 
   for (const [id, m] of matched) {
@@ -224,7 +227,6 @@ export function planImport(
     const from = row.current_chapter;
     const to = toInt(readMax);
     const cmp = to === null ? 0 : to - (from ?? 0);
-    const group = cmp > 0 ? forward : cmp < 0 ? noteHavenAhead : same;
 
     const auto: PlanRow['auto'] = {};
     if (latest !== null && !sameNum(latest, row.reader_latest_chapter)) {
@@ -252,9 +254,13 @@ export function planImport(
     }
     const progress = cmp !== 0 && to !== null ? { current_chapter: to } : null;
     const cover = coverFor(row, rs);
+    const realAuto = Object.keys(auto).some((k) => !STAMPS.has(k));
     // Nothing real could change (not even an unticked option): no timestamps either.
-    const substantive = progress || status || cover || map.length || Object.keys(auto).some((k) => !STAMPS.has(k));
-    if (!substantive) for (const k of STAMPS) delete (auto as Record<string, unknown>)[k];
+    if (!(progress || status || cover || realAuto)) for (const k of STAMPS) delete (auto as Record<string, unknown>)[k];
+    // Same progress, no status proposal, no pre-ticked cover, but a new latest
+    // (or platform): a real write that needs its own visible group.
+    const group = cmp > 0 ? forward : cmp < 0 ? noteHavenAhead
+      : realAuto && !status && !cover?.ticked ? latestOnly : same;
 
     group.push({
       media_id: id,
@@ -267,6 +273,7 @@ export function planImport(
       ticked: group === forward,
       progress,
       status,
+      latest: auto.reader_latest_chapter !== undefined ? { from: row.reader_latest_chapter, to: auto.reader_latest_chapter } : null,
       auto,
       expected: { current_chapter: from, status: row.status },
       cover,
@@ -287,15 +294,15 @@ export function planImport(
   });
 
   const byTitle = (a: { title: string }, b: { title: string }) => a.title.localeCompare(b.title);
-  forward.sort(byTitle); same.sort(byTitle); noteHavenAhead.sort(byTitle);
+  forward.sort(byTitle); same.sort(byTitle); latestOnly.sort(byTitle); noteHavenAhead.sort(byTitle);
   needsMatch.sort((a, b) => a.reader.title.localeCompare(b.reader.title));
   notInNoteHaven.sort((a, b) => a.reader.title.localeCompare(b.reader.title));
 
-  const all = [...forward, ...same, ...noteHavenAhead];
+  const all = [...forward, ...same, ...latestOnly, ...noteHavenAhead];
   const writes = all.filter(rowWrites).length;
 
   return {
-    forward, same, noteHavenAhead, needsMatch, notInNoteHaven,
+    forward, same, latestOnly, noteHavenAhead, needsMatch, notInNoteHaven,
     hidden: { nsfw: hiddenNsfw },
     statusChanges: all.filter((p) => p.status?.ticked).length,
     writes,

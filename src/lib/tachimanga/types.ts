@@ -236,9 +236,13 @@ export interface PlanRow {
   /** Exactly what apply may write; see TrackerPatch. `expected` is the CAS guard. */
   progress: Pick<TrackerPatch, 'current_chapter'> | null;
   status: StatusProposal | null;
+  /** The reader's latest chapter, when this row would change it (for "Ch 120 → 124 out").
+   *  Always set by planImport; optional only so hand-built test rows stay valid. */
+  latest?: { from: number | null; to: number } | null;
   auto: Omit<TrackerPatch, 'current_chapter' | 'status' | 'cover_image' | 'cover_origin'>;
   expected: { current_chapter: number | null; status: string | null };
   cover: CoverProposal | null;
+  /** Rides along with a row that writes (rowWrites); never a reason to write on its own. */
   map: ImportMapWrite[];
 }
 
@@ -264,8 +268,11 @@ export interface NewTitleRow {
 export interface ImportPlan {
   /** Import is ahead of NoteHaven: ticked. */
   forward: PlanRow[];
-  /** Same progress (may still carry `auto` writes or a status proposal). Collapsed, but the UI must surface ticked status changes. */
+  /** Same progress: nothing real to write, or a status proposal / pre-ticked cover (surface those). */
   same: PlanRow[];
+  /** Same progress, no status proposal, but a new reader latest (or platform): a real write. Show `latest` from → to.
+   *  Always set by planImport; optional only so plans built by hand (tests) stay valid: read it as `plan.latestOnly ?? []`. */
+  latestOnly?: PlanRow[];
   /** NoteHaven is ahead: never applied unless he ticks "Set back" on the row. */
   noteHavenAhead: PlanRow[];
   needsMatch: NeedsMatchRow[];

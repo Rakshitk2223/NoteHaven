@@ -65,7 +65,11 @@ export interface FixtureTitle {
   chapters: ChapterSpec[];
   /** History.last_read_at (seconds), when set. */
   historyAt?: number;
+  /** Where planImport puts it, against FIXTURE_SEEDS with the default options. */
+  planExpect: PlanExpect;
 }
+
+export type PlanExpect = 'forward' | 'same' | 'latestOnly' | 'noteHavenAhead' | 'needsMatch' | 'notInNoteHaven' | 'hidden' | 'absent';
 
 const T0 = 1_788_000_000; // 2026-08-29T… (seconds); fixed so outputs are reproducible
 const range = (from: number, to: number, read: number, readAt = T0): ChapterSpec[] =>
@@ -77,19 +81,21 @@ const range = (from: number, to: number, read: number, readAt = T0): ChapterSpec
 /** The scenarios, one per behaviour the parser and planner must get right. */
 export const FIXTURE_TITLES: FixtureTitle[] = [
   { key: 'forward', title: '[audit] Forward Bump', source: 0, url: '/manga/forward-bump', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/forward.jpg', categories: [1], chapters: range(1, 70, 63), historyAt: T0 + 5000 },
+    thumbnail: 'https://cdn.example.test/covers/forward.jpg', categories: [1], chapters: range(1, 70, 63), historyAt: T0 + 5000, planExpect: 'forward' },
   { key: 'behind', title: '[audit] Import Behind', source: 0, url: '/manga/import-behind', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/behind.jpg', categories: [1], chapters: range(1, 60, 40) },
+    thumbnail: 'https://cdn.example.test/covers/behind.jpg', categories: [1], chapters: range(1, 60, 40), planExpect: 'noteHavenAhead' },
   { key: 'equal', title: '[audit] Equal Progress', source: 1, url: '/series/equal', inLibrary: true,
-    thumbnail: null, categories: [2], chapters: range(1, 25, 20) },
-  // Plural + "The" variant of a NoteHaven "[audit] Plural Variant" row → review.
+    thumbnail: null, categories: [2], chapters: range(1, 25, 20), planExpect: 'latestOnly' },
+  // Plural + "The" variant of a NoteHaven "[audit] Plural Variant" row: the SAME
+  // work to media-match (leading "the" and a trailing plural "s" are normalised
+  // away), so it's a match, not a review. Real review cases are below.
   { key: 'variant', title: '[audit] The Plural Variants', source: 1, url: '/series/plural', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/variant.jpg', chapters: range(1, 15, 9) },
+    thumbnail: 'https://cdn.example.test/covers/variant.jpg', chapters: range(1, 15, 9), planExpect: 'forward' },
   // The same work on two sources (after a source migration): merged onto one row.
   { key: 'two-a', title: '[audit] Two Sources', source: 0, url: '/manga/two-sources', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/two-a.jpg', categories: [1], chapters: range(1, 40, 30), historyAt: T0 + 100 },
+    thumbnail: 'https://cdn.example.test/covers/two-a.jpg', categories: [1], chapters: range(1, 40, 30), historyAt: T0 + 100, planExpect: 'forward' },
   { key: 'two-b', title: '[audit] Two Sources', source: 2, url: '/comic/two-sources-2', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/two-b.jpg', categories: [3], chapters: range(1, 40, 34), historyAt: T0 + 900 },
+    thumbnail: 'https://cdn.example.test/covers/two-b.jpg', categories: [3], chapters: range(1, 40, 34), historyAt: T0 + 900, planExpect: 'forward' },
   // Scanlators repeat numbers; −1 = unknown; 12.5 is an extra. read_max 12.5, latest 13, distinct 14 (1…13 + 12.5).
   { key: 'dupes', title: '[audit] Scanlator Dupes', source: 0, url: '/manga/dupes', inLibrary: true,
     thumbnail: 'https://cdn.example.test/covers/dupes.jpg', chapters: [
@@ -97,30 +103,66 @@ export const FIXTURE_TITLES: FixtureTitle[] = [
       ...range(1, 12, 12).map((c) => ({ ...c, scanlator: 'group-b' })),
       { n: 12.5, read: true, readAt: T0 + 40 },
       { n: -1, read: true, readAt: T0 + 41 },
-    ] },
+    ], planExpect: 'latestOnly' },
   { key: 'new', title: '[audit] Not In NoteHaven', source: 1, url: '/series/not-in-nh', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/new.jpg', chapters: range(1, 30, 5) },
+    thumbnail: 'https://cdn.example.test/covers/new.jpg', chapters: range(1, 30, 5), planExpect: 'notInNoteHaven' },
   { key: 'nsfw-source', title: '[audit] NSFW Source Entry', source: 3, url: '/g/nsfw-source', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/nsfw.jpg', chapters: range(1, 10, 3) },
+    thumbnail: 'https://cdn.example.test/covers/nsfw.jpg', chapters: range(1, 10, 3), planExpect: 'hidden' },
   // Adult by genre on a normal source ('extra' variant carries Manga.genre).
   { key: 'adult-genre', title: '[audit] Adult Genre Entry', source: 0, url: '/manga/adult-genre', inLibrary: true,
-    thumbnail: null, genre: 'Romance, Hentai', chapters: range(1, 8, 2) },
+    thumbnail: null, genre: 'Romance, Hentai', chapters: range(1, 8, 2), planExpect: 'hidden' },
   { key: 'not-in-library', title: '[audit] Not In Library', source: 0, url: '/manga/browsed-once', inLibrary: false,
-    thumbnail: null, chapters: range(1, 5, 5) },
+    thumbnail: null, chapters: range(1, 5, 5), planExpect: 'absent' },
   { key: 'zero-read', title: '[audit] Zero Read', source: 2, url: '/comic/zero-read', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/zero.jpg', categories: [1], chapters: range(1, 12, 0) },
+    thumbnail: 'https://cdn.example.test/covers/zero.jpg', categories: [1], chapters: range(1, 12, 0), planExpect: 'latestOnly' },
   // NoteHaven has it as "Plan to Read": ≥1 chapter read proposes Reading.
   { key: 'started', title: '[audit] Started Reading', source: 1, url: '/series/started', inLibrary: true,
-    thumbnail: null, chapters: range(1, 20, 2) },
+    thumbnail: null, chapters: range(1, 20, 2), planExpect: 'forward' },
   // In two mapped categories that disagree: the proposal is a conflict.
   { key: 'conflict', title: '[audit] Two Shelves', source: 0, url: '/manga/two-shelves', inLibrary: true,
-    thumbnail: null, categories: [2, 3], chapters: range(1, 10, 10) },
+    thumbnail: null, categories: [2, 3], chapters: range(1, 10, 10), planExpect: 'latestOnly' },
   { key: 'hangul', title: '[audit] 한글 제목', source: 1, url: '/series/hangul', inLibrary: true,
-    thumbnail: 'https://cdn.example.test/covers/hangul.jpg', chapters: range(1, 50, 17) },
+    thumbnail: 'https://cdn.example.test/covers/hangul.jpg', chapters: range(1, 50, 17), planExpect: 'latestOnly' },
   { key: 'bracket', title: '[audit] [Bracket] Leading', source: 0, url: '/manga/bracket', inLibrary: true,
-    thumbnail: 'javascript:alert(1)', chapters: range(1, 6, 1) },   // a non-http thumbnail must be dropped
+    thumbnail: 'javascript:alert(1)', chapters: range(1, 6, 1), planExpect: 'notInNoteHaven' },   // a non-http thumbnail must be dropped
+  // Only the main part of a NoteHaven "Main: Subtitle" title (scores 0.85) → review.
+  { key: 'review-subtitle', title: '[audit] Main Part Only', source: 0, url: '/manga/main-part', inLibrary: true,
+    thumbnail: null, chapters: range(1, 8, 4), planExpect: 'needsMatch' },
+  // NoteHaven has this title twice (as Manga AND Manhwa): a near tie → review, never a guess.
+  { key: 'near-tie', title: '[audit] Twin Title', source: 1, url: '/series/twin', inLibrary: true,
+    thumbnail: null, chapters: range(1, 6, 3), planExpect: 'needsMatch' },
   { key: 'no-chapters', title: '[audit] No Chapters Yet', source: 2, url: '/comic/no-chapters', inLibrary: true,
-    thumbnail: null, chapters: [] },
+    thumbnail: null, chapters: [], planExpect: 'notInNoteHaven' },
+];
+
+/**
+ * The [audit] NoteHaven rows to seed so the fixture exercises every plan group
+ * (reading types; see each FIXTURE_TITLES `planExpect`). Titles not listed here
+ * are meant to land in "not in NoteHaven" or stay hidden.
+ */
+export interface FixtureSeed {
+  title: string;
+  type: 'Manga' | 'Manhwa' | 'Manhua';
+  status: 'Reading' | 'Plan to Read';
+  current_chapter: number | null;
+  /** null = no cover (the reader's thumbnail is proposed, pre-ticked); a fitting cover gets it offered unticked. */
+  cover_image: string | null;
+}
+const SEED_COVER = 'https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx-audit.jpg';
+export const FIXTURE_SEEDS: FixtureSeed[] = [
+  { title: '[audit] Forward Bump', type: 'Manhwa', status: 'Reading', current_chapter: 57, cover_image: null },
+  { title: '[audit] Import Behind', type: 'Manhwa', status: 'Reading', current_chapter: 45, cover_image: SEED_COVER },
+  { title: '[audit] Equal Progress', type: 'Manhwa', status: 'Reading', current_chapter: 20, cover_image: SEED_COVER },
+  { title: '[audit] Plural Variant', type: 'Manhwa', status: 'Reading', current_chapter: 3, cover_image: SEED_COVER },
+  { title: '[audit] Two Sources', type: 'Manhua', status: 'Reading', current_chapter: 10, cover_image: SEED_COVER },
+  { title: '[audit] Scanlator Dupes', type: 'Manga', status: 'Reading', current_chapter: 12, cover_image: SEED_COVER },
+  { title: '[audit] Started Reading', type: 'Manhwa', status: 'Plan to Read', current_chapter: 0, cover_image: SEED_COVER },
+  { title: '[audit] Two Shelves', type: 'Manga', status: 'Reading', current_chapter: 10, cover_image: SEED_COVER },
+  { title: '[audit] 한글 제목', type: 'Manhwa', status: 'Reading', current_chapter: 17, cover_image: SEED_COVER },
+  { title: '[audit] Zero Read', type: 'Manhua', status: 'Reading', current_chapter: null, cover_image: SEED_COVER },
+  { title: '[audit] Main Part Only: The Long Subtitle', type: 'Manga', status: 'Reading', current_chapter: 1, cover_image: SEED_COVER },
+  { title: '[audit] Twin Title', type: 'Manga', status: 'Reading', current_chapter: 1, cover_image: SEED_COVER },
+  { title: '[audit] Twin Title', type: 'Manhwa', status: 'Reading', current_chapter: 1, cover_image: SEED_COVER },
 ];
 
 /** Aggregates the parser must produce per scenario (in-library entries only). */
