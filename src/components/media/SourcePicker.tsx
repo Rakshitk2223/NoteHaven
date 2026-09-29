@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Loader2, Plus, Search, X } from 'lucide-react';
+import { Check, Plus, Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { TRACKER_TYPES, candidateLine } from './picker-utils';

@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } fr
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Minus, Download, Plus as PlusIcon, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ImageOff, Sparkles, ArrowDownUp, Database, Upload, FileText, FileSpreadsheet, BarChart3, Eye, EyeOff, Library, Clock, Compass } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Download, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ArrowDownUp, Library, Clock, Compass } from "lucide-react";
 import { ToastAction } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,16 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
@@ -48,16 +38,14 @@ import AppSidebar from "@/components/AppSidebar";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Skeleton } from "@/components/ui/skeleton";
-import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useInView } from "react-intersection-observer";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { CompactTagSelector } from "@/components/CompactTagSelector";
-import { TagBadge } from "@/components/TagBadge";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { typeBadgeSoft, AIRING_STYLE, AIRING_LABEL, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/media-style";
 import { CustomGroupBuilder } from "@/components/media/CustomGroupBuilder";
 import { RefreshLibraryDialog } from "@/components/media/RefreshLibraryDialog";
-import { fetchImagesFromSupabaseBatch, searchCover } from "@/lib/simple-image-fetcher";
+import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { devLog } from "@/lib/logger";
 import { dateToYMD } from "@/lib/date-utils";
 import { refreshCoverImage } from "@/lib/media-refresh";
@@ -69,7 +57,7 @@ import { GenreRail } from "@/components/media/GenreRail";
 import { LibraryStatsDialog } from "@/components/media/LibraryStatsDialog";
 import {
   buildContinueQueue, buildAiringSoon, buildGenreCounts, itemHasGenre,
-  timeToFinish, episodeDataFreshness, type QueueEntry,
+  episodeDataFreshness, type QueueEntry,
 } from "@/lib/media-insights";
 import { quoted, quotedList } from '@/components/confirm-copy';
 import { useProgressMutation, type ProgressResult } from '@/hooks/media/useProgressMutation';
@@ -100,8 +88,6 @@ import {
 } from '@/components/media/types';
 import { useMediaLibrary } from '@/hooks/media/useMediaLibrary';
 
-const PLACEHOLDER_IMAGE = '/placeholder-poster.svg';
-
 type MediaSectionId = 'library' | 'history' | 'browse' | 'more';
 // Icons already in the app-wide icons chunk — new glyphs would grow first paint.
 const SECTION_LIBRARY: MediaSection<MediaSectionId> = { id: 'library', label: 'Library', icon: Library };
@@ -109,14 +95,6 @@ const SECTION_HISTORY: MediaSection<MediaSectionId> = { id: 'history', label: 'H
 const SECTION_BROWSE: MediaSection<MediaSectionId> = { id: 'browse', label: 'Browse', icon: Compass };
 const SECTION_MORE: MediaSection<MediaSectionId> = { id: 'more', label: 'More', icon: MoreVertical };
 
-// searchCover goes through mediaSearchGet, which attaches the JWT the edge
-// function verifies (a bare fetch 401'd and every new item was added coverless).
-// Same title-gated, medium- and adult-filtered search as every other cover path
-// (lib/simple-image-fetcher searchCover) — the add path used to take results[0]
-// unchecked, which is how reading types picked up live-action posters.
-async function fetchCoverImage(title: string, type: string): Promise<string | null> {
-  return (await searchCover(title, type))?.cover ?? null;
-}
 
 
 
@@ -210,6 +188,8 @@ interface MediaListRowProps {
   onQuickUpdate: (item: MediaItem, field: 'current_episode' | 'current_chapter', amount: number) => void;
   onRequestDelete: (id: number) => void;
   onToggleWatched: (item: MediaItem) => void;
+  /** Present once migration 28 is live: Fix match / Link source from the row's ⋮. */
+  onFixMatch?: (item: MediaItem) => void;
   log: { popover: boolean; onOpenSheet: (t: LogTarget) => void; onCommit: (item: MediaItem, value: number) => Promise<boolean> };
 }
 
@@ -226,6 +206,7 @@ const MediaListRow = ({
   onQuickUpdate,
   onRequestDelete,
   onToggleWatched,
+  onFixMatch,
   log,
 }: MediaListRowProps) => {
   const { ref, inView } = useInView({ rootMargin: '300px' });
@@ -391,10 +372,11 @@ const MediaListRow = ({
       )}
       {!progressField && <WatchedToggle item={item} busy={isUpdating} onToggle={onToggleWatched} className="flex-shrink-0 sm:hidden" />}
 
-      {/* Actions: one ⋮ menu (Edit, Delete) instead of two 32 px ghosts */}
+      {/* Actions: one ⋮ menu (Edit, Fix match, Delete) instead of loose ghost buttons */}
       <MediaActionsMenu
         item={item}
         onEdit={(i) => onOpenDetails(i, 'edit')}
+        onFixMatch={onFixMatch}
         onDelete={(i) => onRequestDelete(i.id)}
       />
     </div>
@@ -416,7 +398,7 @@ const MediaTracker = () => {
   const navigate = useNavigate();
   useDocumentTitle("Media");
   const queryClient = useQueryClient();
-  const { isCollapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebar();
+  const { toggle: toggleSidebar } = useSidebar();
   // Persisted view mode (grid = categorized, list = table). Initialize from localStorage.
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
     try {
@@ -479,7 +461,7 @@ const MediaTracker = () => {
   }, []);
   const [refreshLibraryOpen, setRefreshLibraryOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  // Media v2 sections. History and Browse join once they work (NO HOLES rule 2).
+  // Media v2 sections (History only once migration 28's log exists: NO HOLES rule 2).
   const [section, setSection] = useState<MediaSectionId>('library');
   // Each section keeps its own scroll position: the page scrolls the window, and
   // a short section (More) clamps it, so Library would otherwise come back at the top.
@@ -2191,10 +2173,6 @@ const MediaTracker = () => {
     if (editingItem) handleUpdateMedia();
   };
 
-  // Conditional progress fields based on selected type
-  const showSeasonEpisode = watchableTypes.includes(formData.type);
-  const showChapter = readableTypes.includes(formData.type);
-
   // Debounced search handler
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -3131,6 +3109,7 @@ const MediaTracker = () => {
                         onQuickUpdate={handleQuickUpdate}
                         onRequestDelete={(id) => setDeleteConfirm({ open: true, id })}
                         onToggleWatched={toggleWatched}
+                        onFixMatch={v2Schema.sourceLinks ? setFixFor : undefined}
                         log={logProps}
                       />
                     ))}

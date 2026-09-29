@@ -16,8 +16,8 @@ interface MediaSectionNavProps<Id extends string> {
 }
 
 /**
- * Media's own sections (Library · More … History and Browse join once they
- * work). Only Media sections live here — the app menu stays on the hamburger.
+ * Media's own sections (Library · History · Browse · More; the page leaves out any
+ * whose data isn't there yet). Only Media sections live here — the app menu stays on the hamburger.
  */
 export function MediaSectionNav<Id extends string>({ sections, active, onChange, placement }: MediaSectionNavProps<Id>) {
   if (placement === 'top') {

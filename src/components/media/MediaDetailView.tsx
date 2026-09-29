@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { ExternalLink, Globe, Pin, Plus, Replace, Sparkles, Star } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { TagBadge } from '@/components/TagBadge';
 import { WatchedToggle } from './WatchedToggle';
@@ -55,7 +54,6 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
       : `${Math.min(...seasonYears)}–${Math.max(...seasonYears)}`)
     : null;
   const coverUrl = cover;
-  const bannerUrl = meta?.banner_image || coverUrl;
   const isWatchableItem = WATCHABLE_TYPES.includes(item.type);
   const isReadableItem = READABLE_TYPES.includes(item.type);
   // "2 seasons · 24 episodes" / "412 chapters" — the media's real size.
