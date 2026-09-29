@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { TagBadge } from '@/components/TagBadge';
 import { WatchedToggle } from './WatchedToggle';
+import { CoverArt } from './CoverArt';
 import { cn } from '@/lib/utils';
 import { computeProgress, type MediaMeta } from '@/lib/media-metadata';
 import type { Tag } from '@/lib/tags';
@@ -85,7 +86,7 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
       {/* Hero: what it is, and where it comes from */}
       <div className="flex gap-4">
         <div className="relative aspect-[2/3] w-28 flex-shrink-0 overflow-hidden rounded-lg bg-muted shadow-lg ring-1 ring-border sm:w-32">
-          <img src={coverUrl || '/placeholder-poster.svg'} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+          <CoverArt src={coverUrl} title={item.title} letterClassName="text-3xl" />
           {item.cover_pinned && (
             <span className="absolute left-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md bg-background/80 text-foreground shadow" title="Cover pinned">
               <Pin className="h-3.5 w-3.5" aria-label="Cover pinned" />

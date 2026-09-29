@@ -1,9 +1,10 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { MediaMeta } from '@/lib/media-metadata';
-import { type MediaItem, getStatusCategory, initialsOf, progressFieldOf } from './types';
+import { type MediaItem, getStatusCategory, progressFieldOf } from './types';
+import { CoverArt } from './CoverArt';
 import { LogNumberButton, type LogTarget } from './LogSheet';
 import { behindCount } from './progress-view';
 import { GRID_COLS, GRID_COLS_PANE, type GridSize } from './grid-size';
@@ -39,9 +40,6 @@ const LibraryCard = memo(function LibraryCard({
   const { ref, inView } = useInView({ rootMargin: '250px' });
   useEffect(() => { onVisibleChange(item.id, inView); }, [item.id, inView, onVisibleChange]);
 
-  const [imgFailed, setImgFailed] = useState(false);
-  useEffect(() => { setImgFailed(false); }, [cover]);
-
   // Long-press (touch or mouse) enters selection mode; the click that follows is swallowed.
   const pressTimer = useRef<number | null>(null);
   const pressStart = useRef<{ x: number; y: number } | null>(null);
@@ -55,7 +53,6 @@ const LibraryCard = memo(function LibraryCard({
   const behind = behindCount(item, meta);
   const done = getStatusCategory(item.status) === 'Completed';
   const field = progressFieldOf(item);
-  const showCover = !!cover && !imgFailed;
 
   return (
     <div ref={ref} data-media-id={item.id} className="flex min-w-0 flex-col">
@@ -94,23 +91,7 @@ const LibraryCard = memo(function LibraryCard({
           selected && 'ring-2 ring-primary',
         )}
       >
-        {/* The letter tile sits underneath, so a loading, failed or blank cover never leaves an empty box. */}
-        <span aria-hidden="true" className="absolute inset-0 grid place-items-center bg-gradient-brand-soft text-2xl font-extrabold text-primary">
-          {initialsOf(item.title)}
-        </span>
-        {showCover && (
-          <img
-            src={cover!}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            onError={() => setImgFailed(true)}
-            onLoad={(e) => { if (e.currentTarget.naturalWidth < 2) setImgFailed(true); }}
-            className={cn('relative h-full w-full object-cover transition-opacity', selected && 'opacity-70')}
-          />
-        )}
+        <CoverArt src={cover} title={item.title} lazy imgClassName={cn('transition-opacity', selected && 'opacity-70')} />
 
         {/* Mihon's unread spot: how far behind the latest, or done. */}
         {behind != null && behind > 0 && !done && (
