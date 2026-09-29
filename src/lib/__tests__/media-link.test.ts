@@ -46,7 +46,7 @@ const baseRow = (over: Row = {}): Row => ({
   id: 1, user_id: 'u', title: 'Solo Leveling', type: 'Manhwa', status: 'Reading', rating: 9,
   current_chapter: 150, current_season: null, current_episode: null,
   source: null, source_id: null, alt_ids: null, link_status: 'unlinked', linked_at: null,
-  cover_pinned: false, cover_image: null, last_known_latest_chapter: null,
+  cover_pinned: false, cover_image: null, cover_origin: null, last_known_latest_chapter: null,
   latest_checked_at: null, latest_changed_at: null, ...over,
 });
 const candidate = {

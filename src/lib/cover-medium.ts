@@ -79,3 +79,31 @@ export function coverFitsType(url: string | null | undefined, type: string | nul
 export function isUsableCover(url: string | null | undefined, type: string | null | undefined): boolean {
   return coverFitsType(url, type) && !isHotlinkBlocked(url);
 }
+
+// ---------------------------------------------------------------------------
+// The one judge (U5). Runs at WRITE time, in review counts and in audit:covers,
+// never at display time.
+// ---------------------------------------------------------------------------
+
+/** media_tracker.cover_origin (migration 29 vocabulary); null = set before 29 (legacy). */
+export type CoverOrigin = 'manual' | 'source' | 'reader' | 'search';
+
+/**
+ * 'ok'            fits the medium and loads
+ * 'wrong-medium'  provably the wrong medium (a donghua poster for a manhua, a K-drama still for a manhwa)
+ * 'blocked'       won't load: MangaDex hotlinks, or not a web URL at all
+ * 'unverified'    an unknown host whose provenance doesn't vouch for it (title search, legacy)
+ *
+ * Provenance only UPGRADES an unknown host: art that came from the linked
+ * source by id, from his own pick, or from the reader app (the exact art for
+ * that entry) is trusted. It never excuses a provably wrong medium.
+ */
+export type CoverVerdict = 'ok' | 'wrong-medium' | 'blocked' | 'unverified';
+
+export function coverVerdict(url: string | null | undefined, type: string | null | undefined, origin?: CoverOrigin | null): CoverVerdict {
+  if (!url || !/^https?:\/\/[^/\s]+/i.test(url)) return 'blocked';
+  if (isHotlinkBlocked(url)) return 'blocked';
+  if (!coverFitsType(url, type)) return 'wrong-medium';
+  if (coverMedium(url) !== 'unknown') return 'ok';
+  return origin === 'source' || origin === 'manual' || origin === 'reader' ? 'ok' : 'unverified';
+}

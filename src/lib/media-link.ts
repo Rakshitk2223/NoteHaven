@@ -17,7 +17,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { isMissingTableError } from '@/lib/work';
-import { isUsableCover } from '@/lib/cover-medium';
+import { coverVerdict } from '@/lib/cover-medium';
 import {
   fetchSourceDetail,
   type Candidate,
@@ -29,7 +29,9 @@ import type { Json, Tables, TablesUpdate } from '@/integrations/supabase/types';
 
 export type LinkStatus = 'unlinked' | 'linked' | 'review';
 
-export type MediaLinkFailure = 'needs-migration' | 'not-found' | 'not-linked' | 'source-unavailable' | 'error';
+export type MediaLinkFailure = 'needs-migration' | 'not-found' | 'not-linked' | 'source-unavailable' | 'error'
+  /** Guarded (bulk) mode only: the row changed since he looked, so nothing was written. A skip, not an error. */
+  | 'changed';
 
 export type LinkOutcome<T = object> =
   | ({ ok: true; undo: () => Promise<boolean> } & T)
@@ -44,15 +46,31 @@ export interface LinkFields {
   linked_at: string | null;
   cover_pinned: boolean;
   cover_image: string | null;
+  /** Migration 29: who set the cover ('source' when a link sets it). */
+  cover_origin?: string | null;
   last_known_latest_chapter: number | null;
   latest_checked_at: string | null;
   latest_changed_at: string | null;
 }
 
 const LINK_COLS =
-  'id, type, source, source_id, alt_ids, link_status, linked_at, cover_pinned, cover_image, last_known_latest_chapter, latest_checked_at, latest_changed_at';
+  'id, title, type, source, source_id, alt_ids, link_status, linked_at, cover_pinned, cover_image, cover_origin, last_known_latest_chapter, latest_checked_at, latest_changed_at';
 
-type TrackerLinkRow = LinkFields & { id: number; type: string | null };
+type TrackerLinkRow = LinkFields & { id: number; title: string; type: string | null };
+
+/**
+ * Bulk / guarded mode for linkEntry: the row as he saw it when he approved.
+ * The link is written only while the row still matches, so a rename, a retype,
+ * a Fix match or a pin made during the (paced, seconds-long) detail fetch is
+ * never overwritten.
+ */
+export interface LinkExpect {
+  title: string;
+  type: string | null;
+  link_status: string | null;
+  cover_pinned: boolean;
+  cover_image: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Schema detection (migration 28)
@@ -149,14 +167,23 @@ const coverOf = (detail: SourceDetail | null, candidate?: Candidate | null): str
  * applies the cover rules. `isNew`: the entry was just created by the picker.
  * `keepCover`: leave the cover exactly as it is, whatever the rules would do
  * (e.g. he unticked "use the source cover" in the Link-your-library queue).
+ * `expect` (bulk runs): write only while the row still looks like this (see
+ * LinkExpect); otherwise resolve { ok: false, reason: 'changed' }. If only the
+ * cover changed (he pinned or picked one meanwhile), it links WITHOUT touching
+ * the cover. Single-title Fix match leaves it unset: today's behaviour.
  */
 export async function linkEntry(
   trackerId: number,
   candidate: Candidate,
-  opts: { useNewCover?: boolean; isNew?: boolean; keepCover?: boolean } = {},
+  opts: { useNewCover?: boolean; isNew?: boolean; keepCover?: boolean; expect?: LinkExpect } = {},
 ): Promise<LinkOutcome<{ detail: SourceDetail | null; coverChanged: boolean }>> {
   const before = await readLinkRow(trackerId);
   if (typeof before === 'string') return { ok: false, reason: before };
+  const x = opts.expect;
+  // Cheap early check (the UPDATE re-checks after the slow fetch).
+  if (x && (before.title !== x.title || (before.type ?? null) !== (x.type ?? null) || !linkStatusOk(before.link_status, x))) {
+    return { ok: false, reason: 'changed' };
+  }
 
   const type = (before.type || 'Manga') as TrackerType;
   const detail = await fetchSourceDetail(candidate.source, candidate.source_id, type);
@@ -175,20 +202,74 @@ export async function linkEntry(
     patch.latest_checked_at = now;
   }
 
-  // Cover rules (see header).
+  // Cover rules (see header), judged by the one judge (cover-medium coverVerdict).
   const newCover = coverOf(detail, candidate);
+  const pinned = x ? x.cover_pinned || before.cover_pinned : before.cover_pinned;
   let coverChanged = false;
-  if (!opts.keepCover && !before.cover_pinned && newCover && isUsableCover(newCover, type) && newCover !== before.cover_image) {
-    const currentBad = !before.cover_image || !isUsableCover(before.cover_image, type);
+  const loads = (url: string, origin: string | null | undefined) => {
+    const v = coverVerdict(url, type, (origin ?? null) as never);
+    return v !== 'wrong-medium' && v !== 'blocked';
+  };
+  if (!opts.keepCover && !pinned && newCover && loads(newCover, 'source') && newCover !== before.cover_image) {
+    const currentBad = !before.cover_image || !loads(before.cover_image, before.cover_origin);
     if (opts.useNewCover || opts.isNew || currentBad) {
       patch.cover_image = newCover;
+      patch.cover_origin = 'source';
       coverChanged = true;
     }
   }
 
-  const res = await writeWithUndo(trackerId, before, patch);
+  if (!x) {
+    const res = await writeWithUndo(trackerId, before, patch);
+    if (res.ok === false) return res;
+    return { ...res, detail, coverChanged };
+  }
+
+  // Guarded write: title, type and link state as he saw them; the cover only
+  // while unpinned and still the one he saw. If just the cover moved, link anyway.
+  let res = await writeGuarded(trackerId, before, patch, x);
+  if (res.ok === false && res.reason === 'changed' && coverChanged) {
+    const { cover_image: _c, cover_origin: _o, ...linkOnly } = patch;
+    res = await writeGuarded(trackerId, before, linkOnly, x);
+    coverChanged = false;
+  }
   if (res.ok === false) return res;
   return { ...res, detail, coverChanged };
+}
+
+function linkStatusOk(current: string | null, x: LinkExpect): boolean {
+  // An unlinked row may be linked; relinking a linked one needs him to have seen it linked.
+  return x.link_status === 'linked' ? current === 'linked' : current !== 'linked';
+}
+
+/** writeWithUndo, but only while the row still matches `x` (0 rows → 'changed'). */
+async function writeGuarded(
+  trackerId: number,
+  before: TrackerLinkRow,
+  patch: Partial<LinkFields>,
+  x: LinkExpect,
+): Promise<{ ok: true; undo: () => Promise<boolean> } | { ok: false; reason: MediaLinkFailure; message?: string }> {
+  const keys = Object.keys(patch) as Array<keyof LinkFields>;
+  if (keys.length === 0) return { ok: true, undo: async () => true };
+  let q = supabase.from('media_tracker').update(patch as TablesUpdate<'media_tracker'>).eq('id', trackerId).eq('title', x.title);
+  q = (x.type == null ? q.is('type', null) : q.eq('type', x.type)) as typeof q;
+  q = (x.link_status === 'linked' ? q.eq('link_status', 'linked') : q.neq('link_status', 'linked')) as typeof q;
+  if ('cover_image' in patch) {
+    q = q.eq('cover_pinned', false) as typeof q;
+    q = (x.cover_image == null ? q.is('cover_image', null) : q.eq('cover_image', x.cover_image)) as typeof q;
+  }
+  const { data, error } = await q.select('id');
+  if (error) return { ok: false, reason: isMissing(error) ? 'needs-migration' : 'error', message: error.message };
+  if (!data?.length) return { ok: false, reason: 'changed' };
+  const restore: Partial<LinkFields> = {};
+  for (const k of keys) (restore as Record<string, unknown>)[k] = before[k];
+  return {
+    ok: true,
+    undo: async () => {
+      const { error: e } = await supabase.from('media_tracker').update(restore as TablesUpdate<'media_tracker'>).eq('id', trackerId);
+      return !e;
+    },
+  };
 }
 
 /** Remove the binding (link fields only; cover and user fields stay). */
