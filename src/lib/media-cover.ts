@@ -22,6 +22,7 @@ import { coverVerdict, isReadingType, type CoverOrigin, type CoverVerdict } from
 import { newBatchId, writeJournal, type BulkKind, type JournalEntry } from '@/lib/media-bulk';
 import { readSourceMeta } from '@/lib/media-link';
 import { fetchSourceDetail, searchSources, type MediaSource, type TrackerType } from '@/lib/media-sources';
+import { mediaSearchUrl } from '@/lib/edge-function';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,7 +46,15 @@ export interface CoverOption {
   origin: CoverOrigin;
   /** Where it came from, for the label: "AniList", "Your reader app", "Current", "Web search". */
   from: 'source' | 'reader' | 'current' | 'search';
+  /** Judged as a HOTLINK ('blocked' for MangaDex): the option itself may still be usable, see copyOnly. */
   verdict: CoverVerdict;
+  /**
+   * E2: this art can't be shown or saved as-is (MangaDex refuses hotlinks), but
+   * it CAN be copied into NoteHaven storage: preview it as a letter tile, and on
+   * pick run copyCover → setCover(storageUrl). Picks of any other option should
+   * go the same way (copyCover returns our own copies unchanged).
+   */
+  copyOnly?: boolean;
 }
 
 export interface CoverChange {
@@ -93,7 +102,14 @@ export function acceptCover(url: string | null, type: string, origin: CoverOrigi
 /** Ordered, de-duplicated "Change cover…" options, each with its verdict. */
 export function buildCoverOptions(
   type: string,
-  parts: { source?: string[]; reader?: string[]; current?: { url: string | null; origin: CoverOrigin | null }; search?: string[] },
+  parts: {
+    source?: string[];
+    /** Source art that can only be COPIED (MangaDex's cover_copy_from). */
+    sourceCopyOnly?: string[];
+    reader?: string[];
+    current?: { url: string | null; origin: CoverOrigin | null };
+    search?: string[];
+  },
 ): CoverOption[] {
   const out: CoverOption[] = [];
   const seen = new Set<string>();
@@ -103,6 +119,11 @@ export function buildCoverOptions(
     out.push({ url, origin, from, verdict: coverVerdict(url, type, verdictOrigin) });
   };
   for (const u of parts.source ?? []) add(u, 'source', 'source');
+  for (const u of parts.sourceCopyOnly ?? []) {
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push({ url: u, origin: 'source', from: 'source', verdict: coverVerdict(u, type, 'source'), copyOnly: true });
+  }
   for (const u of parts.reader ?? []) add(u, 'reader', 'reader');
   // The current cover keeps its own provenance (a legacy one is judged strictly); choosing it again is his pick.
   if (parts.current?.url) add(parts.current.url, 'manual', 'current', parts.current.origin ?? null);
@@ -279,13 +300,28 @@ async function readerCovers(ids: number[]): Promise<Map<number, string[]>> {
   return out;
 }
 
-/** The linked source's art: the cached media_source_meta row, else a live by-id fetch. */
-async function sourceCover(row: CoverRow): Promise<string | null> {
+/**
+ * The source cover to COPY (E2): the displayable cover, else the copy-only
+ * original (MangaDex's `cover_copy_from`, which the edge returns but never as
+ * `cover`). For linkEntry / Browse callers: copyCover(this) → setCover(stored).
+ */
+export function sourceCoverUrl(d: { cover?: string | null; cover_copy_from?: string | null } | null | undefined): string | null {
+  return d?.cover ?? d?.cover_copy_from ?? null;
+}
+
+/**
+ * The linked source's art: the cached media_source_meta row, else a live by-id
+ * fetch. `copyOnly` when only a copy-only original exists (MangaDex): the cache
+ * never stores that, so it comes from the live detail.
+ */
+async function sourceCover(row: CoverRow): Promise<{ url: string; copyOnly: boolean } | null> {
   if (row.link_status !== 'linked' || !row.source || !row.source_id) return null;
   const cached = await readSourceMeta(row.source as MediaSource, row.source_id).catch(() => null);
-  if (cached?.cover) return cached.cover;
-  const live = await fetchSourceDetail(row.source as MediaSource, row.source_id, row.type as TrackerType).catch(() => null);
-  return live?.cover ?? null;
+  if (cached?.cover) return { url: cached.cover, copyOnly: false };
+  const live = await fetchSourceDetail(row.source as MediaSource, row.source_id, row.type as TrackerType).catch(() => null) as
+    ({ cover?: string | null; cover_copy_from?: string | null } | null);
+  if (live?.cover) return { url: live.cover, copyOnly: false };
+  return live?.cover_copy_from ? { url: live.cover_copy_from, copyOnly: true } : null;
 }
 
 /**
@@ -301,7 +337,8 @@ export async function coverCandidates(row: CoverRow, opts: { search?: boolean; s
       : Promise.resolve([] as string[]),
   ]);
   return buildCoverOptions(row.type, {
-    source: src ? [src] : [],
+    source: src && !src.copyOnly ? [src.url] : [],
+    sourceCopyOnly: src?.copyOnly ? [src.url] : [],
     reader,
     current: { url: row.cover_image, origin: row.cover_origin },
     search: found,
@@ -347,4 +384,66 @@ export async function fixWrongCovers(items: WrongCover[]): Promise<CoverWriteRes
   return setCovers(items.filter((w) => w.suggestion).map((w) => ({
     id: w.row.id, url: w.suggestion!.url, origin: w.suggestion!.origin, expect: w.row.cover_image ?? null,
   })));
+}
+
+// ---------------------------------------------------------------------------
+// E2 · copy a cover into NoteHaven's own storage (edge action=cover_copy)
+// ---------------------------------------------------------------------------
+// Hosts like MangaUpdates, MangaDex and scan sites refuse hotlinks, so a cover
+// he approves is copied once, server-side, and the stored URL is what
+// setCover writes (origin unchanged). Existing covers that load stay as they are.
+
+export type CopyFailure =
+  | 'bad_url' | 'blocked_host' | 'private_address' | 'too_many_redirects' | 'not_image' | 'too_large'
+  | 'fetch_failed' | 'not_owner' | 'daily_cap' | 'store_failed' | 'unavailable';
+
+export type CopyOutcome = { url: string; deduped: boolean; reason?: undefined } | { url: null; reason: CopyFailure };
+
+const COPY_BATCH = 10;
+
+async function postCoverCopy(items: Array<{ media_id: number; url: string }>): Promise<Array<{ media_id: number; ok: boolean; url?: string; deduped?: boolean; reason?: CopyFailure }> | null> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return null;
+  try {
+    const res = await fetch(mediaSearchUrl({}), {
+      method: 'POST',
+      headers: {
+        apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action: 'cover_copy', items }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json() as { action?: string; results?: unknown };
+    return body?.action === 'cover_copy' && Array.isArray(body.results) ? body.results as never : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy covers into NoteHaven storage: one outcome per item, in order. A URL
+ * that's already one of our copies comes straight back. 'unavailable' = the
+ * edge function (or its E2 action) isn't reachable: keep the original URL.
+ */
+export async function copyCovers(items: Array<{ mediaId: number; url: string }>): Promise<CopyOutcome[]> {
+  const out: CopyOutcome[] = [];
+  for (let i = 0; i < items.length; i += COPY_BATCH) {
+    const chunk = items.slice(i, i + COPY_BATCH);
+    const results = await postCoverCopy(chunk.map((c) => ({ media_id: c.mediaId, url: c.url })));
+    chunk.forEach((c, k) => {
+      const r = results?.[k];
+      if (!r || r.media_id !== c.mediaId) out.push({ url: null, reason: 'unavailable' });
+      else if (r.ok && r.url) out.push({ url: r.url, deduped: !!r.deduped });
+      else out.push({ url: null, reason: r.reason ?? 'fetch_failed' });
+    });
+  }
+  return out;
+}
+
+/** One cover: the stored URL, or null + why. */
+export async function copyCover(mediaId: number, url: string): Promise<CopyOutcome> {
+  return (await copyCovers([{ mediaId, url }]))[0];
 }

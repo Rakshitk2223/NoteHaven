@@ -38,6 +38,12 @@ interface Candidate {
   title: string;
   alt_titles: string[];
   cover: string | null;
+  /**
+   * E2: an original cover URL that CAN'T be hotlinked (MangaDex), for the
+   * server-side copy (action=cover_copy) only. Never shown directly; `cover`
+   * stays null for it. Not stored in media_source_meta.
+   */
+  cover_copy_from?: string | null;
   year: number | null;
   authors: string[];
   format: string | null;
@@ -308,6 +314,14 @@ function muFields(full: Loose): Partial<Candidate> {
   };
 }
 
+/** The MangaDex cover-art URL (512px), from an `includes[]=cover_art` relationship. */
+export function mdCoverUrl(m: Loose): string | null {
+  const art = ((m?.relationships || []) as Loose[]).find((r) => r?.type === 'cover_art');
+  const file = art?.attributes?.fileName;
+  if (typeof file !== 'string' || !/^[\w.-]+$/.test(file) || !/^[0-9a-f-]{36}$/i.test(String(m?.id))) return null;
+  return `https://uploads.mangadex.org/covers/${m.id}/${file}.512.jpg`;
+}
+
 function mdCandidate(m: Loose): Candidate {
   const a = m.attributes || {};
   const country = langToCountry(a.originalLanguage);
@@ -317,7 +331,8 @@ function mdCandidate(m: Loose): Candidate {
     source_id: String(m.id),
     title: str(a.title?.en) || str(Object.values(a.title || {})[0]) || '',
     alt_titles: uniq([...Object.values(a.title || {}), ...((a.altTitles || []) as Json[]).flatMap((t) => Object.values(t))]),
-    cover: null, // MangaDex blocks hotlinked covers; the UI falls back to the letter tile
+    cover: null, // MangaDex blocks hotlinked covers; the UI falls back to the letter tile…
+    cover_copy_from: mdCoverUrl(m), // …or copies it into NoteHaven storage (E2)
     year: yearOf(a.year),
     authors: uniq(((m.relationships || []) as Json[])
       .filter((r: Loose) => r.type === 'author' || r.type === 'artist').map((r: Loose) => r.attributes?.name)),
@@ -335,7 +350,7 @@ function mdCandidate(m: Loose): Candidate {
 
 async function searchMangaDex(d: V2Deps, q: string, limit: number): Promise<Candidate[]> {
   const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(q)}&limit=${limit}` +
-    '&includes[]=author&includes[]=artist&contentRating[]=safe&contentRating[]=suggestive&order[relevance]=desc';
+    '&includes[]=author&includes[]=artist&includes[]=cover_art&contentRating[]=safe&contentRating[]=suggestive&order[relevance]=desc';
   const res = await d.pacedFetch('mangadex', url, { headers: UA });
   const data = await ok(res, 'mangadex') as Loose;
   return ((data?.data || []) as Json[]).map(mdCandidate).filter((c) => c.title);
@@ -565,7 +580,7 @@ async function detailMangaUpdates(d: V2Deps, id: string): Promise<Detail | null>
 
 async function detailMangaDex(d: V2Deps, id: string): Promise<Detail | null> {
   const res = await d.pacedFetch('mangadex',
-    `https://api.mangadex.org/manga/${encodeURIComponent(id)}?includes[]=author&includes[]=artist`, { headers: UA });
+    `https://api.mangadex.org/manga/${encodeURIComponent(id)}?includes[]=author&includes[]=artist&includes[]=cover_art`, { headers: UA });
   const data = await ok(res, 'mangadex') as Loose;
   const m = data?.data;
   if (!m) return null;

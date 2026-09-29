@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { coverVerdict } from '@/lib/cover-medium';
+import { coverVerdict, isOwnCoverCopy } from '@/lib/cover-medium';
 
 // ---- in-memory client: media_tracker rows with guarded updates + the journal -------
 type Row = Record<string, unknown>;
@@ -39,10 +39,18 @@ function builder(table: string) {
   };
   return q;
 }
-const fake = { from: (t: string) => builder(t), auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) } };
+const fake = { from: (t: string) => builder(t), auth: { getSession: async () => ({ data: { session: { user: { id: 'u' }, access_token: 'tok' } } }) } };
 vi.mock('@/integrations/supabase/client', () => ({ supabase: fake }));
+vi.mock('@/lib/edge-function', () => ({ mediaSearchUrl: () => 'https://proj.supabase.co/functions/v1/media-search' }));
+const liveDetail = vi.fn();
+vi.mock('@/lib/media-sources', async (orig) => ({
+  ...(await orig<typeof import('@/lib/media-sources')>()),
+  fetchSourceDetail: (...a: unknown[]) => liveDetail(...a),
+  searchSources: async () => ({ candidates: [], sources: [] }),
+}));
+vi.mock('@/lib/media-link', () => ({ readSourceMeta: async () => ({ cover: null }) })); // MangaDex: the cache never has a cover
 
-const { setCover, setCovers, buildCoverOptions, defaultCover, wrongCovers, acceptCover, CoverJournalError, COVER_JOURNAL_CHUNK } = await import('../media-cover');
+const { setCover, setCovers, buildCoverOptions, defaultCover, wrongCovers, acceptCover, CoverJournalError, COVER_JOURNAL_CHUNK, copyCover, copyCovers, coverCandidates, sourceCoverUrl } = await import('../media-cover');
 const { restoreEntry } = await import('../media-bulk');
 type CoverRow = import('../media-cover').CoverRow;
 
@@ -234,5 +242,87 @@ describe('setCover / setCovers (the one writer)', () => {
     tracker.set(1, { ...tracker.get(1)!, cover_pinned: false });  // unpinned again → undo works
     expect(await restoreEntry(entry, 'cover', 'u')).toBe('restored');
     expect(tracker.get(1)).toMatchObject({ cover_image: TMDB, cover_origin: null });
+  });
+});
+
+describe("E2 · our own cover copies", () => {
+  const OWN = 'https://proj.supabase.co/storage/v1/object/public/media-covers/' + 'b'.repeat(64) + '.webp';
+
+  it('the judge trusts our bucket (content-hashed keys only), and nothing that merely looks like it', () => {
+    expect(isOwnCoverCopy(OWN)).toBe(true);
+    expect(coverVerdict(OWN, 'Manhwa')).toBe('ok');
+    expect(coverVerdict(OWN, 'Anime')).toBe('ok');
+    for (const lookalike of [
+      'https://proj.supabase.co/storage/v1/object/public/avatars/' + 'b'.repeat(64) + '.webp',
+      'https://evil.example.com/storage/v1/object/public/media-covers/' + 'b'.repeat(64) + '.webp',
+      'https://proj.supabase.co/storage/v1/object/public/media-covers/../avatars/x.webp',
+      'http://proj.supabase.co/storage/v1/object/public/media-covers/' + 'b'.repeat(64) + '.webp',
+    ]) expect(isOwnCoverCopy(lookalike)).toBe(false);
+  });
+
+  it('copyCover returns the stored URL, sending one authenticated POST', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown>; auth: string | null }> = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      calls.push({ url, body, auth: new Headers(init.headers).get('authorization') });
+      return new Response(JSON.stringify({ action: 'cover_copy', results: body.items.map((it: { media_id: number }) => ({ media_id: it.media_id, ok: true, url: OWN, deduped: false })) }), { status: 200 });
+    });
+    try {
+      expect(await copyCover(1, 'https://cdn.mangaupdates.com/image/i1.jpg')).toEqual({ url: OWN, deduped: false });
+      expect(calls[0]).toMatchObject({ body: { action: 'cover_copy', items: [{ media_id: 1, url: 'https://cdn.mangaupdates.com/image/i1.jpg' }] }, auth: 'Bearer tok' });
+      const many = await copyCovers(Array.from({ length: 12 }, (_, i) => ({ mediaId: i + 1, url: 'https://x.example.com/c.jpg' })));
+      expect(many).toHaveLength(12);
+      expect(calls.slice(1).map((c) => (c.body.items as unknown[]).length)).toEqual([10, 2]); // ≤ 10 per call
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a refused copy carries its reason; an unreachable edge is "unavailable" (keep the original)', async () => {
+    vi.stubGlobal('fetch', async (_u: string, init: RequestInit) => {
+      const items = JSON.parse(String(init.body)).items as Array<{ media_id: number }>;
+      return new Response(JSON.stringify({ action: 'cover_copy', results: items.map((it) => ({ media_id: it.media_id, ok: false, reason: 'not_image' })) }), { status: 200 });
+    });
+    try {
+      expect(await copyCover(1, 'https://cdn.example.com/page.html')).toEqual({ url: null, reason: 'not_image' });
+    } finally { vi.unstubAllGlobals(); }
+    vi.stubGlobal('fetch', async () => new Response('gateway', { status: 502 }));
+    try {
+      expect(await copyCover(1, 'https://cdn.example.com/c.jpg')).toEqual({ url: null, reason: 'unavailable' });
+    } finally { vi.unstubAllGlobals(); }
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: 'unknown action' }), { status: 200 })); // old edge
+    try {
+      expect(await copyCover(1, 'https://cdn.example.com/c.jpg')).toEqual({ url: null, reason: 'unavailable' });
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
+
+describe('E2 · MangaDex-linked titles (Hand Jumper): the source cover is copy-only', () => {
+  const MD = 'https://uploads.mangadex.org/covers/a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d/f00d.png.512.jpg';
+
+  it('sourceCoverUrl prefers a displayable cover, else the copy-only original', () => {
+    expect(sourceCoverUrl({ cover: ANILIST_MANGA, cover_copy_from: MD })).toBe(ANILIST_MANGA);
+    expect(sourceCoverUrl({ cover: null, cover_copy_from: MD })).toBe(MD);
+    expect(sourceCoverUrl(null)).toBeNull();
+  });
+
+  it('"Change cover…" offers the MangaDex art as copy-only (blocked as a hotlink, usable via copy)', async () => {
+    liveDetail.mockResolvedValue({ cover: null, cover_copy_from: MD });
+    const opts = await coverCandidates(base({ link_status: 'linked', source: 'mangadex', source_id: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d' }));
+    expect(opts[0]).toMatchObject({ url: MD, from: 'source', origin: 'source', verdict: 'blocked', copyOnly: true });
+  });
+
+  it('then copy → setCover stores OUR URL, which the judge calls ok', async () => {
+    const OWN = 'https://proj.supabase.co/storage/v1/object/public/media-covers/' + 'c'.repeat(64) + '.jpg';
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ action: 'cover_copy', results: [{ media_id: 1, ok: true, url: OWN, deduped: false }] }), { status: 200 }));
+    try {
+      seed(base({ link_status: 'linked', source: 'mangadex', source_id: 'x' }));
+      const copied = await copyCover(1, MD);
+      expect(copied.url).toBe(OWN);
+      const res = await setCover(1, copied.url, 'source', { expect: null });
+      expect(res.written).toEqual([1]);
+      expect(tracker.get(1)).toMatchObject({ cover_image: OWN, cover_origin: 'source' });
+      expect(coverVerdict(OWN, 'Manhwa', 'source')).toBe('ok');
+    } finally { vi.unstubAllGlobals(); }
   });
 });

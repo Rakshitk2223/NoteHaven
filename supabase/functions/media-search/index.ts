@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { handleV2 } from './v2.ts';
 import { hasAdultGenre, MU_EXCLUDE_GENRES } from './adult.ts';
 import { CACHE_COLUMNS, mergeCacheRows, STATUS_GUESS, type CacheRow } from './cache-merge.ts';
+import { COVER_BUCKET, copyCovers, MAX_ITEMS as MAX_COVER_ITEMS, type CopyDeps } from './cover-copy.ts';
 
 // CORS. Set ALLOWED_ORIGINS to a comma-separated allow-list (e.g.
 // "https://notehaven.example,http://localhost:8080"). Unset falls back to '*'
@@ -52,6 +53,79 @@ function isAuthenticatedUser(req: Request): boolean {
   } catch {
     return false;
   }
+}
+
+/** The signed-in user's id (sub), or null for anon / service-role / malformed tokens. */
+function userIdOf(req: Request): string | null {
+  const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload?.role === 'authenticated' && typeof payload?.sub === 'string' ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve A + AAAA. null or [] → cover_copy refuses the fetch ('dns_failed'): no resolution, no fetch. */
+async function resolveHost(host: string): Promise<string[] | null> {
+  const dns = (Deno as unknown as { resolveDns?: (h: string, t: 'A' | 'AAAA') => Promise<string[]> }).resolveDns;
+  if (typeof dns !== 'function') return null;
+  const [a, aaaa] = await Promise.allSettled([dns(host, 'A'), dns(host, 'AAAA')]);
+  const got = [...(a.status === 'fulfilled' ? a.value : []), ...(aaaa.status === 'fulfilled' ? aaaa.value : [])];
+  const notFound = (r: PromiseSettledResult<string[]>) => r.status === 'rejected' && /not ?found|NXDOMAIN|no data/i.test(String(r.reason));
+  if (got.length) return got;
+  return notFound(a) && notFound(aaaa) ? [] : null; // other errors (unsupported, permission): unknown
+}
+
+/** POST { action: 'cover_copy', items: [{ media_id, url }] } → { action, results }. */
+async function handleCoverCopy(req: Request, supabase: SupabaseClient, cors: Record<string, string>, body: Record<string, unknown>): Promise<Response> {
+  const userId = userIdOf(req);
+  if (!userId) {
+    return new Response(JSON.stringify({ error: 'Sign in required' }), { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+  const items = Array.isArray(body.items) ? (body.items as Array<{ media_id: unknown; url: unknown }>).slice(0, MAX_COVER_ITEMS) : [];
+  if (!items.length) {
+    return new Response(JSON.stringify({ error: 'items required' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+  const storagePrefix = `${(Deno.env.get('SUPABASE_URL') || '').replace(/\/$/, '')}/storage/v1/object/public/${COVER_BUCKET}/`;
+  const deps: CopyDeps = {
+    fetch: (u, init) => fetch(u, init),
+    resolve: resolveHost,
+    owns: async (uid, mediaId) => {
+      const { data } = await supabase.from('media_tracker').select('id').eq('id', mediaId).eq('user_id', uid).maybeSingle();
+      return !!data;
+    },
+    countSince: async (uid, since) => {
+      let q = supabase.from('media_cover_copies').select('id', { count: 'exact', head: true }).gte('created_at', since);
+      if (uid) q = q.eq('user_id', uid);
+      const { count, error } = await q;
+      if (error) throw error; // can't count → fail closed (the whole call errors)
+      return count ?? 0;
+    },
+    put: async (key, bytes, mime) => {
+      const { error } = await supabase.storage.from(COVER_BUCKET)
+        .upload(key, bytes, { contentType: mime, cacheControl: '31536000', upsert: false });
+      if (!error) return 'stored';
+      const e = error as { statusCode?: string | number; message?: string };
+      if (String(e.statusCode) === '409' || /already exists|duplicate/i.test(e.message || '')) return 'exists';
+      throw error;
+    },
+    publicUrl: (key) => supabase.storage.from(COVER_BUCKET).getPublicUrl(key).data.publicUrl,
+    reserve: async (row) => {
+      const { data, error } = await supabase.from('media_cover_copies')
+        .insert({ ...row, failure: 'in_progress' }).select('id').single();
+      if (error || !data) throw error ?? new Error('no reservation'); // → no fetch
+      return (data as { id: number }).id;
+    },
+    settle: async (id, outcome) => {
+      const { error } = await supabase.from('media_cover_copies').update(outcome).eq('id', id);
+      if (error) console.error('media_cover_copies settle:', error.message); // the reserved row still counts
+    },
+    now: () => Date.now(),
+    isOwnStorageUrl: (u) => !!storagePrefix && u.startsWith(storagePrefix),
+  };
+  const results = await copyCovers(userId, items, deps);
+  return new Response(JSON.stringify({ action: 'cover_copy', results }), { headers: { ...cors, 'Content-Type': 'application/json' } });
 }
 
 function clampLimit(raw: string | null): number {
@@ -1449,8 +1523,10 @@ Deno.serve(async (req) => {
       return await handleV2(action, new URL(req.url), corsHeaders, v2Deps);
     }
 
-    // Batch endpoint: POST with { items: [...] }
+    // POST: { action: 'cover_copy', items } (E2), else the legacy batch { items }
     if (req.method === 'POST' && !query) {
+      const body = await req.clone().json().catch(() => null) as Record<string, unknown> | null;
+      if (body?.action === 'cover_copy') return await handleCoverCopy(req, supabase, corsHeaders, body);
       return await handleBatchSearch(req, supabase);
     }
 

@@ -100,8 +100,24 @@ export type CoverOrigin = 'manual' | 'source' | 'reader' | 'search';
  */
 export type CoverVerdict = 'ok' | 'wrong-medium' | 'blocked' | 'unverified';
 
+/**
+ * NoteHaven's own copy of an approved cover (E2: the `media-covers` bucket,
+ * content-hashed keys). It only ever holds art that was judged when copied.
+ */
+export function isOwnCoverCopy(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && u.hostname.endsWith('.supabase.co')
+      && /^\/storage\/v1\/object\/public\/media-covers\/[0-9a-f]{64}\.(jpg|png|webp|gif|avif)$/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 export function coverVerdict(url: string | null | undefined, type: string | null | undefined, origin?: CoverOrigin | null): CoverVerdict {
   if (!url || !/^https?:\/\/[^/\s]+/i.test(url)) return 'blocked';
+  if (isOwnCoverCopy(url)) return 'ok';
   if (isHotlinkBlocked(url)) return 'blocked';
   if (!coverFitsType(url, type)) return 'wrong-medium';
   if (coverMedium(url) !== 'unknown') return 'ok';
