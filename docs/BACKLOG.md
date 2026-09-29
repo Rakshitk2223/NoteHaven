@@ -42,6 +42,17 @@ deployed** and go out in one redeploy when Phase 1 ships. Phase 2 (link the whol
 queue) and Phase 3 (Updates / "N behind", platform + resume link) follow. Push notifications and
 recommendations stay declined.
 
+## Parked (not on the roadmap; revisit after U5)
+
+Media v2 scope is frozen at U0–U5 (owner, 2026-09-29). These are wanted, just not now:
+
+- **⌘K navigation skips the dirty-edit guard.** Leaving Media through the palette with unsaved edits doesn't ask first.
+- **A client-side negative cache for no-match cover lookups**, so titles with no cover stop re-asking the edge function.
+- **Mac `+` / `-` / `=` keys in the Log popover** (from `PLAN.md`'s Mac Log row).
+- **Hands-free sync through AniList tracking.** Needs AniList OAuth.
+- **Accept Tachimanga's lighter Tachiyomi-compatible `.tachibk` backup as an import format**, next to `.tmb` (U2b).
+- **U6 polish:** hold-to-repeat, the season picker, "Caught up", Mac hover +1.
+
 ## Known limitations
 
 - **`00` and `20` aren't safe to re-run.** `00` fails on existing policies (and, if forced, would

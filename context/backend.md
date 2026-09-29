@@ -170,12 +170,11 @@ client helpers are in `src/lib/edge-function.ts`.
 
 - **Auth:** `verify_jwt = true` in `supabase/config.toml` (sticky server-side, hence declared there),
   and the function also checks the JWT `role`: a signed-in user (`authenticated` with a `sub`) or
-  `service_role` (the maintenance scripts), so the anon key gets 401. `mediaSearchGet` /
-  `mediaSearchPost` send `apikey: <anon key>` and `Authorization: Bearer <session access token>`; they
-  return `null` when there's no session, on a non-2xx response or on a network error, and callers treat
+  `service_role` (the maintenance scripts), so the anon key gets 401. `mediaSearchGet` sends `apikey: <anon key>` and `Authorization: Bearer <session access token>`; it
+  returns `null` when there's no session, on a non-2xx response or on a network error, and callers treat
   that as "not found".
 - **Dev-only override:** in a dev build, `VITE_MEDIA_SEARCH_URL` (e.g. `http://127.0.0.1:8787`, set in
-  `.env.local`) points both helpers at the local function. `import.meta.env.DEV` is a build-time
+  `.env.local`) points it at the local function. `import.meta.env.DEV` is a build-time
   constant, so production builds always use `${VITE_SUPABASE_URL}/functions/v1/media-search`.
 - **CORS:** `ALLOWED_ORIGINS` (comma-separated secret); unset means `*`. A request from an origin that
   isn't listed gets the first allowed origin echoed back.
@@ -194,7 +193,7 @@ client helpers are in `src/lib/edge-function.ts`.
 - **POST** `{ items: [{ id, title, type }] }` (no `q`): batch cover lookup, at most 50 items, of which the
   first 20 cache misses are fetched; returns `{ success, results: [{ id, cover_image }] }`. Nothing in
   the repo calls it today.
-- **v2 actions** (`v2.ts`; chosen by `?action=` on GET, or `{ action }` in a POST body; the legacy paths
+- **v2 actions** (`v2.ts`; GET only, chosen by `?action=`; the legacy paths
   above are untouched and still serve unlinked entries):
   - `GET ?action=search&q&type&limit` (limit default 8, clamped 1–10): fans out to the **type-correct**
     sources only — manhwa: AniList + MangaUpdates + MangaDex; manhua: MangaUpdates + AniList + MangaDex;
@@ -207,9 +206,8 @@ client helpers are in `src/lib/edge-function.ts`.
     TMDB with credits, TVmaze with embedded episodes and cast), **upserts `media_source_meta`** on
     `(source, source_id)`, and returns the normalised detail (`detail: null` + `error` when not found
     or rate-limited).
-  - `POST { action: 'resolve', items: [{ id, title, type }] }` (at most 10 items): up to 5 candidates per
-    item, for "link your library". The **client** scores them (`src/lib/media-match.ts`); the function
-    doesn't.
+  - There is no batch `resolve` action (removed 2026-09-29, BE2). Phase 2's "link your library" will
+    call `action=search` in a client-paced loop and score candidates with `src/lib/media-match.ts`.
   - Guarantees the client relies on: unknown values are `null` (never `0`, `''` or `'upcoming'`),
     statuses are normalised to the `media_source_meta` vocabulary, adult works are excluded at the
     source (AniList `isAdult: false`, Jikan `sfw`, TMDB `include_adult=false`, MangaDex content rating
@@ -222,7 +220,7 @@ client helpers are in `src/lib/edge-function.ts`.
   Jikan 400, Wikidata 300, MangaDex / MangaUpdates / TVmaze / Fanart 250, TMDB 60.
 - **Writes:** fire-and-forget upserts into `media_metadata` on `(title, type)` with the service role —
   the top 10 results in search and source modes, and cover-only rows in batch mode. v2 `detail` writes
-  `media_source_meta`; v2 `search` and `resolve` write nothing.
+  `media_source_meta`; v2 `search` writes nothing.
 - **Errors:** `{ error }` with 400, 401 or 500; internal details are never returned.
 - **Secrets:** `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS`; `SUPABASE_URL` and
   `SUPABASE_SERVICE_ROLE_KEY` come from the runtime.

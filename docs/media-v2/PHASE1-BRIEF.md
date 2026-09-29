@@ -28,14 +28,14 @@ Match its interactions, not its CSS. Build with the app's Aurora tokens, shadcn 
   Add a `npm run edge:dev` script. Read secrets from `.env` without printing them. Write a one-paragraph
   how-to in your report.
 - **B1 · Interface first (by ~30 min):** publish typed signatures (stubs are fine) in
-  `src/lib/media-sources.ts` (`searchSources`, `fetchSourceDetail`, `resolveBatch`, plus `Candidate` /
+  `src/lib/media-sources.ts` (`searchSources`, `fetchSourceDetail`, `resolveBatch` [removed 2026-09-29, BE2], plus `Candidate` /
   `SourceDetail` types) and `src/lib/media-link.ts` (`linkEntry`, `unlinkEntry`, `setCoverPinned`), so Writer A
   can build against them. Ping the butler when it lands.
 - **B2 · Migration `28_media_source_links.sql`:** exactly as in the plan's Architecture section:
   tracker link columns, `media_source_meta` (edge-only writes), `media_progress_log` (append-only,
   RLS by user), `latest_changed_at`. It must be idempotent and pass a fresh 00→28 run plus a re-run in
   PGlite. Update `types.ts` by hand.
-- **B3 · Edge actions:** `action=search|detail|resolve` per the plan, **type-correct sources only**.
+- **B3 · Edge actions:** `action=search|detail|resolve` per the plan (`resolve` removed 2026-09-29, BE2; Phase 2 uses `search` in a client-paced loop), **type-correct sources only**.
   Candidates carry their own ids; no `0`/`'upcoming'` placeholders; statuses normalised; adult filters
   kept; AniList paced at ≥2100ms. Nothing is persisted from search; `detail` upserts `media_source_meta`.
   The old `q=` path stays working, because unlinked entries still use it.

@@ -219,7 +219,7 @@ items appended automatically.
 | `dashboard.ts` | widget types, metadata, default layout, load / save / reset | `user_preferences` (`dashboard_widgets`) |
 | `date-utils.ts` | local `YYYY-MM-DD` helpers: `dateToYMD`, `parseYMD`, `formatDateForDisplay`, `formatDateDDMMYYYY`, `isToday`, `addDays` | — |
 | `cover-medium.ts` | pure: the medium a cover URL shows (comic / anime / screen), `isUsableCover` (also refuses MangaDex hotlinks), `coverFitsType` | — |
-| `edge-function.ts` | `mediaSearchGet` / `mediaSearchPost` / `mediaSearchUrl`: authenticated calls to `media-search`; `null` on no session, non-2xx or network error. Dev builds honour `VITE_MEDIA_SEARCH_URL` (the local `edge:dev` server); production folds it away | edge function |
+| `edge-function.ts` | `mediaSearchGet` / `mediaSearchUrl`: authenticated GET to `media-search`; `null` on no session, non-2xx or network error. Dev builds honour `VITE_MEDIA_SEARCH_URL` (the local `edge:dev` server); production folds it away | edge function |
 | `fetch-all.ts` | `fetchAllRows`: page any query past PostgREST's 1000-row cap (needs a fresh, fully ordered query per page) | — |
 | `image-cache.ts` | localStorage cover cache with a 24 h TTL, merge-on-write | — |
 | `ledger.ts` | entries CRUD, monthly summary (RPC + derived subscription charges), CSV/JSON export, `formatCurrency` | `ledger_entries`, `subscriptions`; RPC `get_monthly_ledger_summary` |
@@ -229,7 +229,7 @@ items appended automatically.
 | `media-match.ts` | pure match scoring: title vs all alt titles, type / country gate, year, plausibility; `AUTO_LINK_MIN` 0.9, `REVIEW_MIN` 0.6; near-tie (≤0.05) demotes auto → review only against a *different* work (the same work on two sources isn't a rival). Used by `media-sources`, the dry-run script and tests | — |
 | `media-metadata.ts` | reads the metadata cache, runs the Refresh Library sweep (linked items refresh by id via a lazy `refreshLinked`), acknowledges new content | `media_metadata`, `media_tracker`; edge function |
 | `media-progress.ts` | pure progress types, `computeProgress`, and `nextProgress` (chapter clamp to latest / total; episode season rollover both ways; season floor 1) | — |
-| `media-sources.ts` | typed v2 edge wrappers: `searchSources`, `fetchSourceDetail`, `resolveBatch` (no caller yet; Phase 2), `sourcesForType`, `SOURCE_LABEL`; a missing edge action degrades to per-source `unavailable` | edge function (`action=search|detail|resolve`) |
+| `media-sources.ts` | typed v2 edge wrappers: `searchSources`, `fetchSourceDetail`, `sourcesForType`, `SOURCE_LABEL`; a missing edge action degrades to per-source `unavailable` | edge function (`action=search|detail`) |
 | `media-refresh.ts` | per-item cover cycling through sources by type | AniList, Kitsu, Jikan, TVmaze direct; TMDB, Wikidata, Fanart via the edge function; writes `media_tracker.cover_image` + `media_metadata` |
 | `pantry-match.ts` | "cook with what I have" scoring (pure) | — |
 | `preferences.ts` | the `AppPreferences` blob, light/dark/system mode, `applyPreferencesToDOM` | localStorage + `user_preferences` (`app_preferences`) |

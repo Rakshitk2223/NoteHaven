@@ -90,12 +90,14 @@ Reuse the existing per-source fetchers, the `SOURCE_SPACING_MS` pacing, `corsFor
   `media_source_meta` and return the normalized detail. For reading types, also fetch
   **latest_chapter** from MU (preferred for manhwa/manhua) or MangaDex `/manga/{id}/aggregate` when it's
   hosted there. For anime, AniList `nextAiringEpisode`.
-- `action=resolve` (POST, ≤10 items): for "Link your library", return the top 3 candidates per item
-  with a confidence score (below). Pace AniList at ≥2100 ms.
+- ~~`action=resolve` (POST, ≤10 items): for "Link your library", return the top 3 candidates per item
+  with a confidence score (below). Pace AniList at ≥2100 ms.~~ Built, never called, **removed
+  2026-09-29 (BE2)**. Phase 2 calls `action=search` in a client-paced loop instead.
 - Don't hotlink MangaDex covers (they're blocked); prefer AniList/MU covers.
 
 ### Client lib (reuse `mediaSearchGet` in `src/lib/edge-function.ts`; extend `media-progress.ts`)
-- `src/lib/media-sources.ts`: typed wrappers `searchSources`, `fetchSourceDetail`, `resolveBatch`.
+- `src/lib/media-sources.ts`: typed wrappers `searchSources`, `fetchSourceDetail` (`resolveBatch` was
+  built, then removed 2026-09-29 with the edge `resolve` action).
 - `src/lib/media-match.ts` (**pure**): normalized-title similarity against the title plus all alt titles
   (case, punctuation, leading "the", a trailing plural `s`, season suffixes), plus a type/country gate,
   year proximity, and plausibility (candidate `latest`/`chapters` ≥ his progress). Score ≥0.9 → auto-link;
@@ -217,7 +219,7 @@ disaster floor; `media_bulk_journal` is the undo.
 | Backup | Settings → Data (bulk dialogs run the export inline first) |
 
 **Removal list** (each goes in the unit named; nothing runs in parallel with its replacement):
-- **U0 / E1:** `resolveBatch` and the edge `resolve` action (unused).
+- **U0 / E1:** `resolveBatch` and the edge `resolve` action (unused). ✅ Done 2026-09-29 (BE2).
 - **U2b:** the "Import JSON" row becomes one "Import…" row that detects `.json` vs `.tmb`.
 - **U4:** Refresh Library, `RefreshActivityContext`, Settings → Sync activity, the "New seasons" filter and
   dot (`has_new_content` stops being read), the display-time cover search, `backfill-media-metadata`.
@@ -248,7 +250,7 @@ needed).
 **Edge:** E1 ships with the Phase 1 deploy (the v2 actions, minus `resolve`). The import, the linking and
 the library update need **no** deploy. E2 only if needed.
 
-### G. Roadmap U0 → U6
+### G. Roadmap U0 → U6 (U6 parked; scope frozen at U0–U5, 2026-09-29)
 | Unit | Contents | Removes | Depends on | Size |
 |---|---|---|---|---|
 | **U0** Phase 1 ship, now | the Phase 1 fixes; the gate at 390 / 820 / 1180 / 1440; pin guards on the 3 legacy cover writers (bulk refresh, `refreshCoverImage`, Sync activity retry); Sync activity "Remove" uses `setCoverPinned`; cover writes stop bumping `last_activity_at`; the Behind filter uses `behindCount`; E1; merge | `resolveBatch`, edge `resolve` | his deploy | S–M |
@@ -257,7 +259,7 @@ the library update need **no** deploy. E2 only if needed.
 | **U3** Link your library | the resolver, proposals, one-tap auto band, the `ReviewCard` queue (watch types and unmapped reading rows first), duplicates, suspect covers → the source cover via `setCover`; grid, rails, genres and sorts read `media_source_meta` for linked rows (legacy becomes a read-only fallback) | — | U2b | L |
 | **U4** library update + Updates | paced `refreshLinked` on open and on pull; `release_date` moves here; episode latest for watch types (anime from TMDB / TVmaze seasons, since AniList splits seasons); the Updates feed (it needs two observations); one `latestOf(item, meta)` for badge, filter, sort, clamp and Updates | Refresh Library, Sync activity, `has_new_content` reads, the display-time search, the `media_metadata` merge-upsert | U3 | L |
 | **U5** covers | `setCover` everywhere, `coverVerdict`, the "Change cover…" picker, "Wrong covers · N"; E2 only if needed | the slot machine, bulk refresh, the legacy remove, the cover backfill | U3 (+ U2b) | M |
-| **U6** rest of Phase 3 | hold-to-repeat, season picker, "Caught up", Mac hover +1 | — | U4 | M |
+| ~~**U6** rest of Phase 3~~ **parked, see `docs/BACKLOG.md`** (scope frozen at U0–U5, 2026-09-29) | hold-to-repeat, season picker, "Caught up", Mac hover +1 | — | U4 | M |
 
 ## Visual direction: A · Mihon Library (Rakshit, 2026-09-28; demo https://claude.ai/artifact/CYGnLNArE56iqP2wVwRGBL)
 Dense cover grid, a behind-count badge in Mihon's unread spot, Library / Updates / History / Browse /
