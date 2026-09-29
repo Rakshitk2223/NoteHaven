@@ -252,7 +252,12 @@ const defaultDeps: ResolverDeps = {
   isOffline: () => typeof navigator !== 'undefined' && navigator.onLine === false,
 };
 
-const LOCK = 'media-link-resolver';
+/**
+ * One Web Lock for ALL source traffic: this resolver and the library update
+ * pass (media-update.ts) never run at once, so together they stay inside
+ * AniList's 30 requests a minute.
+ */
+export const SOURCE_TRAFFIC_LOCK = 'notehaven-source-traffic';
 
 export function createResolver(
   overrides: Partial<ResolverDeps> = {},
@@ -367,7 +372,7 @@ export function createResolver(
       };
       const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
       if (!locks) return body();
-      await locks.request(LOCK, { ifAvailable: true }, async (lock) => {
+      await locks.request(SOURCE_TRAFFIC_LOCK, { ifAvailable: true }, async (lock) => {
         if (!lock) {
           running = false;
           emit({ state: 'idle', runningElsewhere: true });
