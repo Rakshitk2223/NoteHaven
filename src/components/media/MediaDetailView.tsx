@@ -11,6 +11,7 @@ import type { Tag } from '@/lib/tags';
 import { AIRING_LABEL, AIRING_STYLE } from './media-style';
 import { type MediaItem, type ProgressField, READABLE_TYPES, WATCHABLE_TYPES, cleanResumeUrl, progressFieldOf, statusOptionsFor } from './types';
 import { ProgressControl } from './ProgressControl';
+import { latestOf } from './progress-view';
 import { LogNumberButton, type LogTarget } from './LogSheet';
 import { SOURCE_LABEL, type MediaSource, type SourceDetail } from '@/lib/media-sources';
 
@@ -61,8 +62,10 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
   const isWatchableItem = WATCHABLE_TYPES.includes(item.type);
   const isReadableItem = READABLE_TYPES.includes(item.type);
   // "2 seasons · 24 episodes" / "412 chapters" — the media's real size.
+  // An ongoing series has no final total: say how far it's got (the badge's own latest).
+  const latestOut = isReadableItem ? latestOf(item, meta) : null;
   const totalsLine = isReadableItem
-    ? (meta?.chapters ? `${meta.chapters} chapters` : null)
+    ? (meta?.chapters ? `${meta.chapters} chapters` : latestOut != null ? `${latestOut} chapters out` : null)
     : isWatchableItem
     ? ([
         meta?.total_seasons ? `${meta.total_seasons} season${meta.total_seasons === 1 ? '' : 's'}` : null,
@@ -104,6 +107,12 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
             {airing && <Badge className={cn('border-0', AIRING_STYLE[meta!.status!] || '')}>{airing}</Badge>}
             {totalsLine && <span className="font-medium text-foreground/80">{totalsLine}</span>}
             {yearRange && <span className="tabular-nums">{yearRange}</span>}
+            {meta?.rating != null && meta.rating > 0 && (
+              <span className="inline-flex items-center gap-1 tabular-nums" title="Source score (out of 10)">
+                <Star className="h-3.5 w-3.5 fill-warning text-warning" aria-hidden="true" />
+                <span className="font-semibold text-foreground">{meta.rating.toFixed(1)}</span> score
+              </span>
+            )}
           </div>
           {item.has_new_content && (
             <p className="inline-flex items-center gap-1 text-xs font-semibold text-success"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> New content</p>
@@ -346,7 +355,7 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
                         })}
                       </ul>
                     ) : (
-                      <p className="py-1 text-xs text-muted-foreground">{s.episode_count} episodes · titles not cached yet</p>
+                      <p className="py-1 text-xs text-muted-foreground">{s.episode_count} episodes</p>
                     )}
                   </div>
                 </details>
@@ -375,12 +384,6 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
         </div>
       )}
 
-      {/* Graceful state when episode data isn't cached yet */}
-      {isWatchableItem && (!seasons || seasons.length === 0) && (
-        <div className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
-          Episode details for this title aren't cached yet — they'll fill in automatically.
-        </div>
-      )}
     </div>
   );
 }
