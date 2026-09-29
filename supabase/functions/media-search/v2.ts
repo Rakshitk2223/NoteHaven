@@ -26,6 +26,8 @@ export interface V2Deps {
   supabase: Loose;
   pacedFetch: (source: string, input: string, init?: RequestInit) => Promise<Response>;
   env: (key: string) => string;
+  /** false under `npm run edge:dev` (EDGE_CACHE_WRITES=0): never write media_source_meta. */
+  cacheWrites?: boolean;
 }
 
 type Source = 'anilist' | 'mangaupdates' | 'mangadex' | 'jikan' | 'tmdb' | 'tvmaze';
@@ -717,8 +719,10 @@ export async function handleV2(
     try {
       const detail = await detailOne(d, source, id, type);
       if (!detail) return json({ action, detail: null, error: 'not_found' }, cors);
-      const { error } = await d.supabase.from('media_source_meta').upsert(metaRow(detail), { onConflict: 'source,source_id' });
-      if (error) console.error('media_source_meta upsert:', error.message); // e.g. migration 28 not applied yet
+      if (d.cacheWrites !== false) {
+        const { error } = await d.supabase.from('media_source_meta').upsert(metaRow(detail), { onConflict: 'source,source_id' });
+        if (error) console.error('media_source_meta upsert:', error.message); // e.g. migration 28 not applied yet
+      }
       return json({ action, detail }, cors);
     } catch (e) {
       const code = e instanceof RateLimited ? 'rate_limited' : e instanceof Unavailable ? 'unavailable' : 'error';

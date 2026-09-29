@@ -2,6 +2,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { handleV2 } from './v2.ts';
 import { hasAdultGenre, MU_EXCLUDE_GENRES } from './adult.ts';
+import { CACHE_COLUMNS, mergeCacheRows, type CacheRow } from './cache-merge.ts';
 
 // CORS. Set ALLOWED_ORIGINS to a comma-separated allow-list (e.g.
 // "https://notehaven.example,http://localhost:8080"). Unset falls back to '*'
@@ -113,6 +114,45 @@ function cacheable<T extends { title?: string; type?: string }>(rows: T[]): T[] 
     seen.add(key);
     return true;
   });
+}
+
+// Cache writes (media_metadata here, media_source_meta in v2.ts). On unless
+// EDGE_CACHE_WRITES=0, which `npm run edge:dev` sets: local runs use PROD data
+// from a network that may block sources, so their thinner answers stay out.
+const CACHE_WRITES = Deno.env.get('EDGE_CACHE_WRITES') !== '0';
+
+// Keep a post-response write alive on the hosted runtime (a no-op locally).
+function inBackground(p: Promise<unknown>): void {
+  (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil?.(p);
+}
+
+/**
+ * Merge search results into the shared cache: read the batch's existing rows in
+ * one query, merge in code (cache-merge.ts: fill gaps, never downgrade), then
+ * upsert only the rows that change. A failed read writes nothing.
+ */
+async function writeMetadataCache<T extends { title?: string; type?: string }>(supabase: SupabaseClient, rows: T[]): Promise<void> {
+  if (!CACHE_WRITES) return;
+  const incoming = cacheable(rows) as unknown as CacheRow[];
+  if (incoming.length === 0) return;
+  const { data: existing, error: readError } = await supabase
+    .from('media_metadata')
+    .select(CACHE_COLUMNS.join(','))
+    .in('title', [...new Set(incoming.map((r) => r.title))])
+    .in('type', [...new Set(incoming.map((r) => r.type))]);
+  if (readError) { console.error('Cache read error:', readError.message); return; }
+  const merged = mergeCacheRows((existing ?? []) as object[], incoming, { coverFits: coverFitsType });
+  if (merged.length === 0) return;
+  // defaultToNull: false, so a column a new row doesn't carry gets its default.
+  const { error } = await supabase.from('media_metadata')
+    .upsert(merged, { onConflict: 'title,type', defaultToNull: false });
+  if (error) console.error('Cache error:', error.message);
+  else console.log(`💾 Cached ${merged.length} row(s)`);
+}
+
+function cacheInBackground<T extends { title?: string; type?: string }>(supabase: SupabaseClient, rows: T[]): void {
+  const p = writeMetadataCache(supabase, rows).catch((e) => console.error('Cache error:', e));
+  inBackground(p);
 }
 
 // Helper: Add timeout to any promise
@@ -1341,9 +1381,7 @@ async function handleBatchSearch(req: Request, supabase: SupabaseClient): Promis
     }
 
     if (coverImage) {
-      supabase.from('media_metadata').upsert({
-        title: item.title, type: normalizedType, cover_image: coverImage,
-      }, { onConflict: 'title,type' }).then(() => {}).catch(() => {});
+      cacheInBackground(supabase, [{ title: item.title, type: normalizedType, cover_image: coverImage }]);
     }
 
     return { id: item.id, cover_image: coverImage };
@@ -1395,7 +1433,7 @@ Deno.serve(async (req) => {
 
     // Media v2 actions (search | detail | resolve). The legacy q= / source= /
     // batch paths below stay as they were: unlinked entries still use them.
-    const v2Deps = { supabase, pacedFetch, env: (k: string) => Deno.env.get(k) || '' };
+    const v2Deps = { supabase, pacedFetch, env: (k: string) => Deno.env.get(k) || '', cacheWrites: CACHE_WRITES };
     const action = searchParams.get('action');
     if (action) {
       return await handleV2(action, req, new URL(req.url), corsHeaders, v2Deps);
@@ -1428,15 +1466,10 @@ Deno.serve(async (req) => {
         source
       ) || [];
 
-      // Cache freshly fetched results for future lookups (fire and forget).
-      // The full MediaResult objects carry the V2 columns (episodes_detail,
-      // cast_members, runtime) when a source populated them, so they persist here.
-      const toCache = cacheable(sourceResults.slice(0, 10));
-      if (toCache.length > 0) {
-        supabase.from('media_metadata')
-          .upsert(toCache, { onConflict: 'title,type' })
-          .then(({ error }) => { if (error) console.error('Cache error:', error.message); });
-      }
+      // Merge freshly fetched results into the cache (fire and forget). The full
+      // MediaResult objects carry the V2 columns (episodes_detail, cast_members,
+      // runtime) when a source populated them, so they persist here.
+      cacheInBackground(supabase, sourceResults.slice(0, 10));
 
       return new Response(
         JSON.stringify({
@@ -1574,12 +1607,8 @@ Deno.serve(async (req) => {
     const duration = Date.now() - startTime;
     console.log(`✅ API search complete in ${duration}ms. Found ${uniqueResults.length} results from: ${sources.join(', ') || 'none'}`);
 
-    // Save results to database (fire and forget)
-    if (uniqueResults.length > 0) {
-      supabase.from('media_metadata').upsert(cacheable(uniqueResults.slice(0, 10)), { onConflict: 'title,type' })
-        .then(() => console.log('💾 Cached results to database'))
-        .catch(err => console.error('Cache error:', err));
-    }
+    // Merge results into the cache (fire and forget)
+    cacheInBackground(supabase, uniqueResults.slice(0, 10));
 
     return new Response(
       JSON.stringify({
