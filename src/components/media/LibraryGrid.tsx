@@ -6,7 +6,7 @@ import type { MediaMeta } from '@/lib/media-metadata';
 import { type MediaItem, getStatusCategory, progressFieldOf } from './types';
 import { CoverArt } from './CoverArt';
 import { LogNumberButton, type LogTarget } from './LogSheet';
-import { behindCount } from './progress-view';
+import { behindBadge } from './progress-view';
 import { GRID_COLS, GRID_COLS_PANE, type GridSize } from './grid-size';
 import { WatchedToggle } from './WatchedToggle';
 
@@ -50,7 +50,7 @@ const LibraryCard = memo(function LibraryCard({
     pressStart.current = null;
   };
 
-  const behind = behindCount(item, meta);
+  const behind = behindBadge(item, meta);
   const done = getStatusCategory(item.status) === 'Completed';
   const field = progressFieldOf(item);
 
@@ -94,7 +94,7 @@ const LibraryCard = memo(function LibraryCard({
         <CoverArt src={cover} title={item.title} lazy imgClassName={cn('transition-opacity', selected && 'opacity-70')} />
 
         {/* Mihon's unread spot: how far behind the latest, or done. */}
-        {behind != null && behind > 0 && !done && (
+        {behind != null && (
           <span className="absolute left-1.5 top-1.5 min-w-[1.5rem] rounded-md bg-primary px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums text-primary-foreground shadow">
             {behind}
           </span>

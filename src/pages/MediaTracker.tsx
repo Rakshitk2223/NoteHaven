@@ -68,7 +68,7 @@ import { MediaActionsMenu } from '@/components/media/MediaActionsMenu';
 import { WatchedToggle } from '@/components/media/WatchedToggle';
 import { MediaEditForm } from '@/components/media/MediaEditForm';
 import { LogSheet, type LogTarget } from '@/components/media/LogSheet';
-import { boundsFor } from '@/components/media/progress-view';
+import { behindBadge, boundsFor } from '@/components/media/progress-view';
 import { LibraryGrid } from '@/components/media/LibraryGrid';
 import { ProgressControl } from '@/components/media/ProgressControl';
 import { readGridSize, writeGridSize, type GridSize } from '@/components/media/grid-size';
@@ -996,7 +996,8 @@ const MediaTracker = () => {
     if (progressFilter === 'new') {
       base = base.filter((i) => i.has_new_content);
     } else if (progressFilter === 'behind') {
-      base = base.filter((i) => computeProgress(i, metadataMap.get(i.id)).behind);
+      // The same rule as the cover's "N behind" badge (progress-view behindBadge).
+      base = base.filter((i) => behindBadge(i, metadataMap.get(i.id)) != null);
     }
 
     // Client-side sort for metadata-derived orders (not available as DB columns).
