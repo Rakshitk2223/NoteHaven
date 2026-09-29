@@ -636,6 +636,7 @@ export type Database = {
           id: number
           kind: string
           media_id: number
+          op: string
           undone_at: string | null
           user_id: string
         }
@@ -647,6 +648,7 @@ export type Database = {
           id?: never
           kind: string
           media_id: number
+          op?: string
           undone_at?: string | null
           user_id?: string
         }
@@ -658,6 +660,7 @@ export type Database = {
           id?: never
           kind?: string
           media_id?: number
+          op?: string
           undone_at?: string | null
           user_id?: string
         }
@@ -1009,6 +1012,8 @@ export type Database = {
           id: number
           last_activity_at: string | null
           last_known_latest_chapter: number | null
+          last_known_latest_episode: number | null
+          last_known_latest_season: number | null
           last_known_total_episodes: number | null
           last_known_total_seasons: number | null
           latest_changed_at: string | null
@@ -1042,6 +1047,8 @@ export type Database = {
           id?: number
           last_activity_at?: string | null
           last_known_latest_chapter?: number | null
+          last_known_latest_episode?: number | null
+          last_known_latest_season?: number | null
           last_known_total_episodes?: number | null
           last_known_total_seasons?: number | null
           latest_changed_at?: string | null
@@ -1075,6 +1082,8 @@ export type Database = {
           id?: number
           last_activity_at?: string | null
           last_known_latest_chapter?: number | null
+          last_known_latest_episode?: number | null
+          last_known_latest_season?: number | null
           last_known_total_episodes?: number | null
           last_known_total_seasons?: number | null
           latest_changed_at?: string | null
