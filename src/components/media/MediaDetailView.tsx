@@ -261,6 +261,13 @@ export function MediaDetailView({ item, meta, cover, tags, busy, onPatch, onBump
         </div>
       )}
 
+      {/* Your tags (negative ids are unsaved placeholders from the edit form). Tap one to browse it. */}
+      {tags.some((t) => t.id > 0) && (
+        <div role="group" aria-label="Tags" className="flex flex-wrap items-center gap-1.5">
+          {tags.filter((t) => t.id > 0).map((t) => <TagBadge key={t.id} tag={t} size="sm" />)}
+        </div>
+      )}
+
       {/* Seasons & episodes — each season expands to its episode list */}
       {seasons && seasons.length > 0 && (
         <div className="space-y-2">
