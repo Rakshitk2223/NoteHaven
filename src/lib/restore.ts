@@ -64,9 +64,18 @@ export const NATURAL_KEYS: Readonly<Record<string, readonly string[]>> = {
 export const HISTORY_TABLE = 'media_progress_log';
 const HISTORY_CHUNK = 1000;
 
+// Reader import map (migration 29): which reader-app entry is which title.
+// Remapped by media_id like History (NOT NULL, so an unmapped row is dropped);
+// last_seen_at is kept. Its PK is (user_id, origin, origin_key), so a key the
+// account already has is skipped: the existing mapping points at a live row.
+export const IMPORT_MAP_TABLE = 'media_import_map';
+
 // Deliberately NOT restored: vault_folders / vault_files (the rows would point
 // at Storage objects this backup does not contain, so a "restored" vault would
-// be a tree of dead links) and user_preferences (device-local layout).
+// be a tree of dead links), user_preferences (device-local layout), and
+// media_link_proposals / media_bulk_journal (migration 29: proposals are
+// rebuilt by re-running the resolver, and journal before-values describe rows
+// in the account they came from, so "undoing" them here would write stale data).
 
 type Row = Record<string, unknown>;
 type Id = string | number;
@@ -204,6 +213,38 @@ export async function restoreBackup(
       break;
     }
     inserted += chunk.length;
+  }
+
+  // 3b. Reader import map — remapped onto the restored titles; existing keys win.
+  const mapRows = rowsFor(IMPORT_MAP_TABLE).flatMap((row) => {
+    const mediaId = idMap.media_tracker?.get(row.media_id as Id);
+    if (mediaId === undefined) return [];
+    return [{ ...row, media_id: mediaId, user_id: userId }];
+  });
+  if (mapRows.length) {
+    try {
+      const existing = await fetchAllRows<Row>(() =>
+        client.from(IMPORT_MAP_TABLE).select('origin,origin_key').eq('user_id', userId).order('origin').order('origin_key'));
+      const have = new Set(existing.map((e) => keyOf(e, ['origin', 'origin_key'])));
+      const fresh = mapRows.filter((r) => {
+        const k = keyOf(r, ['origin', 'origin_key']);
+        if (have.has(k)) { reused += 1; return false; }
+        have.add(k); // a key twice in one backup would abort the whole chunk
+        return true;
+      });
+      for (let i = 0; i < fresh.length; i += HISTORY_CHUNK) {
+        const chunk = fresh.slice(i, i + HISTORY_CHUNK);
+        const { error } = await client.from(IMPORT_MAP_TABLE).insert(chunk);
+        if (error) {
+          console.error(`Import failed for ${IMPORT_MAP_TABLE}:`, error);
+          failed.push(`${IMPORT_MAP_TABLE} (${error.message})`);
+          break;
+        }
+        inserted += chunk.length;
+      }
+    } catch (error) {
+      failed.push(`${IMPORT_MAP_TABLE} (${error instanceof Error ? error.message : 'lookup failed'})`);
+    }
   }
 
   // 4. Tag links. These carry no user_id (RLS scopes them via their parent),

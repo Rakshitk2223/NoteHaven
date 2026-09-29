@@ -20,6 +20,10 @@ const EXPORT_TABLES = [
   'prompts', 'notes', 'tasks', 'media_tracker',
   // Media History (migration 28): append-only; restore keeps its timestamps.
   'media_progress_log',
+  // Migration 29. Only the import map is restored (lib/restore.ts); proposals
+  // are rebuilt by re-running the resolver, and the journal undoes changes in
+  // THIS account, so restoring either would point at the wrong rows.
+  'media_import_map', 'media_link_proposals', 'media_bulk_journal',
   'subscriptions', 'subscription_categories',
   'ledger_entries', 'ledger_categories', 'ledger_accounts',
   'birthdays', 'countdowns', 'code_snippets', 'snippet_folders', 'tags',

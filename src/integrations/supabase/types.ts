@@ -627,6 +627,135 @@ export type Database = {
           },
         ]
       }
+      media_bulk_journal: {
+        Row: {
+          after: Json
+          batch_id: string
+          before: Json
+          created_at: string
+          id: number
+          kind: string
+          media_id: number
+          undone_at: string | null
+          user_id: string
+        }
+        Insert: {
+          after: Json
+          batch_id: string
+          before: Json
+          created_at?: string
+          id?: never
+          kind: string
+          media_id: number
+          undone_at?: string | null
+          user_id?: string
+        }
+        Update: {
+          after?: Json
+          batch_id?: string
+          before?: Json
+          created_at?: string
+          id?: never
+          kind?: string
+          media_id?: number
+          undone_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_bulk_journal_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "media_tracker"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      media_import_map: {
+        Row: {
+          last_seen_at: string
+          media_id: number
+          origin: string
+          origin_key: string
+          reader_cover: string | null
+          user_id: string
+        }
+        Insert: {
+          last_seen_at?: string
+          media_id: number
+          origin: string
+          origin_key: string
+          reader_cover?: string | null
+          user_id?: string
+        }
+        Update: {
+          last_seen_at?: string
+          media_id?: number
+          origin?: string
+          origin_key?: string
+          reader_cover?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_import_map_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "media_tracker"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      media_link_proposals: {
+        Row: {
+          band: string
+          candidates: Json
+          decided_at: string | null
+          decision: string | null
+          input_progress: number | null
+          input_title: string
+          input_type: string
+          media_id: number
+          resolved_at: string
+          sources: Json | null
+          user_id: string
+        }
+        Insert: {
+          band: string
+          candidates?: Json
+          decided_at?: string | null
+          decision?: string | null
+          input_progress?: number | null
+          input_title: string
+          input_type: string
+          media_id: number
+          resolved_at?: string
+          sources?: Json | null
+          user_id?: string
+        }
+        Update: {
+          band?: string
+          candidates?: Json
+          decided_at?: string | null
+          decision?: string | null
+          input_progress?: number | null
+          input_title?: string
+          input_type?: string
+          media_id?: number
+          resolved_at?: string
+          sources?: Json | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_link_proposals_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: true
+            referencedRelation: "media_tracker"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_metadata: {
         Row: {
           anilist_id: number | null
@@ -707,6 +836,7 @@ export type Database = {
           id: number
           kind: string
           media_id: number
+          origin: string | null
           season: number | null
           to_value: number | null
           user_id: string
@@ -718,6 +848,7 @@ export type Database = {
           id?: never
           kind?: string
           media_id: number
+          origin?: string | null
           season?: number | null
           to_value?: number | null
           user_id?: string
@@ -729,6 +860,7 @@ export type Database = {
           id?: never
           kind?: string
           media_id?: number
+          origin?: string | null
           season?: number | null
           to_value?: number | null
           user_id?: string
@@ -867,6 +999,7 @@ export type Database = {
         Row: {
           alt_ids: Json | null
           cover_image: string | null
+          cover_origin: string | null
           cover_pinned: boolean
           created_at: string | null
           current_chapter: number | null
@@ -884,6 +1017,8 @@ export type Database = {
           linked_at: string | null
           platform: string | null
           rating: number | null
+          reader_checked_at: string | null
+          reader_latest_chapter: number | null
           release_date: string | null
           resume_url: string | null
           source: string | null
@@ -897,6 +1032,7 @@ export type Database = {
         Insert: {
           alt_ids?: Json | null
           cover_image?: string | null
+          cover_origin?: string | null
           cover_pinned?: boolean
           created_at?: string | null
           current_chapter?: number | null
@@ -914,6 +1050,8 @@ export type Database = {
           linked_at?: string | null
           platform?: string | null
           rating?: number | null
+          reader_checked_at?: string | null
+          reader_latest_chapter?: number | null
           release_date?: string | null
           resume_url?: string | null
           source?: string | null
@@ -927,6 +1065,7 @@ export type Database = {
         Update: {
           alt_ids?: Json | null
           cover_image?: string | null
+          cover_origin?: string | null
           cover_pinned?: boolean
           created_at?: string | null
           current_chapter?: number | null
@@ -944,6 +1083,8 @@ export type Database = {
           linked_at?: string | null
           platform?: string | null
           rating?: number | null
+          reader_checked_at?: string | null
+          reader_latest_chapter?: number | null
           release_date?: string | null
           resume_url?: string | null
           source?: string | null

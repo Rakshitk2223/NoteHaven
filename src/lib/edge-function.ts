@@ -66,28 +66,3 @@ export async function mediaSearchGet(
     return null;
   }
 }
-
-/**
- * POST a JSON body to the media-search function with the session token attached
- * (used by action=resolve). Same failure contract as mediaSearchGet: null on any
- * non-2xx, missing session, or network failure.
- */
-export async function mediaSearchPost(
-  body: Record<string, unknown>,
-  signal?: AbortSignal,
-): Promise<unknown | null> {
-  try {
-    const headers = await authHeaders();
-    if (!headers) return null;
-    const res = await fetch(BASE, {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal,
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}

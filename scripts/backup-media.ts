@@ -54,14 +54,21 @@ const supabase = createClient(supabaseUrl, (serviceKey || anonKey)!, {
 });
 
 /** Tables RLS will hide from the anon key — an empty dump here is not a backup. */
-const USER_SCOPED = new Set(['media_tracker', 'media_tags', 'media_progress_log']);
+const USER_SCOPED = new Set([
+  'media_tracker', 'media_tags', 'media_progress_log',
+  'media_import_map', 'media_link_proposals', 'media_bulk_journal',
+]);
 
 // Everything that would be painful or impossible to reconstruct.
 // media_metadata is the expensive one: ~11k rows assembled from eight
 // third-party APIs over many runs.
 // media_progress_log is History (migration 28): append-only, and its timestamps
-// can't be rebuilt from anything else.
-const TABLES = ['media_tracker', 'media_metadata', 'media_tags', 'media_progress_log'] as const;
+// can't be rebuilt from anything else. Migration 29: the reader import map, the
+// link proposals and the bulk-change journal (the before-values for Undo).
+const TABLES = [
+  'media_tracker', 'media_metadata', 'media_tags', 'media_progress_log',
+  'media_import_map', 'media_link_proposals', 'media_bulk_journal',
+] as const;
 
 const PAGE = 1000;
 
