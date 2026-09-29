@@ -34,6 +34,27 @@ export const MAX_REDIRECTS = 2;
 export const DAILY_CAP = 300;
 /** Across ALL users (sign-up is open to strangers). */
 export const GLOBAL_DAILY_CAP = 1500;
+/** Bytes stored per 24 h across all users (Storage is shared with the Vault; free tier = 1 GB). */
+export const GLOBAL_DAILY_BYTES = 150 * 1024 * 1024;
+
+/**
+ * Only the user ids in the COVER_COPY_USERS secret may copy (comma-separated).
+ * Unset or empty → nobody (fail closed): sign-up is public, and every copy
+ * spends shared Storage.
+ */
+export function coverCopyAllowed(userId: string, raw: string | null | undefined): boolean {
+  const ids = (raw || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return ids.length > 0 && ids.includes(userId.toLowerCase());
+}
+
+/**
+ * Bytes the last 24 h's log rows account for. A reserved row that never
+ * settled ('in_progress', a crash or a copy still running) counts as the full
+ * 2 MB it might have stored.
+ */
+export function bytesAccounted(rows: Array<{ bytes: number | null; failure: string | null }>): number {
+  return rows.reduce((n, r) => n + (r.failure === 'in_progress' ? MAX_COVER_BYTES : (r.bytes ?? 0)), 0);
+}
 export const MAX_ITEMS = 10;
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -105,12 +126,16 @@ export function isPrivateAddress(ip: string): boolean {
   if ((h[0] & 0xffc0) === 0xfe80) return true;                                // fe80::/10 link local
   if ((h[0] & 0xff00) === 0xff00) return true;                                // ff00::/8 multicast
   if (h[0] === 0x2001 && h[1] === 0x0db8) return true;                        // documentation
+  const v4of = (hi: number, lo: number) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
   // IPv4-mapped / -compatible / NAT64: judge the embedded IPv4.
   const mapped = h.slice(0, 5).every((x) => x === 0) && (h[5] === 0xffff || h[5] === 0);
   const nat64 = h[0] === 0x64 && h[1] === 0xff9b && h.slice(2, 6).every((x) => x === 0);
-  if (mapped || nat64) {
-    const v4 = `${h[6] >> 8}.${h[6] & 255}.${h[7] >> 8}.${h[7] & 255}`;
-    return isPrivateAddress(v4);
+  if (mapped || nat64) return isPrivateAddress(v4of(h[6], h[7]));
+  // 6to4 (2002::/16): the IPv4 sits in hextets 1–2.
+  if (h[0] === 0x2002) return isPrivateAddress(v4of(h[1], h[2]));
+  // Teredo (2001:0::/32): the server IPv4 in hextets 2–3, the client's obfuscated (XOR 0xffff) in 6–7.
+  if (h[0] === 0x2001 && h[1] === 0x0000) {
+    return isPrivateAddress(v4of(h[2], h[3])) || isPrivateAddress(v4of(h[6] ^ 0xffff, h[7] ^ 0xffff));
   }
   return false;
 }
@@ -211,6 +236,8 @@ export interface CopyDeps {
   owns: (userId: string, mediaId: number) => Promise<boolean>;
   /** Fetches logged since `sinceIso`: this user's, or everyone's (userId null). */
   countSince: (userId: string | null, sinceIso: string) => Promise<number>;
+  /** Everyone's log rows since `sinceIso` (bytes + failure), for the global byte cap. */
+  rowsSince: (sinceIso: string) => Promise<Array<{ bytes: number | null; failure: string | null }>>;
   /** Store bytes at `key`; 'exists' when an object with that (content-hashed) key is already there. */
   put: (key: string, bytes: Uint8Array, mime: string) => Promise<'stored' | 'exists'>;
   publicUrl: (key: string) => string;
@@ -291,6 +318,8 @@ export async function copyCovers(userId: string, items: Array<{ media_id: unknow
     const since = new Date(d.now() - 24 * 60 * 60 * 1000).toISOString();
     if ((await d.countSince(userId, since)) >= DAILY_CAP) { out.push({ media_id: mediaId, ok: false, reason: 'daily_cap' }); continue; }
     if ((await d.countSince(null, since)) >= GLOBAL_DAILY_CAP) { out.push({ media_id: mediaId, ok: false, reason: 'busy' }); continue; }
+    // Room for one more full-size cover in today's shared byte budget?
+    if (bytesAccounted(await d.rowsSince(since)) + MAX_COVER_BYTES > GLOBAL_DAILY_BYTES) { out.push({ media_id: mediaId, ok: false, reason: 'busy' }); continue; }
 
     // Reserve first: no log row, no fetch.
     let logId: number;

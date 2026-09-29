@@ -286,6 +286,10 @@ describe("E2 · our own cover copies", () => {
     try {
       expect(await copyCover(1, 'https://cdn.example.com/page.html')).toEqual({ url: null, reason: 'not_image' });
     } finally { vi.unstubAllGlobals(); }
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ action: 'cover_copy', error: 'not_enabled' }), { status: 403 }));
+    try {
+      expect(await copyCover(1, 'https://cdn.example.com/c.jpg')).toEqual({ url: null, reason: 'not_enabled' });
+    } finally { vi.unstubAllGlobals(); }
     vi.stubGlobal('fetch', async () => new Response('gateway', { status: 502 }));
     try {
       expect(await copyCover(1, 'https://cdn.example.com/c.jpg')).toEqual({ url: null, reason: 'unavailable' });

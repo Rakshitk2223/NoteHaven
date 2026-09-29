@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  vetUrl, isPrivateAddress, refererFor, sniffImage, fetchImageGuarded, copyCovers, DAILY_CAP, GLOBAL_DAILY_CAP, MAX_COVER_BYTES, type CopyDeps,
+  vetUrl, isPrivateAddress, refererFor, sniffImage, fetchImageGuarded, copyCovers, DAILY_CAP, GLOBAL_DAILY_CAP, MAX_COVER_BYTES,
+  GLOBAL_DAILY_BYTES, coverCopyAllowed, bytesAccounted, type CopyDeps,
 } from './cover-copy';
 import { mdCoverUrl } from './v2';
 
@@ -61,10 +62,14 @@ describe('isPrivateAddress (resolved addresses)', () => {
       '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '127.0.0.1', '169.254.169.254', '100.64.0.1',
       '0.0.0.0', '224.0.0.1', '240.0.0.1', '198.18.0.1', '::1', '::', 'fe80::1', 'fc00::1', 'fd12:3456::1', 'ff02::1',
       '::ffff:127.0.0.1', '::ffff:10.0.0.5', '::ffff:a9fe:a9fe', '64:ff9b::a00:1', '2001:db8::1', 'garbage',
+      '2002:7f00:1::1',            // 6to4 of 127.0.0.1
+      '2002:a9fe:a9fe::1',         // 6to4 of 169.254.169.254
+      '2001:0:4136:e378:8000:63bf:f5ff:fffe', // Teredo, client (XOR) = 10.0.0.1
+      '2001:0:a00:1::1',           // Teredo, server = 10.0.0.1
     ]) expect({ ip, blocked: isPrivateAddress(ip) }).toEqual({ ip, blocked: true });
   });
   it('allows public addresses', () => {
-    for (const ip of ['8.8.8.8', '93.184.216.34', '172.32.0.1', '2606:4700:4700::1111', '::ffff:8.8.8.8']) {
+    for (const ip of ['8.8.8.8', '93.184.216.34', '172.32.0.1', '2606:4700:4700::1111', '::ffff:8.8.8.8', '2002:808:808::1', '2001:0:4136:e378:8000:63bf:f7f7:f7f7']) {
       expect({ ip, blocked: isPrivateAddress(ip) }).toEqual({ ip, blocked: false });
     }
   });
@@ -176,10 +181,12 @@ function deps(over: Partial<CopyDeps> = {}, routes: Record<string, Route> = {}) 
   const logs: Array<Record<string, unknown>> = [];
   let count = 0;
   let globalExtra = 0;
+  let extraRows: Array<{ bytes: number | null; failure: string | null }> = [];
   const d: CopyDeps = {
     fetch: net.fetch, resolve: net.resolve,
     owns: async (_u, id) => id === 1 || id === 2,
     countSince: async (uid) => (uid === null ? count + globalExtra : count),
+    rowsSince: async () => [...extraRows, ...logs.map((l) => ({ bytes: (l.bytes as number | null) ?? null, failure: (l.failure as string | null) ?? null }))],
     put: async (key, bytes) => { if (store.has(key)) return 'exists'; store.set(key, bytes); return 'stored'; },
     publicUrl: (key) => `https://proj.supabase.co/storage/v1/object/public/media-covers/${key}`,
     reserve: async (row) => { logs.push({ ...row, failure: 'in_progress' }); count += 1; return logs.length - 1; },
@@ -188,7 +195,7 @@ function deps(over: Partial<CopyDeps> = {}, routes: Record<string, Route> = {}) 
     isOwnStorageUrl: (u) => u.startsWith('https://proj.supabase.co/storage/v1/object/public/media-covers/'),
     ...over,
   };
-  return { d, store, logs, net, setCount: (n: number) => { count = n; }, setGlobal: (n: number) => { globalExtra = n; } };
+  return { d, store, logs, net, setCount: (n: number) => { count = n; }, setGlobal: (n: number) => { globalExtra = n; }, setRows: (r: typeof extraRows) => { extraRows = r; } };
 }
 const IMG = 'https://cdn.example.com/cover.jpg';
 
@@ -223,6 +230,15 @@ describe('copyCovers (ownership, dedup, cap, logging)', () => {
     h.setGlobal(GLOBAL_DAILY_CAP);
     expect(await copyCovers('u', [{ media_id: 1, url: IMG }], h.d)).toEqual([{ media_id: 1, ok: false, reason: 'busy' }]);
     expect(h.net.seen).toEqual([]);
+  });
+
+  it('the global BYTE cap (150 MB / 24 h, shared Storage) stops it before any network', async () => {
+    const h = deps({}, { [IMG]: { type: 'image/jpeg', body: JPG } });
+    h.setRows([{ bytes: GLOBAL_DAILY_BYTES - MAX_COVER_BYTES + 1, failure: null }]); // not room for one more 2 MB
+    expect(await copyCovers('u', [{ media_id: 1, url: IMG }], h.d)).toEqual([{ media_id: 1, ok: false, reason: 'busy' }]);
+    expect(h.net.seen).toEqual([]);
+    h.setRows([{ bytes: GLOBAL_DAILY_BYTES - MAX_COVER_BYTES, failure: null }]); // exactly room for one
+    expect((await copyCovers('u', [{ media_id: 1, url: IMG }], h.d))[0].ok).toBe(true);
   });
 
   it("the log row is reserved BEFORE the fetch: if it can't be written, nothing is fetched (fail closed)", async () => {
@@ -283,5 +299,21 @@ describe('MangaDex covers (E2: copied, never hotlinked)', () => {
     expect(r).toMatchObject({ ok: true });
     expect(r.ok && r.url).toMatch(/\/media-covers\/[0-9a-f]{64}\.jpg$/);
     expect(h.net.seen[0].referer).toBe('https://mangadex.org/');
+  });
+});
+
+describe('allow-list + byte accounting (Job 14)', () => {
+  const RAK = 'b94bac8e-584c-49b5-9af2-431e3eafd0ad';
+  it('COVER_COPY_USERS: unset / empty → nobody (403); listed → allowed; others → 403', () => {
+    expect(coverCopyAllowed(RAK, undefined)).toBe(false);
+    expect(coverCopyAllowed(RAK, '')).toBe(false);
+    expect(coverCopyAllowed(RAK, ' , ')).toBe(false);
+    expect(coverCopyAllowed(RAK, RAK)).toBe(true);
+    expect(coverCopyAllowed(RAK, ` other-id , ${RAK.toUpperCase()} `)).toBe(true);
+    expect(coverCopyAllowed('00000000-0000-0000-0000-000000000001', RAK)).toBe(false);
+  });
+  it('an unsettled reservation counts as the full 2 MB', () => {
+    expect(bytesAccounted([{ bytes: 1000, failure: null }, { bytes: null, failure: 'not_image' }, { bytes: null, failure: 'in_progress' }]))
+      .toBe(1000 + MAX_COVER_BYTES);
   });
 });

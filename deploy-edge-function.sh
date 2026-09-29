@@ -85,6 +85,15 @@ if [ -n "$FANART_API_KEY" ]; then
     supabase secrets set FANART_API_KEY="$FANART_API_KEY"
     echo "✅ FANART_API_KEY set"
 fi
+# Cover copy (action=cover_copy) is allow-listed: only these user ids may copy
+# covers into Storage (comma-separated). Unset on the server = nobody can.
+#   export COVER_COPY_USERS=<your user id>
+if [ -n "$COVER_COPY_USERS" ]; then
+    supabase secrets set COVER_COPY_USERS="$COVER_COPY_USERS"
+    echo "✅ COVER_COPY_USERS set"
+else
+    echo "ℹ️  COVER_COPY_USERS not exported here, so the server's value is left unchanged (if it was never set, cover copy is off for everyone)."
+fi
 # Restrict CORS to your own origins. Comma-separated; unset falls back to '*'.
 #   export ALLOWED_ORIGINS="https://your-app.example,http://localhost:8080"
 if [ -n "$ALLOWED_ORIGINS" ]; then

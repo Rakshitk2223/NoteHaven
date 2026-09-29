@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { handleV2 } from './v2.ts';
 import { hasAdultGenre, MU_EXCLUDE_GENRES } from './adult.ts';
 import { CACHE_COLUMNS, mergeCacheRows, STATUS_GUESS, type CacheRow } from './cache-merge.ts';
-import { COVER_BUCKET, copyCovers, MAX_ITEMS as MAX_COVER_ITEMS, type CopyDeps } from './cover-copy.ts';
+import { COVER_BUCKET, copyCovers, coverCopyAllowed, MAX_ITEMS as MAX_COVER_ITEMS, type CopyDeps } from './cover-copy.ts';
 
 // CORS. Set ALLOWED_ORIGINS to a comma-separated allow-list (e.g.
 // "https://notehaven.example,http://localhost:8080"). Unset falls back to '*'
@@ -83,6 +83,11 @@ async function handleCoverCopy(req: Request, supabase: SupabaseClient, cors: Rec
   if (!userId) {
     return new Response(JSON.stringify({ error: 'Sign in required' }), { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } });
   }
+  // Allow-list (secret COVER_COPY_USERS): unset or empty → nobody. Sign-up is
+  // public and every copy spends Storage shared with the Vault.
+  if (!coverCopyAllowed(userId, Deno.env.get('COVER_COPY_USERS'))) {
+    return new Response(JSON.stringify({ action: 'cover_copy', error: 'not_enabled' }), { status: 403, headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
   const items = Array.isArray(body.items) ? (body.items as Array<{ media_id: unknown; url: unknown }>).slice(0, MAX_COVER_ITEMS) : [];
   if (!items.length) {
     return new Response(JSON.stringify({ error: 'items required' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } });
@@ -111,6 +116,16 @@ async function handleCoverCopy(req: Request, supabase: SupabaseClient, cors: Rec
       throw error;
     },
     publicUrl: (key) => supabase.storage.from(COVER_BUCKET).getPublicUrl(key).data.publicUrl,
+    rowsSince: async (since) => {
+      const out: Array<{ bytes: number | null; failure: string | null }> = [];
+      for (let from = 0; ; from += 1000) { // past PostgREST's 1000-row cap (the global cap allows 1,500/day)
+        const { data, error } = await supabase.from('media_cover_copies').select('bytes, failure')
+          .gte('created_at', since).order('id').range(from, from + 999);
+        if (error) throw error; // can't sum → fail closed
+        out.push(...((data ?? []) as Array<{ bytes: number | null; failure: string | null }>));
+        if ((data ?? []).length < 1000) return out;
+      }
+    },
     reserve: async (row) => {
       const { data, error } = await supabase.from('media_cover_copies')
         .insert({ ...row, failure: 'in_progress' }).select('id').single();

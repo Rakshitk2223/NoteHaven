@@ -395,13 +395,17 @@ export async function fixWrongCovers(items: WrongCover[]): Promise<CoverWriteRes
 
 export type CopyFailure =
   | 'bad_url' | 'blocked_host' | 'private_address' | 'too_many_redirects' | 'not_image' | 'too_large'
-  | 'fetch_failed' | 'not_owner' | 'daily_cap' | 'store_failed' | 'unavailable';
+  | 'fetch_failed' | 'not_owner' | 'daily_cap' | 'store_failed' | 'dns_failed' | 'busy'
+  /** The account isn't on the server's COVER_COPY_USERS allow-list (or it's unset). */
+  | 'not_enabled'
+  /** The edge function (or its E2 action) isn't reachable: keep the original URL. */
+  | 'unavailable';
 
 export type CopyOutcome = { url: string; deduped: boolean; reason?: undefined } | { url: null; reason: CopyFailure };
 
 const COPY_BATCH = 10;
 
-async function postCoverCopy(items: Array<{ media_id: number; url: string }>): Promise<Array<{ media_id: number; ok: boolean; url?: string; deduped?: boolean; reason?: CopyFailure }> | null> {
+async function postCoverCopy(items: Array<{ media_id: number; url: string }>): Promise<Array<{ media_id: number; ok: boolean; url?: string; deduped?: boolean; reason?: CopyFailure }> | 'not_enabled' | null> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) return null;
@@ -415,6 +419,7 @@ async function postCoverCopy(items: Array<{ media_id: number; url: string }>): P
       },
       body: JSON.stringify({ action: 'cover_copy', items }),
     });
+    if (res.status === 403) return 'not_enabled';
     if (!res.ok) return null;
     const body = await res.json() as { action?: string; results?: unknown };
     return body?.action === 'cover_copy' && Array.isArray(body.results) ? body.results as never : null;
@@ -432,7 +437,9 @@ export async function copyCovers(items: Array<{ mediaId: number; url: string }>)
   const out: CopyOutcome[] = [];
   for (let i = 0; i < items.length; i += COPY_BATCH) {
     const chunk = items.slice(i, i + COPY_BATCH);
-    const results = await postCoverCopy(chunk.map((c) => ({ media_id: c.mediaId, url: c.url })));
+    const got = await postCoverCopy(chunk.map((c) => ({ media_id: c.mediaId, url: c.url })));
+    if (got === 'not_enabled') { chunk.forEach(() => out.push({ url: null, reason: 'not_enabled' })); continue; }
+    const results = got;
     chunk.forEach((c, k) => {
       const r = results?.[k];
       if (!r || r.media_id !== c.mediaId) out.push({ url: null, reason: 'unavailable' });
