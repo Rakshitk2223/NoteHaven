@@ -257,16 +257,19 @@ needed).
 the library update need **no** deploy. E2 only if needed.
 
 ### G. Roadmap U0 → U6 (U6 parked; scope frozen at U0–U5, 2026-09-29)
-**Status (2026-09-29, final): U0 → U5 are all done on `media-v2`. Open before shipping: E1 (the one edge
-redeploy) and the phone browser pass.**
+**Status (2026-09-29, final): U0 → U5 and E2 are done and SHIPPED.** `media-v2` is on `main` (`5dd396d`),
+the edge function is redeployed (E1 + E2), and migrations 29 and 30 are live. **Only open item: the phone
+pass, by Rakshit.**
 | Unit | Status |
 |---|---|
-| U0 | ✅ done on the branch: pin guards on every legacy cover writer, cover writes no longer bump `last_activity_at`, Edit → Update stays with "Saved · Undo", Library stats over the whole library, one `latestOf` (pulled forward from U4) for badge + Behind filter, `resolve` removed, `main` merged in (`84fadef`). **Still open: E1, the one edge redeploy, at ship** |
+| U0 | ✅ shipped: pin guards on every legacy cover writer, cover writes no longer bump `last_activity_at`, Edit → Update stays with "Saved · Undo", Library stats over the whole library, one `latestOf` (pulled forward from U4) for badge + Behind filter, `resolve` removed, `main` merged in (`84fadef`); E1 deployed at ship |
 | U2a | ✅ done: migration 29 live, Dropped / On Hold, platform + resume link in Edit and PickPreview |
 | U2b | ✅ done: the Worker + sql.js parser, the pure planner, the preview, guarded apply through the one progress writer (`lib/media-progress-write.ts`), the journal and "Undo last bulk change" (`lib/media-bulk.ts`), the backup gate (`lib/full-export.ts`), a synthetic fixture generator, and Vitest |
 | U3 | ✅ done: the paced, resumable resolver (`lib/media-resolve.ts`) → `media_link_proposals`; the "Linking" pill and "Needs a pick · N" chip; Auto-matched and the `ReviewCard` queue; guarded `linkEntry(…, { expect, keepCover })`; journaled Approve behind the shared backup gate; linked titles read `media_source_meta` everywhere (`metaFor`) |
 | U4 | ✅ done: the library update pass (`lib/media-update.ts`: by id, paced, 6 h per title, never lowers a latest, aired episodes from edge `detail.last_aired`, `release_date` moved here); the Updates tab; one Web Lock shared with the resolver. Removed: Refresh Library, `RefreshActivityContext`, Settings → Sync activity, `has_new_content` reads, the display-time cover search. `backfill-media-metadata.ts` also removed (`71b4600`). **Not removed as planned:** the edge `media_metadata` merge-upsert and the legacy `q=` / `source=` / batch paths, now dead code with no caller |
 | U5 | ✅ done: `coverVerdict` (the one judge), `lib/media-cover.ts` `setCover(s)` (the one writer, journaled), Change cover… (web search on tap only), Wrong covers · N. A Change cover… pick pins (`6144851`); cover writes journal every 5. Removed: the slot machine, bulk refresh covers, `media-refresh.ts`, `removeCoverImage`, `backfill-cover-images`. E2 (a cover Storage copy) not needed so far |
+| E2 | ✅ shipped: migration 30 (a public `media-covers` bucket with no storage policies, the `media_cover_copies` log), the edge `cover_copy` action (allow-listed through the `COVER_COPY_USERS` secret; 300 fetches per user and 1,500 across all users per day, 150 MB/day stored; full SSRF guards), and copy-first in every cover pick, fix, import and link (`copyCover(s)`). MangaDex art is copy-only. E2 went ahead because MangaUpdates, MangaDex and scan-site thumbnails don't load when hotlinked (migration 30's header) |
+| Also shipped | the installed app's auto-update (`lib/app-update.ts`); iOS can pick a `.tmb` (no `accept` list); linked counts come only from the source and implausible totals are unknown (no more "134 of 1"); linked titles show their source's cover, never a by-title guess; the Grid \| List switch beside Sort |
 | Deploy | **Correction to § F "Edge":** linking (`action=search`) and the update pass (`action=detail`, which gained `last_aired` in U4) *do* depend on E1, like Browse. Only the Tachimanga import works without it |
 | U6 | parked (`docs/BACKLOG.md`) |
 

@@ -81,7 +81,7 @@ parse of the edge function.
 |---|---|---|
 | `.env` — client (copy `.env.example`) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | public by design; Vite inlines them at build time. `VITE_SUPABASE_PROJECT_ID` is in the template but no code reads it |
 | `.env` — local scripts only | `SUPABASE_SERVICE_ROLE_KEY`, `TMDB_API_KEY` | the service-role key bypasses RLS: **never import it into `src/`**. `OMDB_API_KEY` is still in the template but unused (`backfill:covers` was removed) |
-| edge-function secrets (`supabase secrets set`) | `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS` (CORS; unset means `*`) | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are injected by the Supabase runtime |
+| edge-function secrets (`supabase secrets set`) | `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS` (CORS; unset means `*`), `COVER_COPY_USERS` (user ids allowed to copy covers; unset means nobody) | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are injected by the Supabase runtime |
 
 ## Layout
 
@@ -108,11 +108,12 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
   `21_commands`, `22_security_lint`, `22_wishlist`, `23_work_projects`, `24_share_owner_check`,
   `25_calendar_events_fixes`, `26_tag_usage_triggers`, `27_notes_realtime`, `28_media_source_links`,
   `29_media_v2_import_link` (import map, bulk journal, link proposals, reader-latest and latest
-  season/episode columns, Dropped / On Hold). There is no migration runner; don't use `supabase db push`
-  (two files share the `22_` prefix). **Next new file: `30_*.sql`** — the roadmap needs none unless the
-  cover storage copy (E2) turns out to be necessary.
-- All of them are live on production (24–27 with fix batch 1; 28 on 2026-09-28 and 29 on 2026-09-29,
+  season/episode columns, Dropped / On Hold), `30_media_covers_bucket` (the public `media-covers` bucket
+  with no storage policies, and the `media_cover_copies` log). There is no migration runner; don't use
+  `supabase db push` (two files share the `22_` prefix). **Next new file: `31_*.sql`.**
+- All of them are live on production (24–27 with fix batch 1; 28 on 2026-09-28; 29 and 30 on 2026-09-29,
   each ahead of the Media v2 code that uses it; prod had no `media_tracker.status` CHECK before 29).
+  `30` touches `storage.buckets`, so like `00` it needs the SQL editor's elevated role.
 - **Re-run safety:** `21` onwards are all idempotent. **Don't re-run `00` or `20`**: `00` fails with
   "policy already exists" (and, if forced, would re-create `ledger_buckets`), and `20`'s orphan-tag
   cleanup predates `work_project_tags`, so it would delete tags used only by work projects. `24` leaves
@@ -228,18 +229,25 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     `cover_pinned` = "keep my cover" (pinned + null = "no cover wanted") and beats everything; **a
     Change cover… pick pins** (Undo unpins and restores the old cover). Priority: pin → linked source art
     → reader thumbnail → an existing cover that passes → letter tile. **Web search runs only when he taps
-    "Search the web"** in Change cover…; the display never searches (`simple-image-fetcher` reads stored covers only). Don't
-    reintroduce a per-card refresh, a bulk cover refresh or a display-time lookup.
-17. **Media v2 edge actions are not deployed** (as of 2026-09-29): `action=search|detail`,
-    `adult.ts` and the 2100 ms AniList pacing exist only on `media-v2`, and ship in one redeploy with
-    Phase 1. Don't describe them as live; `media-v2` must not merge to `main` before that redeploy.
-    There is no batch `resolve` action (removed); Link your library loops `action=search` at a client
-    pace. Everything the app calls is `search` or `detail` (Browse, Fix match, linking, the update pass,
-    Change cover's search); only the Tachimanga import works without the redeploy.
+    "Search the web"** in Change cover…; the display never searches (`simple-image-fetcher` reads stored
+    covers only, and a linked title shows its stored cover or its source's art, never a by-title guess).
+    Don't reintroduce a per-card refresh, a bulk cover refresh or a display-time lookup.
+    **Copy first (E2):** every cover the app saves (pick, fix, import, link) goes through `copyCover(s)`
+    → edge `action=cover_copy` → the `media-covers` bucket (content-hashed keys), and the stored URL is
+    what `setCover` writes (`lib/cover-copy.ts` `urlToSave`: action unreachable → the original, unless
+    it's copy-only art like MangaDex's `cover_copy_from`; any other failure → nothing saved). The action
+    is **allow-listed** (`COVER_COPY_USERS`; unset = nobody), owner-checked, SSRF-guarded, and capped per
+    user, globally and in bytes per day, with every fetch logged in `media_cover_copies` (written only by
+    the service role). Never add a storage policy to `media-covers` (a SELECT policy makes it listable),
+    and never loosen the guards or caps: sign-up is open to strangers.
+17. **Media v2 is live** (shipped 2026-09-29): `action=search|detail|cover_copy`, `adult.ts` and the
+    2100 ms AniList pacing are deployed. There is no batch `resolve` action (removed); Link your library
+    loops `action=search` at a client pace. Redeploy with `./deploy-edge-function.sh` whenever
+    `supabase/functions/media-search/` changes.
 18. **Media roadmap is U0–U5, scope frozen** (2026-09-29): one writer per field, cover priority, entry
     points and migration 29 are in `docs/media-v2/PLAN.md` ("Re-cut 2026-09-29"). U6 and the other
     later ideas are parked in `docs/BACKLOG.md`; don't pull them forward. Unit status lives in
-    `PLAN.md` § G: U0 → U5 are done on the branch; E1 (the edge redeploy) and the phone pass are open.
+    `PLAN.md` § G: U0 → U5 and E2 are shipped; only the phone pass is open.
 19. **Tachimanga backups are personal data** (the repo is public). Docs, commits, tests and fixtures
     describe the import feature only: never a title, shelf name, count or other detail from his backup.
     In code: reader titles and shelf (category) names live **only in browser memory** during an import.
@@ -275,6 +283,17 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     `backfill:covers`, `backfill-media-metadata.ts` / `backfill:metadata`. `release_date` is now written
     by the update pass. The edge function's legacy `q=` / `source=` / batch paths have **no caller left**
     in the repo: dead code in `index.ts`, still deployed; don't build on them.
+24. **Linked counts come only from the source.** For a linked title, chapters, episodes, seasons,
+    episode lists and status come from `media_source_meta` alone (`linkedMeta` in
+    `components/media/source-meta.ts`); legacy `media_metadata` may only fill descriptive blanks. For
+    every title, `plausibleMeta` turns a total below his progress into **unknown** (show "Ch 134", never
+    "134 of 1", and never clamp logging to it) and drops "upcoming" on something he's started. Don't
+    fall back to a legacy count for a linked title.
+25. **The installed app updates itself** (`lib/app-update.ts`, started in `main.tsx`; `injectRegister:
+    false`). It checks on every route change, on returning to the foreground and every 30 min, and reloads
+    when a new version takes over, unless a hold is set. Anything that must not be cut off by a reload
+    (unsaved edits, a bulk write in progress) calls `holdReload(key, true)` and clears it when done;
+    today that's the Media edit form, the import and link Approves and the Wrong-covers fix.
 
 ## Decided — don't re-litigate
 

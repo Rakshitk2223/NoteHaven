@@ -60,6 +60,8 @@ In the Supabase SQL editor, run the files in `supabase/migrations/` **in filenam
 9. `29_media_v2_import_link.sql` — the Tachimanga import map, the bulk-change journal, link proposals,
    reader-latest columns, and the Dropped / On Hold statuses. It runs as one transaction and stops,
    changing nothing, if an existing status wouldn't fit the new list
+10. `30_media_covers_bucket.sql` — the public `media-covers` bucket (no storage policies on purpose) and
+    the `media_cover_copies` log behind the cover-copy caps
 
 There is no migration runner — don't use `supabase db push`. `00` and `20` are not safe to re-run;
 `21` onwards are idempotent.
@@ -79,6 +81,7 @@ supabase login
 export TMDB_API_KEY=...                                               # optional
 export FANART_API_KEY=...                                             # optional
 export ALLOWED_ORIGINS="https://your-app.example,http://localhost:8080"   # CORS; unset means *
+export COVER_COPY_USERS="<your auth user id>"                          # who may copy covers into Storage; unset means nobody
 ./deploy-edge-function.sh
 ```
 
@@ -118,11 +121,13 @@ npm run preview   # serve dist/ locally
 
 - **Frontend:** `dist/` is a static site. Production is on Netlify, which deploys every push to `main`.
   `public/_redirects` (`/* /index.html 200`) is the SPA fallback; any other static host needs the same
-  rewrite. The repo contains no other hosting config. The app is a PWA whose service worker updates
-  automatically.
+  rewrite. The repo contains no other hosting config. The app is a PWA: it checks for a new version on
+  every navigation, on returning to the foreground and every 30 minutes, and reloads itself, but waits
+  while there are unsaved edits or a bulk change is running.
 - **Edge function:** redeploy with `./deploy-edge-function.sh` whenever
-  `supabase/functions/media-search/` changes. (The Media v2 actions on the `media-v2` branch are not
-  deployed yet; they go out in one redeploy when that branch merges.)
+  `supabase/functions/media-search/` changes. Cover copying (`action=cover_copy`) stays off for everyone
+  until `COVER_COPY_USERS` lists your user id; the script leaves an unexported secret unchanged on the
+  server.
 - **Database:** new migrations are applied by hand in the SQL editor, like step 3.
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on every pull
   request: `npm ci`, `npm run lint`, `npm run test:insights`, `npm test`, `npm run build`, and an esbuild

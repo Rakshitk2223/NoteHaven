@@ -1,17 +1,18 @@
 # NoteHaven — backend map
 
 There is no application server. The backend is one Supabase project: Postgres with row-level security,
-Auth (email + password), Storage (two buckets), Realtime (Notes), RPC functions, and one Deno edge
+Auth (email + password), Storage (three buckets), Realtime (Notes), RPC functions, and one Deno edge
 function, `media-search`. The client reaches everything through the single supabase-js client in
 `src/integrations/supabase/client.ts`. Conventions and gotchas are in `CLAUDE.md`; the frontend side is
 in `context/frontend.md`.
 
 ```
-React SPA ──supabase-js──► Supabase: Postgres + RLS · Auth · Storage (vault, avatars) · Realtime (notes) · RPC
+React SPA ──supabase-js──► Supabase: Postgres + RLS · Auth · Storage (vault, avatars, media-covers) · Realtime (notes) · RPC
     │
     ├──fetch + user JWT──► edge function media-search ──► AniList, Jikan, MangaDex, MangaUpdates,
     │                          (service role)                TVmaze, TMDB, Wikidata/Commons, Fanart.tv
-    │                          └──upsert──► media_metadata (legacy) · media_source_meta (v2, not deployed yet)
+    │                          └──upsert──► media_metadata (legacy) · media_source_meta (v2)
+    │                          └──cover_copy──► Storage media-covers (E2) · log in media_cover_copies
     └──direct from the browser──► AniList, Kitsu, Jikan, TVmaze (cover refresh) · TheMealDB · Openverse
 ```
 
@@ -102,7 +103,9 @@ Refresh then fetches by id instead of re-guessing from the title. **User-owned**
 | `media_import_map` | PK `(user_id, origin, origin_key)`; `origin` CHECK (tachimanga), `origin_key` = sha256 hex of `source:url` (**no reader title or URL is stored**), `media_id` → `media_tracker` (cascade; many keys may map to one row), `reader_cover` (CHECK `^https?://`), `last_seen_at`. Survives relinks; never stored in `alt_ids` | own rows, all four ops; INSERT / UPDATE need the caller's `media_id` | 29 |
 | `media_bulk_journal` | `id`, `user_id`, `batch_id` uuid, `kind` CHECK (link, import, cover), `op` CHECK (update, insert), `media_id` → `media_tracker` (cascade), `before` / `after` JSONB, `created_at`, `undone_at`. Indexes `(user_id, created_at DESC)`, `(batch_id)` | SELECT / INSERT own (+ `media_id` EXISTS); **append-only except marking undone**: an UPDATE policy only from `undone_at IS NULL` to a timestamp, and a column grant on `undone_at` alone; DELETE revoked | 29 |
 
-All three 29 tables revoke everything from `anon`. Migration 29 is one transaction with a pre-check (it
+| `media_cover_copies` | `id`, `user_id`, `media_id` → `media_tracker` (**SET NULL**, so deleting a title can't reset today's cap), `object_key` (CHECK `<sha256>.<ext>`; null when the fetch failed), `source_host`, `bytes` (≤ 2 MB), `deduped`, `failure` (a short code, never a URL; `in_progress` while reserved), `created_at`. Index `(user_id, created_at DESC)`. One row per outbound fetch, failures included | SELECT own; **no write policies, writes revoked**: only the edge function writes it, so a client can't fake or erase its cap | 30 |
+
+All three 29 tables and the 30 log revoke everything from `anon`. Migration 29 is one transaction with a pre-check (it
 raises, changing nothing, if any existing status is outside the new list) and `lock_timeout` 5 s.
 
 **One progress writer:** `lib/media-progress-write.ts` `casProgressWrite` (used by
@@ -170,6 +173,7 @@ Not tables: the recipe pantry (`localStorage.recipesPantry`) and command "projec
 | Bucket | Access | Limits | Path | Used by |
 |---|---|---|---|---|
 | `vault` | **private**; one owner-only policy on `storage.objects` (`(storage.foldername(name))[1] = auth.uid()::text`) | 25 MB per file | `{user_id}/{uuid}.{ext}` | `lib/vault.ts` |
+| `media-covers` (30) | **public** URLs; **no** `storage.objects` policies at all (a SELECT policy would let any signed-in client list every key; a public bucket serves its URLs without one). Only the edge function (service role) writes | 2 MB; jpeg, png, webp, gif, avif | `<sha256>.<ext>` (content-hashed, so identical art is stored once; `Cache-Control` 1 year) | edge `cover_copy`; read by every cover `<img>` |
 | `avatars` | **public** URLs; owner INSERT / UPDATE / DELETE (the public-read policy was dropped by `22_security_lint`) | 5 MB; png, jpeg, webp, gif | `{user_id}/avatar.{ext}` | `settings/AccountSection.tsx` (URL saved in the auth user's `avatar_url` metadata) |
 
 Vault rules: the folder tree lives in the database, so moving a file is a one-row `UPDATE` and the
@@ -189,9 +193,9 @@ adds `notes` to the `supabase_realtime` publication (idempotent; `REPLICA IDENTI
 `adult.ts` (the shared explicit-content filter, pure, covered by `adult.test.ts` under Vitest). The
 client helpers are in `src/lib/edge-function.ts`.
 
-> **Deploy state (2026-09-29):** production runs `main`'s version. The v2 actions, `adult.ts` and the
-> 2100 ms AniList pacing exist only on the `media-v2` branch. They go live in **one** redeploy when
-> Media v2 Phase 1 ships. Until then, only `npm run edge:dev` serves them.
+> **Deploy state (2026-09-29):** Media v2 shipped. Production runs the v2 function (`search`, `detail`,
+> `cover_copy`, `adult.ts`, 2100 ms AniList pacing) from `main` (`5dd396d`), and migrations 28–30 are
+> live.
 
 - **Auth:** `verify_jwt = true` in `supabase/config.toml` (sticky server-side, hence declared there),
   and the function also checks the JWT `role`: a signed-in user (`authenticated` with a `sub`) or
@@ -237,6 +241,26 @@ client helpers are in `src/lib/edge-function.ts`.
     `last_aired` goes to the client only; `media_source_meta` has no column for it.
   - There is no batch `resolve` action (removed 2026-09-29, BE2). Phase 2's "link your library" will
     call `action=search` in a client-paced loop and score candidates with `src/lib/media-match.ts`.
+  - `POST { action: 'cover_copy', items: [{ media_id, url }] }` (at most 10; `cover-copy.ts`, E2): fetches
+    an approved cover **once, server-side** (with the Referer its host expects), stores it in the
+    `media-covers` bucket and returns the public URL. It never writes `media_tracker`; the client saves
+    the returned URL with `setCover`. Guards, all Vitest-covered in `cover-copy.test.ts`:
+    - **Allow-list:** only user ids in the `COVER_COPY_USERS` secret (comma-separated); unset or empty =
+      nobody (403 `not_enabled`), since sign-up is open and Storage is shared with the Vault.
+    - The caller must be a signed-in user who **owns** the `media_id`.
+    - **SSRF:** https on the default port only; no credentials, IP literals, localhost / `.local` /
+      `.internal` / single-label hosts. The host must resolve, and every address must be public
+      (private, loopback, link-local, CGNAT, multicast, reserved and IPv4-mapped are refused); no
+      resolution means no fetch. At most 2 redirects, each re-checked.
+    - **Content:** an allowed image Content-Type, a hard 2 MB read cutoff, and the type taken from the
+      bytes' magic number (renamed HTML or SVG is refused).
+    - **Caps**, rolling 24 h, failed fetches included: 300 fetches per user, 1,500 across all users,
+      and 150 MB stored across all users. The log row is reserved before the fetch and settled after,
+      so if it can't be written nothing is fetched (fails closed).
+    - Residual risk, documented: DNS rebinding between resolve and connect. The hosted runtime has no
+      route to the private network, and nothing fetched is executed.
+  - MangaDex detail and search now return `cover_copy_from` (the 512 px cover-art URL) for the copy
+    only; `cover` stays null for MangaDex, since it can't be hotlinked. Not stored in `media_source_meta`.
   - Guarantees the client relies on: unknown values are `null` (never `0`, `''` or `'upcoming'`),
     statuses are normalised to the `media_source_meta` vocabulary, adult works are excluded at the
     source (AniList `isAdult: false`, Jikan `sfw`, TMDB `include_adult=false`, MangaDex content rating
@@ -253,12 +277,12 @@ client helpers are in `src/lib/edge-function.ts`.
   never beats a real status), and upserts only rows that changed. U4 removes these writes. v2 `detail` writes
   `media_source_meta`; v2 `search` writes nothing.
 - **Errors:** `{ error }` with 400, 401 or 500; internal details are never returned.
-- **Secrets:** `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS`; `SUPABASE_URL` and
+- **Secrets:** `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS`, `COVER_COPY_USERS` (the cover-copy allow-list); `SUPABASE_URL` and
   `SUPABASE_SERVICE_ROLE_KEY` come from the runtime.
 - **Deploy:** `deploy-edge-function.sh` checks the CLI and login, runs
   `supabase link --project-ref ylefihvjlyzabhvgdnoe` and `supabase functions deploy media-search --use-api` (JWT
   verification comes from `config.toml`), then sets `TMDB_API_KEY`, `FANART_API_KEY` and
-  `ALLOWED_ORIGINS` from the environment when they're present (an unexported one is left unchanged on
+  `ALLOWED_ORIGINS` and `COVER_COPY_USERS` from the environment when they're present (an unexported one is left unchanged on
   the server, never cleared). It deploys with `--use-api`, so Docker needn't be running. CI parses the function with esbuild on
   every push (bundling `v2.ts` and `adult.ts` through the import).
 - **Local dev** (`npm run edge:dev` → `scripts/edge-dev/serve.ts`): runs the **real** `index.ts` in real
@@ -283,10 +307,18 @@ One judge, one writer (U5):
   guarded on `cover_pinned = false` and the cover he saw; it writes `cover_image` + `cover_origin`,
   journals `kind = 'cover'` in chunks of 5 (write 5 → journal 5), and puts a chunk back if the journal can't be written. A non-manual cover
   that's wrong-medium or blocked is refused.
+- **Copy first (E2):** every cover the app saves (a Change cover… pick, a Wrong covers fix, the import's
+  reader covers, `linkEntry`'s source art) goes through `copyCover(s)` (`lib/media-cover.ts`) and the
+  `urlToSave` rule in `lib/cover-copy.ts`: a successful copy saves the storage URL; `unavailable` (the
+  action unreachable) saves the original unless it's **copy-only** art (MangaDex), which is then not
+  saved; any other failure saves nothing and says why. Our own copies (`isOwnCoverCopy`) pass through
+  unchanged, and covers that already load are left alone.
 - **Priority:** a pin always wins → the linked source's art (the default for linked titles) → the reader
   app's thumbnail (`media_import_map.reader_cover`; the default for unlinked ones) → the existing cover if
   it passes → the letter tile. **Web search runs only when he taps "Search the web"** in Change cover….
-- **Display** (`lib/simple-image-fetcher.ts`): localStorage cache (`lib/image-cache.ts`, 24 h TTL) →
+- **Display** (`lib/simple-image-fetcher.ts`): a **linked** title shows only its stored cover, else
+  its source's own art (judged), and never a cover found by title in the legacy cache. Unlinked titles:
+  localStorage cache (`lib/image-cache.ts`, 24 h TTL) →
   `media_tracker.cover_image` → `media_metadata` by `(title, type)` (chunked `IN`). It never searches; a
   missing cover stays missing until he picks one.
 - `linkEntry` sets `cover_origin = 'source'` when it applies the source's art, only if the title isn't
@@ -316,9 +348,10 @@ privileges.
 | `28_media_source_links.sql` | Media v2: 11 link / latest columns on `media_tracker`, `media_source_meta`, `media_progress_log` (see "Media v2" above). **Additive only**; ends with a verify SELECT (expect 11, true, true) | yes |
 | `29_media_v2_import_link.sql` | `media_link_proposals`, `media_import_map`, `media_bulk_journal`; 5 `media_tracker` columns (reader latest, cover origin, latest season / episode); `media_progress_log.origin`; the `status` CHECK widened to Dropped / On Hold (found by column, not by name; the only change that isn't an ADD). One transaction; a status pre-check raises before anything changes; ends with a verify SELECT | yes |
 
-All of `00`–`29` are applied on production (24–27 with fix batch 1; 28 on 2026-09-28 and 29 on
-2026-09-29, each ahead of the code that uses it). **Next new file: `30_*.sql`**, needed only if the
-cover Storage copy (E2) turns out to be necessary.
+| `30_media_covers_bucket.sql` | E2: the public `media-covers` bucket (settings re-asserted on a re-run, so a hand edit can't widen it) with **no storage policies**, and the `media_cover_copies` log. Needs the SQL editor's elevated role (like `vault` / `avatars`). One transaction; verify SELECT expects 0 storage policies mentioning the bucket and 0 without a `bucket_id` filter | yes |
+
+All of `00`–`30` are applied on production (24–27 with fix batch 1; 28 on 2026-09-28; 29 and 30 on
+2026-09-29, each ahead of the code that uses it). **Next new file: `31_*.sql`.**
 
 `00` sections: 01 core tables · 02 tags, ledger, subscriptions, birthdays, countdowns, shared notes,
 snippets, calendar RPC · 03 `media_metadata` · 04 `user_preferences` · 05 `cover_image` + pg_trgm ·
@@ -342,7 +375,7 @@ listed in `README.md`.
 | Script | Talks to |
 |---|---|
 | `backfill-release-dates.ts` | cached `media_metadata.episodes_detail` → `media_tracker.release_date` (no network) |
-| `backup-media.ts` | `media_tracker`, `media_metadata`, `media_tags`, `media_progress_log` and the three migration 29 tables → `./backups/<timestamp>/`; a 29 table that doesn't exist yet is noted as "not set up", not a failure. Doesn't include `media_source_meta` (rebuildable from the sources) |
+| `backup-media.ts` | `media_tracker`, `media_metadata`, `media_tags`, `media_progress_log`, the three migration 29 tables and `media_cover_copies` (30) → `./backups/<timestamp>/`; a 29 table that doesn't exist yet is noted as "not set up", not a failure. Doesn't include `media_source_meta` (rebuildable from the sources) |
 | `backup-vault.ts` | **read-only**: every Vault object's bytes plus `vault_files` / `vault_folders` rows, with SHA-256 manifest and `RESTORE.md` → `./backups/vault-<stamp>/`; orphan objects are backed up and flagged |
 | `audit-cover-medium.ts` | reads a local JSON export (no database, no network) and counts covers by `coverVerdict` (`lib/cover-medium.ts`, the same judge the app uses) |
 | `audit-metadata-coverage.ts` | read-only coverage report |

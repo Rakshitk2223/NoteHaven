@@ -27,6 +27,13 @@ QueryClientProvider        staleTime 5 min · gcTime 30 min · no refetch on foc
   OS colour scheme while mode is `system`. Keying the wrapper on the pathname remounts and fades every route.
 - `Index`, `Login`, `SignUp`, `CheckEmail`, `ResetPassword` and `NotFound` load eagerly; every other page
   (including the public `SharedNote`) is `React.lazy`.
+- **App updates** (`lib/app-update.ts`, started once in `main.tsx`): the app registers the service worker
+  itself (`injectRegister: false`) and checks for a new version on every route change (`AppInner`), when
+  the tab comes back to the foreground, and every 30 min. When a new version takes over it reloads,
+  unless something holds the reload (`holdReload(key, on)`: unsaved Media edits, an import Approve, a link
+  Approve, a Wrong-covers fix); then it waits for the next route change with nothing held. After an
+  automatic reload the app toasts "Updated to the latest version" once. Anything new that mustn't be cut
+  off by a reload should call `holdReload`.
 - There is no app-wide media sweep any more (`RefreshActivityContext` and Refresh Library were removed
   in U4). Media's background work (the library update pass and "Link your library") lives in
   lazy-loaded singletons that coordinate through a Web Lock, not a provider.
@@ -117,13 +124,18 @@ items appended automatically.
     (1024 px); the PageShell-style hamburger stays on mobile.
   - **Metadata:** one `metaFor` per title (`buildMetaIndex` in `components/media/source-meta.ts`): a
     linked title reads `media_source_meta` (the slim `SOURCE_META_SLIM` columns for grid, rails, filters
-    and sorts; the full row in the detail view) and legacy `media_metadata` only fills blanks; an
-    unlinked title reads the legacy cache as it is. Nothing searches for a missing cover at display time:
-    `simple-image-fetcher` reads stored covers and caches only.
+    and sorts; the full row in the detail view). **Counts come only from the source** (`linkedMeta`):
+    chapters, episodes, seasons, episode lists and status; legacy `media_metadata` may only fill
+    descriptive blanks. An unlinked title reads the legacy cache. Then `plausibleMeta` runs for every
+    title: a total below his progress is **unknown** (shown as "Ch 134", never "134 of 1", and never
+    clamping the Log), and "upcoming" on something he's started is dropped. Nothing searches for a
+    missing cover at display time: `simple-image-fetcher` reads stored covers and caches only, and a
+    linked title shows its stored cover or its source's art, never a cover found by title.
   - **Library:** `LibraryGrid` (cover tiles; the log number or the Movies `WatchedToggle` under each
     cover; the "N behind" badge from `latestOf` = the higher of the source's and the reader's latest,
     never on Completed / On Hold / Dropped; long-press 450 ms to select) or the list
-    view (`MediaListRow`, 44 px controls, ⋮ `MediaActionsMenu`). Grid size S / M / L (`grid-size.ts`,
+    view (`MediaListRow`, 44 px controls, ⋮ `MediaActionsMenu`); the **Grid | List** switch sits beside
+    Sort and scrolls the results into view on a phone (`view-switch.ts`). Grid size S / M / L (`grid-size.ts`,
     default M; 3 columns on phone up to 8 at `xl`; narrower set while the Mac pane is open). Type pills
     and custom groups (`CustomGroupBuilder`), status, sort, debounced search, genre chips (`GenreRail`,
     AND), a "More filters" sheet (all / behind, needs cover; Behind uses the badge's rule; the old
@@ -170,13 +182,21 @@ items appended automatically.
     while pinned) lists options in priority order: the linked source's art → the reader app's thumbnail →
     the current cover → **web search, only when he taps "Search the web"**. Each option carries its
     `coverVerdict` (ok / unverified / wrong kind / won't load); wrong-kind and won't-load options can't
-    be picked. Picking one writes it through `setCover` with that option's origin **and pins it**, so
+    be picked, except copy-only art (MangaDex), which previews as a letter tile and is copied on pick.
+    Picking one **copies it first** (E2, below), then writes the stored URL through `setCover` with that
+    option's origin **and pins it**, so
     later linking and cover fixes keep it; Undo unpins and restores the previous cover.
     **Wrong covers · N** (`WrongCovers`, from More) lists covers that are wrong-medium, blocked or missing,
     with a fix to the default (source art for linked titles, the reader thumbnail otherwise). "Fix all"
     is a bulk write behind the shared backup gate, journaled every 5.
     **Pin / Unpin** and **Remove cover** (a pinned null cover) stay in the ⋮ menu. Every change goes
-    through `setCover(s)` and is journaled, so "Undo last bulk change" covers it. The old per-card
+    through `setCover(s)` and is journaled. A one-row cover batch (a single pick or fix) keeps its own
+    toast Undo and never takes over "Undo last bulk change" (`isSingleCoverChange`).
+    **Copy first (E2):** every cover pick, fix, import cover and link cover goes through `copyCover(s)`
+    → edge `cover_copy` → the `media-covers` bucket, and the stored URL is what's saved
+    (`lib/cover-copy.ts` `urlToSave`). If the action is unreachable, the original is saved unless it's
+    copy-only; any other failure saves nothing and the toast says why (`COPY_FAILURE_TEXT`, including
+    "not turned on for this account" outside the `COVER_COPY_USERS` allow-list). The old per-card
     Refresh cover (the slot machine) and bulk refresh covers are gone.
   - **Updates** (`UpdatesView`, U4): titles whose latest chapter or aired episode **grew**, newest
     first, grouped by day, over the last 30 days ("Ch N out", "S2 · E5 aired"); tap opens the title;
@@ -212,9 +232,9 @@ items appended automatically.
     "Import JSON…" before it), export JSON / CSV / TXT, and **Undo last bulk change**
     (`['mediaBulkLatest']` → `lib/media-bulk.ts` `undoBatch`) while an undoable batch exists. There is
     no Refresh library… row any more.
-  - **Import…** sniffs the file's first bytes, never its name (`import/sniff.ts`; `.json`, `.tmb` and
-    `.zip` accepted, since test backups travel renamed as `.zip` so iOS doesn't offer to open them in the
-    reader app). JSON goes to the legacy JSON import; a zip opens `ReaderImportDialog` (lazy; full
+  - **Import…** sniffs the file's first bytes, never its name (`import/sniff.ts`). The file input has
+    **no `accept` attribute**, because iOS greys out a `.tmb` for any accept list; test backups travel
+    renamed as `.zip` so iOS doesn't offer to open them in the reader app. JSON goes to the legacy JSON import; a zip opens `ReaderImportDialog` (lazy; full
     screen on phone):
     1. **Parse** in a Web Worker (`lib/tachimanga/parse.ts` → `parse.worker.ts`, sql.js + jszip, kept
        out of cold load and the PWA precache; the worker is terminated after one parse to free the wasm
@@ -292,12 +312,14 @@ items appended automatically.
 |---|---|---|
 | `accounts.ts` | ledger accounts; money-in-hand maths (`computeMoneyInHand`, `computeAccountBalances`) | `ledger_accounts` |
 | `bucket-list.ts` | bucket-list CRUD, categories and status metadata, image suggestions | `bucket_list`; Openverse |
+| `app-update.ts` | PWA updates: `startAppUpdates`, `onRouteChange`, `holdReload`, `consumeUpdatedFlag` (see Providers) | service worker |
 | `calendar.ts` | event colour / label / icon maps, grouping by date | — |
 | `category-init.ts` | seed default ledger and subscription categories once per account | `ledger_categories`, `subscription_categories`, `user_preferences` (seed flag) |
 | `codeSnippets.ts` | snippets and project folders, supported languages, tag wiring; re-exports the secret masking | `code_snippets`, `code_snippet_tags`, `snippet_folders` |
 | `commands.ts` | Commands tab CRUD and reorder (projects = `snippet_folders`) | `commands` |
 | `dashboard.ts` | widget types, metadata, default layout, load / save / reset | `user_preferences` (`dashboard_widgets`) |
 | `date-utils.ts` | local `YYYY-MM-DD` helpers: `dateToYMD`, `parseYMD`, `formatDateForDisplay`, `formatDateDDMMYYYY`, `isToday`, `addDays` | — |
+| `cover-copy.ts` | pure E2 save rule: `urlToSave` (copy → storage URL; action unreachable → the original unless copy-only; other failures → nothing) and `COPY_FAILURE_TEXT` | — |
 | `cover-medium.ts` | pure: **the one cover judge**, `coverVerdict(url, type, origin)` → ok / wrong-medium / blocked / unverified (provenance — source, manual, reader — only vouches for an unknown host, never for a wrong medium); plus `coverMedium`, `coverFitsType`, `isUsableCover`, `isHotlinkBlocked`. Runs at write time, in review counts and in `audit:covers`, never at display time | — |
 | `edge-function.ts` | `mediaSearchGet` / `mediaSearchUrl`: authenticated GET to `media-search`; `null` on no session, non-2xx or network error. Dev builds honour `VITE_MEDIA_SEARCH_URL` (the local `edge:dev` server); production folds it away | edge function |
 | `full-export.ts` | **the one full export**: `EXPORT_TABLES` / `EXPORT_JUNCTIONS`, `runFullExport` (downloads the file; tables not set up yet are skipped, unreadable ones fail it), and a per-tab "complete export this session" flag (`hasFullExportThisSession`, 60 min) that bulk dialogs gate on | every user table |
@@ -420,8 +442,9 @@ Fix match is open: the "In library" marks), `['mediaBulkLatest']` (the newest un
 
 ## localStorage keys
 
-One `sessionStorage` key: `notehaven.fullExportAt` (`lib/full-export.ts`, the per-tab "complete export
-in this session" stamp that bulk dialogs gate on).
+Two `sessionStorage` keys: `notehaven.fullExportAt` (`lib/full-export.ts`, the per-tab "complete export
+in this session" stamp that bulk dialogs gate on) and `app-updated:v1` (`lib/app-update.ts`, set just
+before an automatic update reload so the toast shows once).
 
 | Key | Owner |
 |---|---|
@@ -456,7 +479,8 @@ in this session" stamp that bulk dialogs gate on).
   `lovable-tagger` in development mode only; alias `@` → `./src`. `manualChunks` splits `editor` (Tiptap +
   ProseMirror), `codemirror` (core only — each language grammar is its own lazy chunk), `charts`
   (recharts / d3), `motion`, `icons`, `supabase`, `query` and `react-vendor`.
-- **PWA** (`vite-plugin-pwa`): `autoUpdate`; dark `#141414` theme and background colours; Workbox
+- **PWA** (`vite-plugin-pwa`): `autoUpdate`, `injectRegister: false` (registration and update checks are
+  `lib/app-update.ts`); dark `#141414` theme and background colours; Workbox
   precaches the build (except the import's `parse.worker-*.js`, fetched only when used) and runtime-caches Google Fonts (CacheFirst, 1 year) and `*.supabase.co`
   (NetworkFirst, 10 s timeout, 5 min / 50 entries).
 - **TypeScript:** `tsconfig.app.json` covers `src/` and is loose (`strict: false`). The root
@@ -464,12 +488,13 @@ in this session" stamp that bulk dialogs gate on).
 - **ESLint** (`eslint.config.js`, flat config): JS + typescript-eslint recommended, react-hooks
   recommended, `react-refresh/only-export-components` as a warning, `@typescript-eslint/no-unused-vars` off.
 - **Tests:** Vitest (`npm test`, `vitest.config.ts`: node environment, `@/` alias, separate from
-  `vite.config.ts`) runs `src/**/*.test.ts` and `supabase/functions/**/*.test.ts`: `lib/__tests__/`
-  (`media-match`, `media-progress`, `media-progress-write`, `media-link`, `media-bulk`, `full-export`,
-  `restore`; stubbed clients), `lib/tachimanga/__tests__/` (`parse-core` against synthetic fixtures run
-  through real sql.js, `plan`), `components/media/__tests__/` (`import-apply`, `import-selection`,
-  `import-sniff`, `progress-view`, `status`) and the edge `adult.test.ts`. Fixtures are synthetic
-  `[audit]` data only. `scripts/__tests__/media-insights.test.ts` (`npm run test:insights`) stays a plain
-  `tsx` script over `lib/media-insights` and `lib/media-progress`.
+  `vite.config.ts`) runs `src/**/*.test.ts` and `supabase/functions/**/*.test.ts` (323 tests in 32 files
+  on 2026-09-29): `lib/__tests__/` (matching, progress and its writer, linking incl. guarded and
+  copy-first, the resolver, the update pass, covers and cover copy, the bulk journal, export / restore,
+  the display fetcher, app updates; stubbed clients), `lib/tachimanga/__tests__/` (`parse-core` against
+  synthetic fixtures through real sql.js, `plan`), `components/media/__tests__/` (import, link, cover-fix,
+  source-meta, progress-view, status, history labels, view switch) and the edge's `adult`, `cache-merge`,
+  `cover-copy` (every SSRF guard and cap) and `v2-aired`. Fixtures are synthetic `[audit]` data only.
+  `scripts/__tests__/media-insights.test.ts` (`npm run test:insights`) stays a plain `tsx` script.
 - **CI:** `.github/workflows/ci.yml` (GitHub Actions, Node 20): `npm ci` → lint → `test:insights` →
   `npm test` → build → esbuild parse of the edge function.

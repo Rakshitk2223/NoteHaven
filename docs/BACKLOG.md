@@ -34,22 +34,16 @@ and polish to existing features are always in scope.
   them): turn on leaked-password protection (Authentication → Sign In / Providers → Passwords) and apply
   the pending Postgres security patch (Settings → Infrastructure). Not confirmed done.
 
-## In flight: Media v2
+## Shipped: Media v2 (2026-09-29)
 
-Branch `media-v2`, not merged (`main` was merged into it on 2026-09-29). Design and unit status in
-`docs/media-v2/PLAN.md`, live state in `docs/media-v2/HANDOFF.md`.
+`media-v2` is on `main` and live: the web app via Netlify, the v2 edge function (`search`, `detail`,
+`cover_copy`) redeployed, migrations 28–30 applied. Design and unit status are in `docs/media-v2/PLAN.md`.
+It covers Phase 1 plus U0–U5 and E2: link by search-and-pick, fast logging and History, Dropped / On Hold,
+the Tachimanga import with journaled Undo, Link your library, the Updates tab, one cover judge and
+writer, and copying approved covers into NoteHaven storage. It also brought the installed app's
+auto-update.
 
-- **Done on the branch:** Phase 1 (link by search-and-pick, fetch by id, fast logging, History), U0
-  (pin guards, Edit → Saved · Undo, stats over the whole library, one `latestOf`), U2a (Dropped / On
-  Hold, platform + resume link), U2b (the Tachimanga import, the bulk journal, "Undo last bulk change"),
-  U3 (Link your library), U4 (the Updates tab and the library update pass) and U5 (one cover judge and
-  writer, Change cover…, Wrong covers). Removed with them: Refresh Library, Settings → Sync activity, the
-  "new seasons" flag, the cover slot machine and `backfill:covers`.
-- **Still open before it ships:** E1, the one edge-function redeploy, and the phone browser pass.
-- **Database:** migrations 28 and 29 are live on production.
-- **Edge function:** the v2 actions are **not deployed**. Browse, Fix match, Link your library and the
-  update pass all call them (`action=search` / `action=detail`, which now also returns `last_aired`), so
-  they only work against `npm run edge:dev` until E1. The Tachimanga import needs no edge function.
+- 🔲 **Phone pass** (Rakshit): the final by-hand check on the iPhone, installed as a PWA.
 - Push notifications and recommendations stay declined.
 
 ## Parked (not on the roadmap; revisit after U5)
