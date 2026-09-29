@@ -34,7 +34,7 @@ no page — they live in a dashboard widget and the calendar's quick-add. Route 
   most other pages use manual `useState` + `useEffect`).
 - Tiptap 2 (Notes), CodeMirror 6 (snippets), recharts (ledger charts), cmdk (⌘K), date-fns, DOMPurify,
   jszip (vault downloads).
-- supabase-js 2; vite-plugin-pwa (autoUpdate).
+- supabase-js 2; vite-plugin-pwa (autoUpdate); Vitest 3 (dev).
 - **npm only** (`package-lock.json`; no bun/yarn/pnpm). Node 20 in `.nvmrc` and CI; `engines` requires
   Node ≥18 / npm ≥9, enforced by `.npmrc` `engine-strict=true`.
 
@@ -46,13 +46,23 @@ npm run dev            # http://localhost:8080 (host "::")
 npm run typecheck      # tsc --noEmit -p tsconfig.app.json
 npm run build          # typecheck, then vite build → dist/
 npm run lint           # eslint
+npm test               # Vitest: src/**/*.test.ts + supabase/functions/**/*.test.ts
 npm run test:insights  # assertion script for lib/media-insights + lib/media-progress
 npm run preview        # serve dist/
+npm run edge:dev       # the media-search edge function locally in Deno on 127.0.0.1:8787 (PROD database)
+npm run link:dry-run   # Media v2 link proposals from a local export; writes nothing (backups/link-dry-run/)
 ```
+
+Local edge dev: run `edge:dev`, then `VITE_MEDIA_SEARCH_URL=http://127.0.0.1:8787 npm run dev` (process env
+only; agents never create or read `.env*` files). The override is **dev-builds only** (`import.meta.env.DEV`
+folds it away in production). The local function reads the production database but never writes the shared
+caches (`EDGE_CACHE_WRITES=0`; opt in with `EDGE_DEV_CACHE_WRITES=1`). Writes made through the app
+(progress, links, History) are real production writes. Behind the office proxy, start it with
+`DENO_TLS_CA_STORE=mozilla,system`.
 
 Maintenance scripts (`backfill:*`, `backup:media`, `audit:coverage`, `smoke:apis`) are described in `README.md`.
 
-**Done means** `npm run build`, `npm run lint` (zero errors) and `npm run test:insights` all pass —
+**Done means** `npm run build`, `npm run lint` (zero errors), `npm test` and `npm run test:insights` all pass —
 what CI runs (`.github/workflows/ci.yml`, GitHub Actions, on push to `main` and on PRs), plus an esbuild
 parse of the edge function.
 - The existing lint warnings are known: `react-hooks/exhaustive-deps` on deliberate mount-only effects
@@ -60,8 +70,9 @@ parse of the edge function.
   adding deps (that's how refetch loops happen).
 - Bare `tsc --noEmit` is a **false green**: root `tsconfig.json` has `files: []`. Use `npm run typecheck`.
   `tsconfig.app.json` is loose (`strict: false`).
-- There is no test framework. The test script is plain `tsx` with hand-rolled asserts. Vitest for the
-  `lib/*` data layer is the one open backlog item; set it up explicitly if you add it.
+- Vitest (`vitest.config.ts`, node environment, `@/` alias) covers the pure Media v2 logic
+  (`lib/__tests__/`) and the edge function's `adult.ts`. `test:insights` is still a plain `tsx` script.
+  Tests import pure modules only; stub the Supabase client, never hit the network.
 
 ## Environment
 
@@ -85,7 +96,7 @@ src/
   lib/                    data access (one module per feature) + pure helpers
   integrations/supabase/  client.ts (the only client) + types.ts
 supabase/                 config.toml, functions/media-search/, migrations/
-scripts/                  tsx maintenance scripts; __tests__/ holds the insights test
+scripts/                  tsx maintenance scripts; __tests__/ holds the insights test; edge-dev/ the local edge server
 deploy-edge-function.sh   links the project, deploys media-search, sets its secrets
 ```
 
@@ -93,14 +104,19 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
 
 - The schema is `supabase/migrations/*.sql`, applied **by hand in the Supabase SQL editor**, in filename
   order: `00_baseline_schema` (the former 01–19, consolidated 2026-08-14), `20_data_cleanup`,
-  `21_commands`, `22_security_lint`, `22_wishlist`, `23_work_projects`. There is no migration runner;
-  don't use `supabase db push` (two files share the `22_` prefix). **Next new file: `24_*.sql`.**
-- All six are live on production (confirmed by the owner, 2026-08-20).
-- **Re-run safety:** `21`, `22_security_lint`, `22_wishlist` and `23` are idempotent. **Don't re-run
-  `00` or `20`**: `00` fails with "policy already exists", and `20`'s orphan-tag cleanup predates
-  `work_project_tags`, so it would delete tags used only by work projects.
-- **Known limitation:** `00` can't currently bootstrap an empty project, and no SQL adds `notes` to the
-  realtime publication (see `docs/BACKLOG.md`).
+  `21_commands`, `22_security_lint`, `22_wishlist`, `23_work_projects`, `24_share_owner_check`,
+  `25_calendar_events_fixes`, `26_tag_usage_triggers`, `27_notes_realtime`, `28_media_source_links`.
+  There is no migration runner; don't use `supabase db push` (two files share the `22_` prefix). **Next new file: `29_*.sql`**, whose contents are
+  already scoped in `docs/media-v2/PLAN.md` § F (import map, bulk journal, link proposals, reader-latest
+  columns, Dropped / On Hold). Write it to that scope.
+- All of them are live on production (24–27 with fix batch 1; 28 on 2026-09-28, ahead of the Media v2
+  code that uses it).
+- **Re-run safety:** `21` onwards are all idempotent. **Don't re-run `00` or `20`**: `00` fails with
+  "policy already exists" (and, if forced, would re-create `ledger_buckets`), and `20`'s orphan-tag
+  cleanup predates `work_project_tags`, so it would delete tags used only by work projects. `24` leaves
+  its clean-up DELETE commented out on purpose. `00` builds a fresh project since the 2026-09-28 fix.
+- **Migrations only add** (Media v2 rule): no DROP, no bulk rewrite of user rows, and a backup
+  (`backup:media` + a Settings → Data export) before any bulk write.
 - `src/integrations/supabase/types.ts` is generated, then hand-edited; update it with every schema change.
 - Every user table is RLS-scoped to `auth.uid() = user_id`; client queries filter by the signed-in user
   where the existing code does.
@@ -142,8 +158,9 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
 - **Tags:** negative tag ids are unsaved placeholders — persist with `createTag`, then the entity's
   `set<Entity>Tags` helper (note, task, media, prompt, snippet, work project).
 - **Adding a user table** means adding it to the backup list in `settings/DataSection.tsx`
-  (`EXPORT_TABLES`, plus its FK remaps).
-- **Pure modules** (`media-insights`, `media-progress`, `secret-mask`, `recipe-parse`, `pantry-match`)
+  (`EXPORT_TABLES`) and its FK remaps in `lib/restore.ts`.
+- **Pure modules** (`media-insights`, `media-progress`, `media-match`, `cover-medium`, `title-match`,
+  `secret-mask`, `recipe-parse`, `pantry-match`)
   must not import the Supabase client — it pulls in `import.meta.env` and breaks the `tsx` test.
 - **localStorage** holds UI preferences; guard every access in try/catch. Key list: `context/frontend.md`.
 - **Big pages** (MediaTracker, Library, Notes) mix fetching, state and JSX: extract when making
@@ -155,7 +172,8 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
    `update_shared_note(...)` (SECURITY DEFINER; the share UUID is the credential, so anon may call
    them). `shared_notes` is owner-only and recipients can't read `notes`. Don't turn it back into a table query.
 2. **The edge function verifies JWTs** (`verify_jwt = true` in `supabase/config.toml`; the setting is
-   sticky server-side, which is why it lives there) and rejects any role but `authenticated`. Call it
+   sticky server-side, which is why it lives there) and accepts only a signed-in user's JWT or the
+   service-role key (the scripts). Call it
    through `mediaSearchGet` in `lib/edge-function.ts`; a bare `fetch()` gets a 401. TMDB, Wikidata and
    Fanart lookups go through it so their keys stay server-side.
 3. **`media_metadata` is a shared, cross-tenant cache** (no `user_id`; upsert on `title,type`). Any
@@ -182,20 +200,44 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
 12. **Notes autosave**: 800 ms debounce, flushed on note switch, `visibilitychange` and `beforeunload`;
     a realtime channel on `notes` (filtered by `user_id`) syncs tabs and must be removed on unmount.
 13. **Backup and restore** (Settings → Data): the JSON export covers every user table, paged past the
-    1000-row cap. **Restore is known-broken** for ledger entries, subscriptions and categories (see
-    `docs/BACKLOG.md`); Vault and `user_preferences` are deliberately never restored.
+    1000-row cap (`lib/fetch-all.ts`). Restore (`lib/restore.ts`) inserts new rows, remaps FKs and maps
+    natural-key clashes onto existing rows; it never updates or deletes. `media_tracker` has no natural key,
+    so restoring into a live account **duplicates every title**: the backup is a disaster floor, not an
+    undo (bulk Media writes get their Undo from `media_bulk_journal`, migration 29). Vault and
+    `user_preferences` are deliberately never restored.
+14. **Media v2: user-owned vs source-owned.** `media_tracker` holds what the user owns (`title` is the
+    display name, plus type, status, rating, progress, tags, `platform`, `resume_url`, `cover_pinned`);
+    linking and refresh never write those. `media_source_meta` holds what the source knows, keyed
+    `(source, source_id)`, and **only the edge function writes it** (no client write policies; writes
+    revoked). `media_metadata` stays as the legacy shared cache for unlinked entries.
+15. **`media_progress_log` is append-only.** One writer (`hooks/media/useProgressMutation.ts`):
+    compare-and-swap UPDATE first, then a separate log insert. A failed insert never blocks or rolls
+    back progress. Undo writes a `kind = 'undo'` row and never deletes one. No UPDATE / DELETE grants.
+16. **`cover_pinned`** means "keep my cover" (pinned with a null cover means "no cover wanted"). Every
+    cover writer (linking, refresh, sweeps, bulk refresh) must skip a pinned cover.
+17. **Media v2 edge actions are not deployed** (as of 2026-09-29): `action=search|detail`,
+    `adult.ts` and the 2100 ms AniList pacing exist only on `media-v2`, and ship in one redeploy with
+    Phase 1. Don't describe them as live; `media-v2` must not merge to `main` before that redeploy.
+    There is no batch `resolve` action (removed); Phase 2 loops `action=search` at a client pace.
+18. **Media roadmap is U0–U5, scope frozen** (2026-09-29): one writer per field, cover priority, entry
+    points and migration 29 are in `docs/media-v2/PLAN.md` ("Re-cut 2026-09-29"). U6 and the other
+    later ideas are parked in `docs/BACKLOG.md`; don't pull them forward.
+19. **Tachimanga backups are personal data.** Docs, commits, tests and fixtures describe the import
+    feature only: never a title, count or other detail from his backup (the repo is public). Keep
+    backups and exports in gitignored `backups/`.
 
 ## Decided — don't re-litigate
 
-- **2026-08-20 backlog triage:** every proposal was declined except Vitest smoke tests for `lib/*`. The
+- **2026-08-20 backlog triage:** every proposal was declined except Vitest smoke tests for `lib/*` (the
+  runner landed with Media v2). The
   declined list is in `docs/BACKLOG.md` — don't re-propose those items.
 - **2026-08-20 TMDB key:** `381f2d0e…`, committed in `aea34a8`, stays readable in git history. The owner
   chose not to rotate it (worst case: someone burns free-tier TMDB quota). `deploy-edge-function.sh`
   reads `TMDB_API_KEY` from the environment, and `ALLOWED_ORIGINS` is set on the deployed function.
 - **2026-08 security hardening** (share-link policies, unchecked `p_user_id` in the definer RPCs) was
   confirmed closed on production on 2026-08-14. `docs/audit/AUDIT_ONE_SHOT.sql` re-checks the live
-  database as one statement (the SQL editor shows only the last result set). **Caveat: its section 13
-  still queries the dropped `ledger_buckets`, so the whole query fails until that section is removed.**
+  database as one statement (the SQL editor shows only the last result set). Its section 13 now checks
+  the `ledger_buckets` retirement through the catalog, so the statement runs again.
 
 ## Docs
 
@@ -203,3 +245,4 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
 - `context/frontend.md` — routes → pages → lib → tables, components, hooks, theming, storage keys, build.
 - `context/backend.md` — tables, RPCs, triggers, Storage, realtime, edge function, migrations, scripts.
 - `docs/BACKLOG.md` — open items, known limitations, declined ideas.
+- `docs/media-v2/` — `PLAN.md` (design and phases), `PHASE1-BRIEF.md`, `HANDOFF.md` (live state).
