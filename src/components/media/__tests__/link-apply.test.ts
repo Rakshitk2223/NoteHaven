@@ -92,7 +92,11 @@ describe('applyLinks (Approve for Link your library)', () => {
   it('passes "keep my cover" through, so the cover stays', async () => {
     tracker.set(1, base(1));
     await applyLinks([item(1, { keepCover: true })], { link: fakeLink as never });
-    expect(fakeLink).toHaveBeenCalledWith(1, cand, { keepCover: true });
+    expect(fakeLink).toHaveBeenCalledWith(1, cand, expect.objectContaining({
+      keepCover: true,
+      // The row as read, for linkEntry's own compare-and-swap.
+      expect: { title: '[audit] 1', type: 'Manhwa', link_status: 'unlinked', cover_pinned: false, cover_image: 'https://mine/c.jpg' },
+    }));
     expect(tracker.get(1)!.cover_image).toBe('https://mine/c.jpg');
   });
 
@@ -161,5 +165,14 @@ describe('applyLinks (Approve for Link your library)', () => {
     const seen: string[] = [];
     await applyLinks([item(1), { ...item(2), candidate: { source: 'anilist', source_id: '8', title: 'Work', cover: 'https://src/c.jpg' } as never }], { link: fakeLink as never }, (d, t) => seen.push(`${d}/${t}`));
     expect(seen).toEqual(['0/2', '1/2', '2/2']);
+  });
+
+  it('U3-7: a row that changed mid-link comes back "changed" → counted as skipped, not failed, nothing journaled', async () => {
+    tracker.set(1, base(1));
+    const changed = vi.fn(async () => ({ ok: false as const, reason: 'changed' as const }));
+    const r = await applyLinks([item(1)], { link: changed as never });
+    expect(r).toMatchObject({ linked: 0, skipped: 1, failed: 0 });
+    expect(journal).toHaveLength(0);
+    expect(decided).toEqual([]);
   });
 });

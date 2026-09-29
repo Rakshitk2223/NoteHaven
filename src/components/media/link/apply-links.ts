@@ -82,8 +82,16 @@ export async function applyLinks(
         }
         // One work, one title: never link a second title to it.
         if (await workTakenElsewhere(it.mediaId, it.candidate)) { out.skipped += 1; continue; }
-        const res = await deps.link(it.mediaId, it.candidate, { keepCover: !!it.keepCover });
-        if (res.ok === false) { out.failed += 1; continue; }
+        // linkEntry re-checks the row as we just read it inside its own write (backend's CAS):
+        // a change mid-fetch → 'changed', counted as a skip, never a failure.
+        const res = await deps.link(it.mediaId, it.candidate, {
+          keepCover: !!it.keepCover,
+          expect: {
+            title: before.title, type: before.type, link_status: before.link_status,
+            cover_pinned: !!before.cover_pinned, cover_image: (before.cover_image as string | null) ?? null,
+          },
+        });
+        if (res.ok === false) { if (res.reason === 'changed') out.skipped += 1; else out.failed += 1; continue; }
         const after = await readRow(it.mediaId);
         if (!after) { out.failed += 1; continue; }
         const b: Record<string, unknown> = {};
