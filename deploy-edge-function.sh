@@ -52,8 +52,10 @@ echo ""
 # a public, unauthenticated proxy that holds the service-role key — anyone could
 # write to media_metadata and burn the TMDB quota. The client sends its session
 # token (lib/edge-function.ts mediaSearchGet), so signed-in users are unaffected.
+# --use-api bundles server-side, so Docker doesn't need to be running. The
+# function's settings (verify_jwt = true) come from supabase/config.toml.
 echo "📦 Deploying media-search edge function..."
-supabase functions deploy media-search
+supabase functions deploy media-search --use-api
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to deploy function"
@@ -63,7 +65,9 @@ fi
 echo "✅ Function deployed successfully!"
 echo ""
 
-# Set environment variables
+# Set environment variables. Each secret is set ONLY when its variable is
+# exported in this shell; an unset one is left exactly as it is on the server
+# (never cleared). Values are never echoed.
 # SECURITY: never hard-code secrets here. The previously-committed TMDB key is
 # still readable in git history; not rotating it is an accepted risk (decided
 # 2026-08-20, worst case is free-tier quota). Provide the key via your
@@ -71,8 +75,8 @@ echo ""
 #   export TMDB_API_KEY=your_new_key      (and optionally FANART_API_KEY=...)
 echo "🔧 Setting environment variables..."
 if [ -z "$TMDB_API_KEY" ]; then
-    echo "⚠️  TMDB_API_KEY not set in environment — skipping (movies/series enrichment + poster fallback won't work until set)."
-    echo "    Run:  export TMDB_API_KEY=your_new_key  &&  ./deploy-edge-function.sh"
+    echo "ℹ️  TMDB_API_KEY not exported here, so the server's value is left unchanged (check: supabase secrets list)."
+    echo "    To change it:  export TMDB_API_KEY=your_new_key  &&  ./deploy-edge-function.sh"
 else
     supabase secrets set TMDB_API_KEY="$TMDB_API_KEY"
     echo "✅ TMDB_API_KEY set"
@@ -87,7 +91,7 @@ if [ -n "$ALLOWED_ORIGINS" ]; then
     supabase secrets set ALLOWED_ORIGINS="$ALLOWED_ORIGINS"
     echo "✅ ALLOWED_ORIGINS set"
 else
-    echo "⚠️  ALLOWED_ORIGINS not set — CORS stays open to '*'. Set it for production."
+    echo "ℹ️  ALLOWED_ORIGINS not exported here, so the server's value is left unchanged (if it was never set, CORS is '*')."
 fi
 echo ""
 
