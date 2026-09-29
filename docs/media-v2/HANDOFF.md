@@ -92,8 +92,10 @@ VITE_MEDIA_SEARCH_URL=http://127.0.0.1:8787 npm run dev     # terminal 2: app on
 npm test                                                    # Vitest
 npm run build && npm run lint                               # 0 lint errors is the bar
 ```
-The `VITE_MEDIA_SEARCH_URL` override only works in dev builds. The local edge uses PROD data, so cache
-writes are real.
+The `VITE_MEDIA_SEARCH_URL` override only works in dev builds. The local edge reads PROD data but, since
+`e6916aa`, never writes the shared caches (`EDGE_CACHE_WRITES=0`; opt in with `EDGE_DEV_CACHE_WRITES=1`).
+Progress, links and History written through the app are still real prod writes. Behind the office proxy,
+start it with `DENO_TLS_CA_STORE=mozilla,system`.
 
 ## Finish sequence (Phase 1 ship)
 1. Finish A2, then A3, then the full browser gate (the plan's "Definition of done: NO HOLES").
