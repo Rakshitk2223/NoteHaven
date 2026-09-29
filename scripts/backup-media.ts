@@ -70,9 +70,19 @@ const TABLES = [
   'media_import_map', 'media_link_proposals', 'media_bulk_journal',
 ] as const;
 
+// Migration-29 tables don't exist until he pastes 29, and that's "not set up
+// yet", not a failed backup: skipped with a note. Every other table still
+// fails loudly. Same codes as isMissingTableError (src/lib/work.ts) and
+// isNotSetUp (src/lib/restore.ts); copied because this script can't import
+// src/ (the @/ alias and the app's Supabase client).
+const NOT_YET_MIGRATED = new Set(['media_import_map', 'media_link_proposals', 'media_bulk_journal']);
+const isNotSetUp = (table: string, error: { code?: string } | null) =>
+  NOT_YET_MIGRATED.has(table) && (error?.code === 'PGRST205' || error?.code === '42P01');
+
 const PAGE = 1000;
 
-async function dumpTable(table: string): Promise<Record<string, unknown>[]> {
+/** Every row, or null when the table isn't set up yet (see NOT_YET_MIGRATED). */
+async function dumpTable(table: string): Promise<Record<string, unknown>[] | null> {
   const rows: Record<string, unknown>[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
@@ -80,6 +90,7 @@ async function dumpTable(table: string): Promise<Record<string, unknown>[]> {
       .select('*')
       .range(from, from + PAGE - 1);
 
+    if (error && from === 0 && isNotSetUp(table, error)) return null;
     if (error) throw new Error(`${table}: ${error.message}`);
     if (!data || data.length === 0) break;
 
@@ -119,6 +130,11 @@ async function main() {
   for (const table of TABLES) {
     const expected = await serverCount(table);
     const rows = await dumpTable(table);
+    if (rows === null) {
+      (manifest.tables as Record<string, unknown>)[table] = { not_set_up: true };
+      console.log(`  – ${table}: not set up yet (migration 29 not applied), skipped`);
+      continue;
+    }
     const json = JSON.stringify(rows, null, 2);
     const file = `${table}.json`;
     writeFileSync(resolve(dir, file), json);

@@ -1,12 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { restoreBackup, HISTORY_TABLE, IMPORT_MAP_TABLE, type RestoreClient } from '../restore';
+import { restoreBackup, isNotSetUp, HISTORY_TABLE, IMPORT_MAP_TABLE, type RestoreClient } from '../restore';
 
 type Row = Record<string, unknown>;
 
 // In-memory stand-in: every insert gets fresh ids (like the real identity
 // columns) and is recorded per table, one entry per request. `existing` rows
 // answer the account lookups (select → eq → order… → range).
-function fakeClient(failOn?: string, existing: Record<string, Row[]> = {}, failLookup?: string) {
+function fakeClient(
+  failOn?: string, existing: Record<string, Row[]> = {}, failLookup?: string,
+  errorAs: { message: string; code?: string } = { message: 'boom' },
+) {
   const calls: Record<string, Row[][]> = {};
   let nextId = 1000;
   const client: RestoreClient = {
@@ -16,14 +19,14 @@ function fakeClient(failOn?: string, existing: Record<string, Row[]> = {}, failL
           eq: () => chain,
           order: () => chain,
           range: (from: number, to: number) => Promise.resolve(table === failLookup
-            ? { data: null, error: new Error('lookup boom') }
+            ? { data: null, error: errorAs.code ? errorAs : new Error('lookup boom') }
             : { data: (existing[table] ?? []).slice(from, to + 1), error: null }),
         };
         return chain;
       },
       insert(rows: Row[]) {
         (calls[table] ??= []).push(rows);
-        const error = table === failOn ? { message: 'boom' } : null;
+        const error = table === failOn ? errorAs : null;
         const created = error ? null : rows.map(() => ({ id: nextId++ }));
         const done = Promise.resolve({ data: null, error });
         return Object.assign(done, { select: () => Promise.resolve({ data: created, error }) });
@@ -137,5 +140,42 @@ describe('restoreBackup · media_import_map (migration 29)', () => {
     expect(insertFail.failed).toEqual([`${IMPORT_MAP_TABLE} (boom)`]);
     const lookupFail = await restoreBackup(fakeClient(undefined, {}, IMPORT_MAP_TABLE).client, 'me', backup);
     expect(lookupFail.failed).toEqual([`${IMPORT_MAP_TABLE} (lookup boom)`]);
+  });
+});
+
+describe('not set up yet (migration 29 not pasted)', () => {
+  const MISSING = { message: "Could not find the table 'public.media_import_map' in the schema cache", code: 'PGRST205' };
+
+  it('isNotSetUp: only a missing migration-29 table counts; everything else stays a failure', () => {
+    expect(isNotSetUp('media_import_map', { code: 'PGRST205' })).toBe(true);
+    expect(isNotSetUp('media_link_proposals', { code: '42P01' })).toBe(true);
+    expect(isNotSetUp('media_bulk_journal', { code: 'PGRST205' })).toBe(true);
+    expect(isNotSetUp('media_tracker', { code: 'PGRST205' })).toBe(false);      // a core table missing is loud
+    expect(isNotSetUp('media_progress_log', { code: '42P01' })).toBe(false);
+    expect(isNotSetUp('media_import_map', { code: '42501' })).toBe(false);      // permission denied is loud
+    expect(isNotSetUp('media_import_map', new Error('network'))).toBe(false);
+    expect(isNotSetUp('media_import_map', null)).toBe(false);
+  });
+
+  const backup = { media_tracker: [{ id: 7, title: 'A' }], [IMPORT_MAP_TABLE]: [mapRow(7, KEY('a'))] };
+
+  it('restore skips the import map when the lookup finds no table', async () => {
+    const res = await restoreBackup(fakeClient(undefined, {}, IMPORT_MAP_TABLE, MISSING).client, 'me', backup);
+    expect(res.failed).toEqual([]);
+    expect(res.skipped).toEqual([IMPORT_MAP_TABLE]);
+    expect(res.inserted).toBe(1); // the title still restored
+  });
+
+  it('restore skips the import map when the insert finds no table (42P01)', async () => {
+    const res = await restoreBackup(fakeClient(IMPORT_MAP_TABLE, {}, undefined, { message: 'relation does not exist', code: '42P01' }).client, 'me', backup);
+    expect(res.failed).toEqual([]);
+    expect(res.skipped).toEqual([IMPORT_MAP_TABLE]);
+  });
+
+  it('an export from before 29 (no import-map array) restores cleanly', async () => {
+    const { client, calls } = fakeClient();
+    const res = await restoreBackup(client, 'me', { media_tracker: [{ id: 7, title: 'A' }] });
+    expect(res).toMatchObject({ failed: [], skipped: [], inserted: 1 });
+    expect(calls[IMPORT_MAP_TABLE]).toBeUndefined();
   });
 });

@@ -70,6 +70,24 @@ const HISTORY_CHUNK = 1000;
 // account already has is skipped: the existing mapping points at a live row.
 export const IMPORT_MAP_TABLE = 'media_import_map';
 
+// Tables from a migration that may not be pasted yet (Phase 1 can go live
+// before 29). A missing one is "not set up yet": skipped with a note on export
+// and restore, never a failure. Every other table's failure stays loud.
+export const NOT_YET_MIGRATED: ReadonlySet<string> = new Set([
+  'media_import_map', 'media_link_proposals', 'media_bulk_journal',
+]);
+
+/**
+ * True when `error` says `table` doesn't exist AND it's one of the tables that
+ * legitimately may not (PostgREST PGRST205 / Postgres 42P01, the same codes as
+ * isMissingTableError in lib/work.ts, which can't be imported here because it
+ * pulls in the Supabase client and this module must stay pure).
+ */
+export function isNotSetUp(table: string, error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return NOT_YET_MIGRATED.has(table) && (code === 'PGRST205' || code === '42P01');
+}
+
 // Deliberately NOT restored: vault_folders / vault_files (the rows would point
 // at Storage objects this backup does not contain, so a "restored" vault would
 // be a tree of dead links), user_preferences (device-local layout), and
@@ -94,6 +112,8 @@ export interface RestoreResult {
   reused: number;
   /** "table (reason)" for every table or link set that failed. */
   failed: string[];
+  /** Tables skipped because this database doesn't have them yet (NOT_YET_MIGRATED). */
+  skipped: string[];
 }
 
 const keyOf = (row: Row, cols: readonly string[]) => cols.map((c) => String(row[c] ?? '')).join('\u0000');
@@ -106,6 +126,7 @@ export async function restoreBackup(
   let inserted = 0;
   let reused = 0;
   const failed: string[] = [];
+  const skipped: string[] = [];
   // old id -> new id, per table, so children and tag links can be rewritten.
   const idMap: Record<string, Map<Id, Id>> = {};
 
@@ -236,6 +257,7 @@ export async function restoreBackup(
         const chunk = fresh.slice(i, i + HISTORY_CHUNK);
         const { error } = await client.from(IMPORT_MAP_TABLE).insert(chunk);
         if (error) {
+          if (isNotSetUp(IMPORT_MAP_TABLE, error)) { skipped.push(IMPORT_MAP_TABLE); break; }
           console.error(`Import failed for ${IMPORT_MAP_TABLE}:`, error);
           failed.push(`${IMPORT_MAP_TABLE} (${error.message})`);
           break;
@@ -243,7 +265,8 @@ export async function restoreBackup(
         inserted += chunk.length;
       }
     } catch (error) {
-      failed.push(`${IMPORT_MAP_TABLE} (${error instanceof Error ? error.message : 'lookup failed'})`);
+      if (isNotSetUp(IMPORT_MAP_TABLE, error)) skipped.push(IMPORT_MAP_TABLE);
+      else failed.push(`${IMPORT_MAP_TABLE} (${error instanceof Error ? error.message : 'lookup failed'})`);
     }
   }
 
@@ -264,5 +287,5 @@ export async function restoreBackup(
     }
   }
 
-  return { inserted, reused, failed };
+  return { inserted, reused, failed, skipped };
 }

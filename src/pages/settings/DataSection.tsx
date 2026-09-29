@@ -9,7 +9,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { dateToYMD } from '@/lib/date-utils';
 import { IMAGE_CACHE_PREFIXES } from '@/lib/image-cache';
-import { restoreBackup } from '@/lib/restore';
+import { restoreBackup, isNotSetUp } from '@/lib/restore';
 import { SettingsSection, SettingRow } from '@/components/settings/primitives';
 
 // Full backup — every user-owned table.
@@ -125,10 +125,14 @@ export function DataSection() {
         email: user.email,
       };
       const failed: string[] = [];
+      // Tables this database doesn't have yet (migration 29 not pasted): left
+      // out of the file, not written as [], so it never claims "no rows".
+      const notSetUp: string[] = [];
 
       EXPORT_TABLES.forEach((t, i) => {
         const r = results[i];
         if (r.status === 'fulfilled') out[t] = r.value;
+        else if (isNotSetUp(t, r.reason)) notSetUp.push(t);
         else { out[t] = []; failed.push(t); }
       });
       EXPORT_JUNCTIONS.forEach((t, i) => {
@@ -155,7 +159,8 @@ export function DataSection() {
           variant: 'destructive',
         });
       } else {
-        toast({ title: 'Export ready', description: `Downloaded notehaven_export_${dateToYMD(new Date())}.json` });
+        const note = notSetUp.length ? ` Skipped ${notSetUp.join(', ')} (not set up yet).` : '';
+        toast({ title: 'Export ready', description: `Downloaded notehaven_export_${dateToYMD(new Date())}.json.${note}` });
       }
     } catch (e) {
       toast({ title: 'Export failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' });
@@ -194,17 +199,18 @@ export function DataSection() {
       const user = session?.user;
       if (!user) throw new Error('Not authenticated');
 
-      const { inserted, reused, failed } = await restoreBackup(supabase, user.id, pendingImport);
+      const { inserted, reused, failed, skipped } = await restoreBackup(supabase, user.id, pendingImport);
       const matched = reused ? ` ${reused} matched existing item${reused === 1 ? '' : 's'}.` : '';
+      const notSetUp = skipped.length ? ` Skipped ${skipped.join(', ')} (not set up yet).` : '';
 
       if (failed.length) {
         toast({
           title: inserted ? 'Import partly failed' : 'Import failed',
-          description: `${inserted} item${inserted === 1 ? '' : 's'} added.${matched} Could not import: ${failed.join('; ')}`,
+          description: `${inserted} item${inserted === 1 ? '' : 's'} added.${matched}${notSetUp} Could not import: ${failed.join('; ')}`,
           variant: 'destructive',
         });
       } else {
-        toast({ title: 'Import complete', description: `${inserted} item${inserted === 1 ? '' : 's'} added.${matched}` });
+        toast({ title: 'Import complete', description: `${inserted} item${inserted === 1 ? '' : 's'} added.${matched}${notSetUp}` });
       }
     } catch (e) {
       toast({ title: 'Import failed', description: e instanceof Error ? e.message : 'Failed', variant: 'destructive' });
