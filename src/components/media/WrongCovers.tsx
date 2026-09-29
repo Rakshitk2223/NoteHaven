@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { X } from 'lucide-react';
+import { Image as ImageIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { undoBatch } from '@/lib/media-bulk';
+import { holdReload } from '@/lib/app-update';
 import { loadWrongCovers, setCover, setCovers, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
 import { useBackupGate } from './import/useBackupGate';
 import { BackupNote } from './import/BackupNote';
@@ -40,6 +41,8 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
   // "Fix all" is a bulk write: the same backup gate as the import and linking.
   const gate = useBackupGate();
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  // An app update never reloads mid-fix (lib/app-update).
+  useEffect(() => { holdReload('media-cover-fix', !!busy); return () => holdReload('media-cover-fix', false); }, [busy]);
   const q = useQuery({ queryKey: ['mediaWrongCovers'], queryFn: loadWrongCovers, enabled: open, staleTime: 60 * 1000 });
   const items = q.data ?? [];
   const fixable = items.filter((w) => w.suggestion);
@@ -109,25 +112,31 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
             <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border bg-card/60">
               {items.map((w) => (
                 <li key={w.row.id} className={cn('flex items-center gap-3 px-3 py-2', busy === w.row.id && 'opacity-60')}>
-                  <span className="relative h-16 w-11 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border" title="Now">
+                  <span className="relative h-14 w-10 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border" title="Now">
                     <CoverArt src={w.row.cover_image} title={w.row.title} initials={1} letterClassName="text-sm" />
                   </span>
-                  <span aria-hidden="true" className="text-muted-foreground">→</span>
-                  <span className="relative h-16 w-11 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border" title="Suggested">
-                    <CoverArt src={w.suggestion?.url ?? null} title={w.row.title} initials={1} letterClassName="text-sm" />
-                  </span>
+                  {/* The → preview only when there's something to change to. */}
+                  {w.suggestion && (
+                    <>
+                      <span aria-hidden="true" className="-mx-1 text-muted-foreground">→</span>
+                      <span className="relative h-14 w-10 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border" title="Suggested">
+                        <CoverArt src={w.suggestion.url} title={w.row.title} initials={1} letterClassName="text-sm" />
+                      </span>
+                    </>
+                  )}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-foreground">{w.row.title}</span>
-                    <span className="block text-xs text-warning">{PROBLEM[w.problem]}</span>
+                    <span className="line-clamp-2 break-words text-sm font-medium leading-snug text-foreground">{w.row.title}</span>
+                    <span className="block truncate text-xs text-warning">{PROBLEM[w.problem]}</span>
                   </span>
                   {w.suggestion ? (
-                    <Button variant="outline" className="h-11 flex-shrink-0" disabled={!!busy}
+                    <Button variant="outline" className="h-11 flex-shrink-0 px-3" disabled={!!busy}
                       onClick={() => void run(w.row.id, () => setCover(w.row.id, w.suggestion!.url, w.suggestion!.origin, { expect: w.row.cover_image ?? null }), 1)}>
                       Use this
                     </Button>
                   ) : (
-                    <Button variant="ghost" className="h-11 flex-shrink-0" disabled={!!busy} onClick={() => onChangeCover(w.row.id)}>
-                      Change cover…
+                    <Button variant="ghost" size="icon" className="h-11 w-11 flex-shrink-0" disabled={!!busy}
+                      onClick={() => onChangeCover(w.row.id)} aria-label={`Change cover for ${w.row.title}`} title="Change cover…">
+                      <ImageIcon className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   )}
                 </li>

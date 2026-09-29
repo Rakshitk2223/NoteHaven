@@ -1,10 +1,11 @@
 // Approve for "Link your library" (the auto-matched list and the queue's picks):
 // the shared backup gate, then applyLinks, then a result toast with Undo.
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/components/ui/use-toast';
 import { undoBatch } from '@/lib/media-bulk';
+import { holdReload } from '@/lib/app-update';
 import { useBackupGate } from '../import/useBackupGate';
 import { applyLinks, type LinkApproval } from './apply-links';
 import type { LinkRun } from './useLinkRun';
@@ -17,6 +18,8 @@ export function useLinkApprove(run: LinkRun) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  // An app update never reloads mid-linking (lib/app-update).
+  useEffect(() => { holdReload('media-link-approve', busy); return () => holdReload('media-link-approve', false); }, [busy]);
 
   const refreshAll = useCallback(async () => {
     for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] });

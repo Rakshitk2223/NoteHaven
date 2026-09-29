@@ -15,6 +15,9 @@ export default defineConfig(({ mode }) => ({
     mode === 'development' && componentTagger(),
     VitePWA({
       registerType: 'autoUpdate',
+      // The app registers the SW itself (src/lib/app-update.ts: update checks + a
+      // safe reload); the injected registerSW.js only registered it and never updated.
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'NoteHaven',

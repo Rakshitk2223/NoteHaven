@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/components/ui/use-toast';
 import { undoBatch } from '@/lib/media-bulk';
+import { holdReload } from '@/lib/app-update';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { parseReaderBackup } from '@/lib/tachimanga/parse';
@@ -74,6 +75,8 @@ export default function ReaderImportDialog({ file, onClose, phone }: ReaderImpor
   // Backup gate: Approve waits for a COMPLETE in-app full export in this session (the shared gate).
   const gate = useBackupGate();
   const [applying, setApplying] = useState(false);
+  // An app update never reloads mid-import (lib/app-update).
+  useEffect(() => { holdReload('media-import', applying); return () => holdReload('media-import', false); }, [applying]);
 
   // 1. Parse in the Worker as soon as a file is picked.
   useEffect(() => {

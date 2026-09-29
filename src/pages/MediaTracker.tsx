@@ -78,10 +78,11 @@ import { HistoryView } from '@/components/media/HistoryView';
 import { SOURCE_LABEL, fetchSourceDetail, type Candidate, type MediaSource, type TrackerType } from '@/lib/media-sources';
 import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-match';
 import { latestUndoableBatch, undoBatch, type BulkKind } from '@/lib/media-bulk';
-import { IMPORT_ACCEPT, sniffFile } from '@/components/media/import/sniff';
+import { sniffFile } from '@/components/media/import/sniff';
 import { useLinkRun } from '@/components/media/link/useLinkRun';
 import { LinkBar } from '@/components/media/link/LinkBar';
 import { UpdatesView } from '@/components/media/UpdatesView';
+import { holdReload } from '@/lib/app-update';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { SOURCE_META_SLIM, detectMediaV2Schema, linkEntry, readSourceMeta, readSourceMetaBatch, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
 import { buildMetaIndex, detailToMeta, mergeMeta } from '@/components/media/source-meta';
@@ -1842,6 +1843,9 @@ const MediaTracker = () => {
     return () => document.removeEventListener('click', onClick, true);
   }, [guardLinks, navigate]);
 
+  // An app update waits while the Edit form has unsaved changes (lib/app-update).
+  useEffect(() => { holdReload('media-edit', editDirty); return () => holdReload('media-edit', false); }, [editDirty]);
+
   // Reload / closing the tab with unsaved edits gets the browser's own "Leave site?".
   useEffect(() => {
     if (!editDirty) return;
@@ -2617,8 +2621,9 @@ const MediaTracker = () => {
             ref={fileInputRef}
             type="file"
             // One Import…: a NoteHaven JSON backup, or (migration 29) a Tachimanga backup.
-            // Told apart by CONTENT, never the name (test backups travel renamed .zip on iOS).
-            accept={v2Schema.importLink ? IMPORT_ACCEPT : 'application/json,.json'}
+            // Told apart by CONTENT, never the name. No `accept` then: iOS maps it to known
+            // file types and GREYS OUT a .tmb (not one of them). A wrong file gets "Not a backup file".
+            accept={v2Schema.importLink ? undefined : 'application/json,.json'}
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];

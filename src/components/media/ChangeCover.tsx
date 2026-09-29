@@ -144,7 +144,10 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
           </div>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-          <p className="text-xs text-muted-foreground">{searched ? 'Web results included.' : 'Web search runs only if you ask.'}</p>
+          <p className="text-xs text-muted-foreground">
+            {!searched ? 'Web search runs only if you ask.'
+              : (options ?? []).some((o) => o.from === 'search') ? 'Web results included.' : 'No web results.'}
+          </p>
           <div className="flex gap-2">
             {!searched && !row.cover_pinned && (
               <Button variant="outline" className="h-11" onClick={() => void searchWeb()} disabled={searching || !!saving}>

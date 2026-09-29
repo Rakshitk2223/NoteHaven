@@ -1,12 +1,9 @@
 // Import… decides what a file IS by its first bytes, never its name: on iOS a
 // `.tmb` offers to open in Tachimanga (where a fake test backup could restore
-// over the real library), so test files travel renamed as `.zip`, and Safari
-// greys out files whose type the input doesn't list. PURE; Vitest-covered.
+// over the real library), so test files travel renamed as `.zip`; and iOS greys
+// out a .tmb for ANY accept list, so the input has none. PURE; Vitest-covered.
 
 export type ImportFormat = 'zip' | 'json' | 'unknown';
-
-/** The file input's accept list: every name and type a backup may arrive with. */
-export const IMPORT_ACCEPT = '.json,.tmb,.zip,application/json,application/zip,application/x-zip-compressed';
 
 /** Sniff the first bytes: a zip local/empty/spanned header, or JSON's first non-space character. */
 export function sniffImportFormat(head: Uint8Array): ImportFormat {

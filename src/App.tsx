@@ -1,4 +1,6 @@
 import { Toaster } from "@/components/ui/toaster";
+import { toast } from "@/components/ui/use-toast";
+import { consumeUpdatedFlag, onRouteChange } from "@/lib/app-update";
 import { useEffect, lazy, Suspense } from 'react';
 import { MotionConfig } from "framer-motion";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -92,6 +94,12 @@ const AppInner = () => {
     return () => mq?.removeEventListener?.('change', onChange);
   }, []);
   const location = useLocation();
+  // Every navigation looks for a new version (and applies a deferred one if it's safe now).
+  useEffect(() => { onRouteChange(); }, [location.pathname]);
+  // After an automatic update reload, say so once.
+  useEffect(() => {
+    if (consumeUpdatedFlag()) toast({ title: 'Updated to the latest version' });
+  }, []);
   return (
     <div key={location.pathname} className="animate-route relative z-10">
       <Suspense fallback={<RouteFallback />}>
