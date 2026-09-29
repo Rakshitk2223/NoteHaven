@@ -10,7 +10,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
 import type { MediaMeta, EpisodeDetail, SeasonInfo, CastMember } from '@/lib/media-progress';
-import { invalidateImageCache } from './image-cache';
 
 // Pure progress helpers + metadata shapes live in their own module so they can
 // be tested without the Supabase client. Re-exported here for existing callers.
@@ -109,38 +108,4 @@ export async function fetchMediaMetadataBatch(
     console.error('fetchMediaMetadataBatch error:', error);
   }
   return out;
-}
-
-/**
- * Remove a wrong cover: clears media_tracker.cover_image and the localStorage
- * image caches so the card falls back to the letter-gradient placeholder.
- */
-export async function removeCoverImage(mediaId: number): Promise<boolean> {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) return false;
-
-    // No last_activity_at bump: a cover change isn't activity, and bumping it reordered Continue.
-    const { error } = await supabase
-      .from('media_tracker')
-      .update({ cover_image: null })
-      .eq('id', mediaId)
-      .eq('user_id', user.id);
-
-    if (error) {
-      console.error('removeCoverImage error:', error);
-      return false;
-    }
-
-    // Drop the localStorage cache entry for this item. This used to poke at
-    // `media_images_v1` / `media_image_sources_v1`, which nothing has written
-    // since image-cache.ts moved to the _v2 keys — so a removed cover came
-    // straight back on the next load from the still-valid v2 entry.
-    invalidateImageCache(mediaId);
-    return true;
-  } catch (error) {
-    console.error('removeCoverImage error:', error);
-    return false;
-  }
 }

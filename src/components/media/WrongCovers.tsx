@@ -1,0 +1,126 @@
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { ToastAction } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
+import { cn } from '@/lib/utils';
+import { undoBatch } from '@/lib/media-bulk';
+import { fixWrongCovers, loadWrongCovers, setCover, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
+import { CoverArt } from './CoverArt';
+
+const PROBLEM: Record<WrongCover['problem'], string> = {
+  'wrong-medium': 'Wrong kind of art',
+  blocked: 'Won’t load here',
+  missing: 'No cover',
+};
+
+// Every query a cover change can affect.
+const TOUCHED = ['mediaItems', 'mediaRails', 'mediaWrongCovers', 'mediaBulkLatest', 'mediaUpdates'];
+
+/**
+ * "Wrong covers · N": covers that are the wrong kind of art, won't load, or are
+ * missing while a good one is known. One tap per row, or Fix all (one Undo).
+ * Rows with no good suggestion open "Change cover…". Pinned covers never show.
+ */
+export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  phone: boolean;
+  /** Open "Change cover…" for a title with no one-tap fix. */
+  onChangeCover: (id: number) => void;
+}) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<number | 'all' | null>(null);
+  const q = useQuery({ queryKey: ['mediaWrongCovers'], queryFn: loadWrongCovers, enabled: open, staleTime: 60 * 1000 });
+  const items = q.data ?? [];
+  const fixable = items.filter((w) => w.suggestion);
+
+  const report = (res: CoverWriteResult, asked: number) => {
+    for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] });
+    const skipped = asked - res.written.length;
+    toast({
+      title: res.written.length ? `Fixed ${res.written.length} cover${res.written.length === 1 ? '' : 's'}` : 'Nothing changed',
+      description: skipped ? `${skipped} skipped (pinned or changed since)` : undefined,
+      action: res.batchId && res.written.length ? (
+        <ToastAction altText="Undo cover fixes" onClick={() => {
+          void undoBatch(res.batchId!).then(() => { for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] }); });
+        }}>Undo</ToastAction>
+      ) : undefined,
+    });
+  };
+
+  const run = async (key: number | 'all', work: () => Promise<CoverWriteResult>, asked: number) => {
+    setBusy(key);
+    try { report(await work(), asked); } catch (e) {
+      toast({ title: 'Couldn’t fix covers', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => { if (!busy) onOpenChange(o); }}>
+      <SheetContent side="right" className={cn('flex flex-col gap-0 p-0 [&>button]:hidden', phone ? 'h-dvh w-full max-w-none sm:max-w-none' : 'w-full sm:max-w-2xl')}>
+        <div className={cn('flex items-start gap-3 border-b border-border px-4 py-3 sm:px-6', phone && 'pt-[calc(0.75rem+env(safe-area-inset-top))]')}>
+          <div className="min-w-0 flex-1">
+            <SheetTitle className="text-lg font-semibold text-foreground">Wrong covers</SheetTitle>
+            <SheetDescription className="text-sm text-muted-foreground">
+              Covers that are the wrong kind of art, won’t load, or are missing. Pinned covers are left alone.
+            </SheetDescription>
+          </div>
+          <Button size="icon" variant="ghost" className="h-10 w-10 flex-shrink-0" onClick={() => onOpenChange(false)} aria-label="Close" disabled={!!busy}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
+          {q.isLoading ? (
+            <div className="space-y-2" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="loading-shimmer h-20 rounded-xl" />)}</div>
+          ) : q.isError ? (
+            <div className="py-12 text-center">
+              <p className="font-medium text-foreground">Couldn’t check your covers</p>
+              <Button variant="outline" className="mt-4 h-11" onClick={() => q.refetch()}>Try again</Button>
+            </div>
+          ) : items.length === 0 ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">Every cover looks right.</p>
+          ) : (
+            <ul className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border bg-card/60">
+              {items.map((w) => (
+                <li key={w.row.id} className={cn('flex items-center gap-3 px-3 py-2', busy === w.row.id && 'opacity-60')}>
+                  <span className="relative h-16 w-11 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border" title="Now">
+                    <CoverArt src={w.row.cover_image} title={w.row.title} initials={1} letterClassName="text-sm" />
+                  </span>
+                  <span aria-hidden="true" className="text-muted-foreground">→</span>
+                  <span className="relative h-16 w-11 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border" title="Suggested">
+                    <CoverArt src={w.suggestion?.url ?? null} title={w.row.title} initials={1} letterClassName="text-sm" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">{w.row.title}</span>
+                    <span className="block text-xs text-warning">{PROBLEM[w.problem]}</span>
+                  </span>
+                  {w.suggestion ? (
+                    <Button variant="outline" className="h-11 flex-shrink-0" disabled={!!busy}
+                      onClick={() => void run(w.row.id, () => setCover(w.row.id, w.suggestion!.url, w.suggestion!.origin, { expect: w.row.cover_image ?? null }), 1)}>
+                      Use this
+                    </Button>
+                  ) : (
+                    <Button variant="ghost" className="h-11 flex-shrink-0" disabled={!!busy} onClick={() => onChangeCover(w.row.id)}>
+                      Change cover…
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {fixable.length > 1 && (
+          <div className={cn('flex justify-end gap-2 border-t border-border px-4 py-3 sm:px-6', phone && 'pb-[calc(0.75rem+env(safe-area-inset-bottom))]')}>
+            <Button variant="gradient" className="h-11" disabled={!!busy} onClick={() => void run('all', () => fixWrongCovers(fixable), fixable.length)}>
+              {busy === 'all' ? 'Fixing…' : `Fix all ${fixable.length.toLocaleString()}`}
+            </Button>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}

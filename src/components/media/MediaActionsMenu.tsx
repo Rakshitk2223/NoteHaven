@@ -1,4 +1,4 @@
-import { Edit, ImageOff, MoreVertical, Pin, RefreshCw, Replace, Trash2 } from 'lucide-react';
+import { Edit, Image as ImageIcon, ImageOff, MoreVertical, Pin, Replace, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -17,7 +17,8 @@ interface MediaActionsMenuProps {
   onEdit?: (item: MediaItem) => void;
   onFixMatch?: (item: MediaItem) => void;
   onTogglePin?: (item: MediaItem) => void;
-  onRefreshCover?: (item: MediaItem) => void;
+  /** "Change cover…" (the one cover pipeline). Hidden while the cover is pinned. */
+  onChangeCover?: (item: MediaItem) => void;
   onRemoveCover?: (item: MediaItem) => void;
   onDelete: (item: MediaItem) => void;
   className?: string;
@@ -28,14 +29,14 @@ interface MediaActionsMenuProps {
  * adds the cover and link actions (they live there only). Delete is always last,
  * behind a separator, and still confirms.
  */
-export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onTogglePin, onRefreshCover, onRemoveCover, onDelete, className }: MediaActionsMenuProps) {
+export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onTogglePin, onChangeCover, onRemoveCover, onDelete, className }: MediaActionsMenuProps) {
   const linked = item.link_status === 'linked' && !!item.source;
   // A pinned cover is kept as-is: Unpin first to refresh or remove it.
-  const canRefresh = !!onRefreshCover && !linked && !item.cover_pinned;
+  const canChange = !!onChangeCover && !item.cover_pinned;
   // Pinning nothing would lock the title coverless; "Remove cover" is the deliberate way to do that.
   // Unpin stays on any pinned title (incl. pinned + no cover) so a cover can come back.
   const canTogglePin = !!onTogglePin && (item.cover_pinned || !!hasCover);
-  const coverActions = canTogglePin || canRefresh || !!(onRemoveCover && hasCover && !item.cover_pinned);
+  const coverActions = canTogglePin || canChange || !!(onRemoveCover && hasCover && !item.cover_pinned);
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -60,9 +61,9 @@ export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onToggleP
             <Pin className="mr-2 h-4 w-4" /> {item.cover_pinned ? 'Unpin cover' : 'Pin cover'}
           </DropdownMenuItem>
         )}
-        {canRefresh && (
-          <DropdownMenuItem className="min-h-10" onSelect={() => onRefreshCover!(item)}>
-            <RefreshCw className="mr-2 h-4 w-4" /> Refresh cover
+        {canChange && (
+          <DropdownMenuItem className="min-h-10" onSelect={() => onChangeCover!(item)}>
+            <ImageIcon className="mr-2 h-4 w-4" /> Change cover…
           </DropdownMenuItem>
         )}
         {onRemoveCover && hasCover && !item.cover_pinned && (

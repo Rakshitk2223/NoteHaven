@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, laz
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Plus, Edit, Trash2, Filter, Search, Download, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, RefreshCw, Star, ArrowDownUp, Library, Clock, Compass, Sparkles } from "lucide-react";
+import { Plus, Edit, Trash2, Filter, Search, Download, LayoutGrid, List as ListIcon, Menu, MoreVertical, X, Star, ArrowDownUp, Library, Clock, Compass, Sparkles } from "lucide-react";
 import { ToastAction } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,8 +47,7 @@ import { CustomGroupBuilder } from "@/components/media/CustomGroupBuilder";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { devLog } from "@/lib/logger";
 import { dateToYMD } from "@/lib/date-utils";
-import { refreshCoverImage, isNewCover, isPinnedOutcome } from "@/lib/media-refresh";
-import { fetchMediaMetadataBatch, removeCoverImage, computeProgress, type MediaMeta } from "@/lib/media-metadata";
+import { fetchMediaMetadataBatch, computeProgress, type MediaMeta } from "@/lib/media-metadata";
 import { Progress } from "@/components/ui/progress";
 import { ContinueShelf } from "@/components/media/ContinueShelf";
 import { AiringSoon } from "@/components/media/AiringSoon";
@@ -401,6 +400,9 @@ const ReaderImportDialog = lazy(() => import('@/components/media/import/ReaderIm
 // "Needs a pick" queue: lazy, like the import.
 const LinkQueue = lazy(() => import('@/components/media/link/LinkQueue'));
 const AutoMatched = lazy(() => import('@/components/media/link/AutoMatched'));
+// The cover pipeline's two surfaces: lazy (they pull in media-cover).
+const ChangeCover = lazy(() => import('@/components/media/ChangeCover'));
+const WrongCovers = lazy(() => import('@/components/media/WrongCovers'));
 
 const BULK_KIND_LABEL: Record<BulkKind, string> = { import: 'Import', link: 'Linking', cover: 'Cover change' };
 
@@ -555,7 +557,6 @@ const MediaTracker = () => {
   const [readerFile, setReaderFile] = useState<File | null>(null);
   const { toast } = useToast();
   const [updatingIds, setUpdatingIds] = useState<Set<number>>(new Set());
-  const [isRefreshingCovers, setIsRefreshingCovers] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: number | null }>({ open: false, id: null });
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [txtExportDialogOpen, setTxtExportDialogOpen] = useState(false);
@@ -584,7 +585,6 @@ const MediaTracker = () => {
 
   // Image loading state - direct Supabase fetch
   const [imageUrls, setImageUrls] = useState<Map<number, string | null>>(new Map());
-  const [imageApiSources, setImageApiSources] = useState<Map<number, string>>(new Map());
   // Cached media metadata (synopsis, real totals, seasons, airing status, genres).
   const [metadataMap, setMetadataMap] = useState<Map<number, MediaMeta>>(hydrateMetaCache);
   const metadataAttemptedRef = useRef<Set<number>>(new Set());
@@ -683,13 +683,10 @@ const MediaTracker = () => {
       unloaded.map(item => ({ id: item.id, title: item.title, type: item.type }))
     ).then((response) => {
       const newUrlMap = new Map<number, string | null>();
-      const newSourceMap = new Map<number, string>();
       response.results.forEach(result => {
         newUrlMap.set(result.id, result.imageUrl);
-        if (result.apiSource) newSourceMap.set(result.id, result.apiSource);
       });
       setImageUrls(prev => new Map([...prev, ...newUrlMap]));
-      setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
     }).catch(err => console.error('Lazy load error:', err));
   }, [mediaItems]);
 
@@ -714,13 +711,10 @@ const MediaTracker = () => {
       initialItems.map(item => ({ id: item.id, title: item.title, type: item.type }))
     ).then((response) => {
       const newUrlMap = new Map<number, string | null>();
-      const newSourceMap = new Map<number, string>();
       response.results.forEach(result => {
         newUrlMap.set(result.id, result.imageUrl);
-        if (result.apiSource) newSourceMap.set(result.id, result.apiSource);
       });
       setImageUrls(prev => new Map([...prev, ...newUrlMap]));
-      setImageApiSources(prev => new Map([...prev, ...newSourceMap]));
     }).catch(err => console.error('Initial load error:', err));
   }, [mediaItems, imageUrls.size]);
 
@@ -1071,7 +1065,6 @@ const MediaTracker = () => {
           if (r.apiSource) sources.set(r.id, r.apiSource);
         });
         setImageUrls((prev) => new Map([...prev, ...urls]));
-        setImageApiSources((prev) => new Map([...prev, ...sources]));
       })
       .catch((err) => console.error('Needs-cover resolve error:', err));
     return () => { cancelled = true; };
@@ -1145,33 +1138,6 @@ const MediaTracker = () => {
       return n;
     });
   }, []);
-
-  const refreshSelectedCovers = useCallback(async () => {
-    if (selectedItems.length === 0 || isRefreshingCovers) return;
-    setIsRefreshingCovers(true);
-    let updated = 0;
-    let pinned = 0;
-    try {
-      for (const item of selectedItems) {
-        // Pinned covers (incl. "Remove cover") are his call: skip without searching.
-        if (item.cover_pinned) { pinned += 1; continue; }
-        const currentApi = imageApiSources.get(item.id);
-        const res = await refreshCoverImage(item.title, item.type, currentApi, item.id);
-        if (isPinnedOutcome(res)) { pinned += 1; continue; }
-        if (isNewCover(res)) {
-          updated += 1;
-          setImageUrls(prev => new Map([...prev, [item.id, res.coverImage]]));
-          setImageApiSources(prev => new Map([...prev, [item.id, res.apiSource]]));
-        }
-      }
-      toast({
-        title: 'Done',
-        description: `Updated ${updated} of ${selectedItems.length} covers${pinned ? ` · ${pinned} pinned, left as is` : ''}`,
-      });
-    } finally {
-      setIsRefreshingCovers(false);
-    }
-  }, [selectedItems, imageApiSources, toast, isRefreshingCovers]);
 
   // Select every item currently visible (after filters).
   const selectAllVisible = useCallback(() => {
@@ -1943,6 +1909,15 @@ const MediaTracker = () => {
   const linkRun = useLinkRun(v2Schema.importLink);
   const [queueOpen, setQueueOpen] = useState(false);
   const [autoOpen, setAutoOpen] = useState(false);
+  // Covers (migration 29): "Change cover…" for one title, "Wrong covers · N" for the library.
+  const [changeCoverFor, setChangeCoverFor] = useState<MediaItem | null>(null);
+  const [wrongOpen, setWrongOpen] = useState(false);
+  const { data: wrongCount = 0 } = useQuery({
+    queryKey: ['mediaWrongCovers', 'count'],
+    enabled: v2Schema.importLink && section === 'more',
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => (await (await import('@/lib/media-cover')).loadWrongCovers()).length,
+  });
   const [linkPicks, setLinkPicks] = useState<Map<number, number>>(() => new Map());
   const linkLive = ['running', 'waiting', 'paused'].includes(linkRun.progress?.state ?? '') || linkRun.intent === 'paused';
 
@@ -2042,6 +2017,8 @@ const MediaTracker = () => {
         current_episode: watching ? choice.progress : null,
         current_season: watching ? 1 : null,
         cover_image: c?.cover && isUsableCover(c.cover, p.type) ? c.cover : null,
+        // Who set it (migration 29): the source's art, so the judge and "Wrong covers" read it right.
+        ...(v2Schema.importLink && c?.cover && isUsableCover(c.cover, p.type) ? { cover_origin: 'source' } : {}),
         // Only present when migration 28 is live (PickPreview shows the fields then).
         ...(choice.platform !== undefined ? { platform: choice.platform } : {}),
         ...(choice.resume_url !== undefined ? { resume_url: choice.resume_url } : {}),
@@ -2087,21 +2064,6 @@ const MediaTracker = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryClient, refreshRowInCaches, toast]);
 
-  // Cycle to the next cover source for one title (drawer "Refresh cover").
-  const handleRefreshCover = useCallback(async (item: MediaItem) => {
-    const src = imageApiSources.get(item.id);
-    const res = await refreshCoverImage(item.title, item.type, src, item.id);
-    if (isPinnedOutcome(res)) {
-      toast({ title: 'Cover is pinned', description: 'Unpin it to refresh the cover.' });
-    } else if (isNewCover(res)) {
-      setImageUrls(prev => new Map([...prev, [item.id, res.coverImage]]));
-      setImageApiSources(prev => new Map([...prev, [item.id, res.apiSource]]));
-      toast({ title: 'Cover updated', description: `Source: ${res.apiSource}` });
-    } else {
-      toast({ title: 'No cover found', description: 'Tried all sources', variant: 'destructive' });
-    }
-  }, [imageApiSources, toast]);
-
   // Remove a wrong cover → falls back to the letter-gradient placeholder.
   const handleRemoveCover = useCallback(async (item: MediaItem) => {
     // With migration 28, "Remove cover" is a pinned "no cover wanted" — so no
@@ -2120,17 +2082,7 @@ const MediaTracker = () => {
           </ToastAction>
         ),
       });
-      return;
     }
-    const ok = await removeCoverImage(item.id);
-    if (!ok) {
-      toast({ title: 'Could not remove cover', variant: 'destructive' });
-      return;
-    }
-    setImageUrls((prev) => new Map([...prev, [item.id, null]]));
-    setImageApiSources((prev) => { const n = new Map(prev); n.delete(item.id); return n; });
-    patchCachedItem(item.id, { cover_image: undefined });
-    toast({ title: 'Cover removed', description: 'Showing a clean placeholder instead.' });
   }, [v2Schema.sourceLinks, patchCachedItem, refreshRowInCaches, toast]);
 
   // Pin / unpin the current cover: pinned covers are never replaced.
@@ -2680,6 +2632,26 @@ const MediaTracker = () => {
               });
             }}
           />
+          {changeCoverFor && (
+            <Suspense fallback={null}>
+              <ChangeCover
+                item={changeCoverFor}
+                onOpenChange={(o) => { if (!o) setChangeCoverFor(null); }}
+                onChanged={(url, origin) => {
+                  const id = changeCoverFor.id;
+                  setImageUrls((prev) => new Map([...prev, [id, url]]));
+                  patchCachedItem(id, { cover_image: url ?? undefined, ...(origin ? { cover_origin: origin } : {}) } as Partial<MediaItem>);
+                  void queryClient.invalidateQueries({ queryKey: ['mediaWrongCovers'] });
+                }}
+              />
+            </Suspense>
+          )}
+          {wrongOpen && (
+            <Suspense fallback={null}>
+              <WrongCovers open={wrongOpen} onOpenChange={setWrongOpen} phone={!tabletUp}
+                onChangeCover={(id) => { void openById(id).then(() => { const it = itemsByIdRef.current.get(id); if (it) setChangeCoverFor(it); }); }} />
+            </Suspense>
+          )}
           {autoOpen && (
             <Suspense fallback={null}>
               <AutoMatched open={autoOpen} onOpenChange={setAutoOpen} run={linkRun} phone={!tabletUp} />
@@ -2796,6 +2768,7 @@ const MediaTracker = () => {
                 onExportJson={handleExportJson}
                 onExportCsv={handleExportCsv}
                 onExportTxt={() => setTxtExportDialogOpen(true)}
+                wrongCovers={v2Schema.importLink && wrongCount > 0 ? { count: wrongCount, onClick: () => setWrongOpen(true) } : null}
                 linkLibrary={v2Schema.importLink && linkRun.ready && linkRun.unlinked > 0 && !linkLive && !linkRun.progress?.runningElsewhere ? {
                   hint: `${linkRun.unlinked.toLocaleString()} title${linkRun.unlinked === 1 ? ' isn’t' : 's aren’t'} linked to a source yet`,
                   onClick: () => { linkRun.start(); setSection('library'); },
@@ -3016,10 +2989,6 @@ const MediaTracker = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Button size="sm" variant="ghost" onClick={refreshSelectedCovers} disabled={isRefreshingCovers}>
-                    <RefreshCw className={isRefreshingCovers ? 'h-4 w-4 mr-1 animate-spin' : 'h-4 w-4 mr-1'} />
-                    {isRefreshingCovers ? 'Refreshing…' : 'Refresh covers'}
-                  </Button>
                   <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setBulkDeleteOpen(true)}>
                     <Trash2 className="h-4 w-4 mr-1" /> Delete
                   </Button>
@@ -3227,8 +3196,9 @@ const MediaTracker = () => {
                 item={editingItem}
                 hasCover={!!(imageUrls.get(editingItem.id) ?? editingItem.cover_image)}
                 onTogglePin={v2Schema.sourceLinks ? togglePin : undefined}
-                onRefreshCover={handleRefreshCover}
-                onRemoveCover={handleRemoveCover}
+                // One cover pipeline (migration 29): pick from source / reader / web, with Undo.
+                onChangeCover={v2Schema.importLink ? (i) => setChangeCoverFor(i) : undefined}
+                onRemoveCover={v2Schema.sourceLinks ? handleRemoveCover : undefined}
                 onDelete={(i) => setDeleteConfirm({ open: true, id: i.id })}
               />
             </>

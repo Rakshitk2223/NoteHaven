@@ -34,7 +34,9 @@ export interface LinkOutcome {
 }
 
 const CHUNK = 5;
-const COLS = 'id, title, type, source, source_id, alt_ids, link_status, linked_at, cover_pinned, cover_image, last_known_latest_chapter, latest_checked_at';
+// cover_origin is journaled too: linkEntry sets 'source', and Undo must put the old label back
+// (else the old cover would come back labelled 'source', and the judge would trust it).
+const COLS = 'id, title, type, source, source_id, alt_ids, link_status, linked_at, cover_pinned, cover_image, cover_origin, last_known_latest_chapter, latest_checked_at';
 type LinkRow = Record<string, unknown> & { id: number; title: string; type: string; link_status: string | null };
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);

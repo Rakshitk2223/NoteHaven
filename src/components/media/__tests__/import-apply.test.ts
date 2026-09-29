@@ -71,6 +71,24 @@ function builder(table: string) {
   };
   return q;
 }
+// The one cover writer, emulated with its rules (unpinned + still the cover he saw);
+// calls are recorded so the test can check it journals into the import's batch.
+const coverCalls: Array<{ changes: Row[]; journal: Row }> = [];
+vi.mock('@/lib/media-cover', () => ({
+  setCovers: async (changes: Row[], journal: Row) => {
+    coverCalls.push({ changes, journal });
+    const written: number[] = []; const skipped: Record<number, string> = {};
+    for (const c of changes) {
+      const r = tracker.get(c.id as number);
+      if (!r) { skipped[c.id as number] = 'not-found'; continue; }
+      if (r.cover_pinned) { skipped[c.id as number] = 'pinned'; continue; }
+      if ((r.cover_image ?? null) !== c.expect) { skipped[c.id as number] = 'changed'; continue; }
+      tracker.set(c.id as number, { ...r, cover_image: c.url, cover_origin: c.origin });
+      written.push(c.id as number);
+    }
+    return { batchId: journal.batchId ?? null, written, skipped };
+  },
+}));
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: { from: (t: string) => builder(t), auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) } },
 }));
@@ -98,7 +116,7 @@ const plan = (over: Partial<ImportPlan> = {}): ImportPlan => ({
 });
 const put = (s: PlanTrackerRow) => tracker.set(s.id, { ...s, user_id: 'u', current_season: null, current_episode: null });
 
-beforeEach(() => { tracker.clear(); journal = []; logs.length = 0; importMap.length = 0; mediaTags.length = 0; failJournal = false; failMap = false; failUpdate = null; });
+beforeEach(() => { tracker.clear(); journal = []; logs.length = 0; importMap.length = 0; mediaTags.length = 0; coverCalls.length = 0; failJournal = false; failMap = false; failUpdate = null; });
 
 describe('applyImport', () => {
   it('moves progress forward with the reader latest in the same write, journals it, logs History and maps the key', async () => {
@@ -128,6 +146,9 @@ describe('applyImport', () => {
     const p = plan({ same: [planRow(1, { ticked: false, progress: null, auto: {}, cover }), planRow(2, { ticked: false, progress: null, auto: {}, cover })] });
     const r = await applyImport(p, initialSelection(p), [a, b]);
     expect(r.skipped).toBe(2);
+    // Through the one cover writer, journaled into THIS import's batch (one Undo).
+    expect(coverCalls.map((c) => c.journal)).toEqual([{ batchId: r.batchId, kind: 'import' }, { batchId: r.batchId, kind: 'import' }]);
+    expect(coverCalls[0].changes[0]).toMatchObject({ origin: 'reader', expect: null });
     expect(tracker.get(1)!.cover_image).toBeNull();
     expect(tracker.get(2)!.cover_image).toBe('https://mine.example/b.jpg');
   });

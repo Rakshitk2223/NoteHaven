@@ -1,12 +1,10 @@
 // Image fetcher with direct Supabase queries for maximum performance
 // Fetches ALL cached images in ONE database query (~100ms)
-// Only uses external APIs for missing items
+// Never searches external APIs: a missing cover stays missing until he picks one.
 
 import { supabase } from '@/integrations/supabase/client';
 import { devLog } from '@/lib/logger';
-import { mediaSearchGet } from '@/lib/edge-function';
 import { isUsableCover } from '@/lib/cover-medium';
-import { hitMatchesTitle } from '@/lib/title-match';
 import { readImageCache, mergeImageCache } from '@/lib/image-cache';
 
 export interface ImageResult {
@@ -108,67 +106,6 @@ async function fetchFromMediaMetadata(
   return { images, sources };
 }
 
-/**
- * Cover for a title from the edge search, or null. Takes the first of the top
- * results that (a) is the right medium (cover-medium.ts) and (b) actually
- * resembles the title (title-match.ts). Accepting results[0] blindly gave a
- * nonsense title an unrelated manga's cover, and one an explicit adult cover
- * (UX-13). Exported so the add-item flow can use the same gate.
- */
-export async function searchCover(
-  title: string,
-  type: string,
-): Promise<{ cover: string; source: string } | null> {
-  const data = await mediaSearchGet({ q: title, type, limit: 5 }) as
-    { success?: boolean; source?: string; results?: Array<Record<string, unknown>> } | null;
-  if (!data?.success) return null;
-  const hit = data.results?.find((r) =>
-    typeof r.cover_image === 'string' && isUsableCover(r.cover_image, type) && hitMatchesTitle(title, r));
-  return hit ? { cover: hit.cover_image as string, source: data.source || 'api' } : null;
-}
-
-// Fetch missing items from edge function in PARALLEL batches
-async function fetchMissingItemsFromAPI(
-  missingItems: Array<{ id: number; title: string; type: string }>
-): Promise<{ images: Map<number, string>; sources: Map<number, string> }> {
-  const images = new Map<number, string>();
-  const sources = new Map<number, string>();
-  
-  if (missingItems.length === 0) return { images, sources };
-  
-  devLog(`🌐 Fetching ${missingItems.length} missing items from APIs...`);
-  
-  // Process in parallel with Promise.all
-  const batchSize = 10; // Process 10 at a time to avoid overwhelming
-  
-  for (let i = 0; i < missingItems.length; i += batchSize) {
-    const batch = missingItems.slice(i, i + batchSize);
-    
-    const promises = batch.map(async (item) => {
-      const hit = await searchCover(item.title, item.type);
-      return hit ? { id: item.id, imageUrl: hit.cover, apiSource: hit.source } : null;
-    });
-
-    const batchResults = await Promise.all(promises);
-    
-    batchResults.forEach(result => {
-      if (result) {
-        images.set(result.id, result.imageUrl);
-        sources.set(result.id, result.apiSource);
-      }
-    });
-    
-    // Small delay between batches to be nice to the API
-    if (i + batchSize < missingItems.length) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-  
-  devLog(`✅ Fetched ${images.size}/${missingItems.length} missing items from APIs`);
-  
-  return { images, sources };
-}
-
 // Main function - FAST!
 export async function fetchImagesFromSupabase(
   items: Array<{ id: number; title: string; type: string }>
@@ -181,7 +118,8 @@ export async function fetchImagesFromSupabase(
   const startTime = performance.now();
 
   const results: ImageResult[] = [];
-  let fetchedFromAPI = 0;
+  // Always 0 now: nothing is fetched from outside at display time (kept in the response shape).
+  const fetchedFromAPI = 0;
 
   // Step 1: Check localStorage cache (TTL-bounded — see lib/image-cache.ts)
   const cached = readImageCache();
@@ -210,20 +148,19 @@ export async function fetchImagesFromSupabase(
 
   // Step 3: Check media_metadata (cross-table lookup)
   const { images: metaImages, sources: metaSources } = await fetchFromMediaMetadata(stillNeedMetadata);
-  const stillMissing = stillNeedMetadata.filter(item => !metaImages.has(item.id));
 
-  // Step 4: Fetch from external APIs (only for truly missing items)
-  const { images: apiImages, sources: apiSources } = await fetchMissingItemsFromAPI(stillMissing);
-  fetchedFromAPI = apiImages.size;
+  // No step 4: covers are never searched for at display time any more (it was a
+  // slot machine: a title search per cover-less card as you scrolled). A missing
+  // cover shows the letter tile; "Change cover…" / "Wrong covers" fill it on purpose.
 
   // Combine all results
   const allImages = new Map<number, string>([
-    ...cacheHits, ...trackerImages, ...metaImages, ...apiImages
+    ...cacheHits, ...trackerImages, ...metaImages,
   ]);
   const allSources = new Map<number, string>([
     ...cacheSources,
     ...[...trackerImages.keys()].map(k => [k, 'tracker'] as [number, string]),
-    ...metaSources, ...apiSources
+    ...metaSources,
   ]);
 
   items.forEach(item => {

@@ -63,14 +63,14 @@ const { undoBatch } = await import('@/lib/media-bulk');
 
 const base = (id: number, over: Row = {}): Row => ({
   id, user_id: 'u', title: `[audit] ${id}`, type: 'Manhwa', source: null, source_id: null, alt_ids: null,
-  link_status: 'unlinked', linked_at: null, cover_pinned: false, cover_image: 'https://mine/c.jpg',
+  link_status: 'unlinked', linked_at: null, cover_pinned: false, cover_image: 'https://mine/c.jpg', cover_origin: 'manual',
   last_known_latest_chapter: null, latest_checked_at: null, current_chapter: 12, ...over,
 });
 const cand = { source: 'anilist', source_id: '7', title: 'Work', cover: 'https://src/c.jpg' } as never;
 // A stand-in for linkEntry: writes the link fields (and the cover unless keepCover).
 const fakeLink = vi.fn(async (id: number, _c: unknown, opts: { keepCover?: boolean } = {}) => {
   const r = tracker.get(id)!;
-  tracker.set(id, { ...r, source: 'anilist', source_id: '7', alt_ids: { mal: 1 }, link_status: 'linked', linked_at: 'now', last_known_latest_chapter: 140, ...(opts.keepCover ? {} : { cover_image: 'https://src/c.jpg' }) });
+  tracker.set(id, { ...r, source: 'anilist', source_id: '7', alt_ids: { mal: 1 }, link_status: 'linked', linked_at: 'now', last_known_latest_chapter: 140, ...(opts.keepCover ? {} : { cover_image: 'https://src/c.jpg', cover_origin: 'source' }) });
   return { ok: true as const, undo: async () => true, detail: null, coverChanged: !opts.keepCover };
 });
 const item = (id: number, over: Record<string, unknown> = {}) => ({ mediaId: id, candidate: cand, expect: { title: `[audit] ${id}`, type: 'Manhwa' }, ...over });
@@ -84,7 +84,8 @@ describe('applyLinks (Approve for Link your library)', () => {
     expect(r).toMatchObject({ linked: 1, skipped: 0, failed: 0, linkedIds: [1] });
     expect(journal[0]).toMatchObject({ kind: 'link', op: 'update' });
     // cover_pinned rides along whenever the cover changed (Undo respects a later pin).
-    expect(Object.keys(journal[0].after as Row).sort()).toEqual(['alt_ids', 'cover_image', 'cover_pinned', 'last_known_latest_chapter', 'link_status', 'linked_at', 'source', 'source_id']);
+    expect(Object.keys(journal[0].after as Row).sort()).toEqual(['alt_ids', 'cover_image', 'cover_origin', 'cover_pinned', 'last_known_latest_chapter', 'link_status', 'linked_at', 'source', 'source_id']);
+    expect(journal[0]).toMatchObject({ before: { cover_origin: 'manual' }, after: { cover_origin: 'source' } });
     expect(tracker.get(1)!.current_chapter).toBe(12);
     expect(decided).toEqual([1]);
   });
@@ -124,7 +125,7 @@ describe('applyLinks (Approve for Link your library)', () => {
     const r = await applyLinks([item(1)], { link: fakeLink as never });
     const u = await undoBatch(r.batchId);
     expect(u.restored).toBe(1);
-    expect(tracker.get(1)).toMatchObject({ link_status: 'unlinked', source: null, source_id: null, alt_ids: null, cover_image: 'https://mine/c.jpg' });
+    expect(tracker.get(1)).toMatchObject({ link_status: 'unlinked', source: null, source_id: null, alt_ids: null, cover_image: 'https://mine/c.jpg', cover_origin: 'manual' });
   });
 
   // ---- consultant Job 9 must-fixes ----------------------------------------------

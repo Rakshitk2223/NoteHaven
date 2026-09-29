@@ -5,7 +5,8 @@
 //     with History origin 'tachimanga'; the row's `auto` fields ride in the same
 //     guarded update.
 //   · status   → guarded on `expected.status`.
-//   · cover    → guarded on the cover he saw and on cover_pinned = false.
+//   · cover    → lib/media-cover setCovers (unpinned + the cover he saw + the judge),
+//     journaled into this import's batch.
 //   · auto     → reader latest / platform-if-empty / last read, for a matched row.
 //   · new titles → inserted (journal op 'insert', so Undo removes them).
 //   · media_import_map → upserted, so the next import matches by key.
@@ -15,6 +16,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { casProgressWrite, ProgressConflictError } from '@/lib/media-progress-write';
 import { hasGuard, newBatchId, restoreEntries, writeJournal, type JournalEntry } from '@/lib/media-bulk';
+import { setCovers } from '@/lib/media-cover';
 import type { ImportMapWrite, ImportPlan, PlanRow, PlanTrackerRow } from '@/lib/tachimanga/types';
 import { type ImportSelection, matchedRows, rowApplies } from './selection';
 
@@ -56,13 +58,14 @@ async function applyRow(
   snap: Snapshot | undefined,
   sel: ImportSelection,
   userId: string,
+  batchId: string,
 ): Promise<{ entry: JournalEntry | null; skipped: number; error?: unknown }> {
   const before: Record<string, unknown> = {};
   const after: Record<string, unknown> = {};
   let skipped = 0;
   const entry = (): JournalEntry | null => (Object.keys(after).length ? { media_id: r.media_id, op: 'update', before, after } : null);
   try {
-    skipped = await applyRowParts(r, snap, sel, userId, before, after);
+    skipped = await applyRowParts(r, snap, sel, userId, batchId, before, after);
     return { entry: entry(), skipped };
   } catch (error) {
     return { entry: entry(), skipped, error };
@@ -74,6 +77,7 @@ async function applyRowParts(
   snap: Snapshot | undefined,
   sel: ImportSelection,
   userId: string,
+  batchId: string,
   before: Record<string, unknown>,
   after: Record<string, unknown>,
 ): Promise<number> {
@@ -121,14 +125,15 @@ async function applyRowParts(
     if (data?.length) wrote({ status: r.status.to }, was); else skipped += 1;
   }
 
-  // Cover (never over a pin, and only over the cover he saw).
+  // Cover: through THE cover writer (CAS: unpinned + the cover he saw; the judge
+  // refuses wrong-medium art), journaled into this import's batch so the import's
+  // one Undo takes it back too. It journals itself: not part of this row's entry.
   if (sel.cover.has(r.media_id) && r.cover) {
-    let q = supabase.from('media_tracker').update({ cover_image: r.cover.url, cover_origin: 'reader' } as never)
-      .eq('id', r.media_id).eq('user_id', userId).eq('cover_pinned', false) as unknown as Guarded;
-    q = guardEq(q, 'cover_image', snap?.cover_image ?? null);
-    const { data, error } = await q.select('id');
-    if (error) throw error;
-    if (data?.length) wrote({ cover_image: r.cover.url, cover_origin: 'reader' }, { ...was, cover_origin: snap?.cover_origin ?? null }); else skipped += 1;
+    const res = await setCovers(
+      [{ id: r.media_id, url: r.cover.url, origin: 'reader', expect: snap?.cover_image ?? null }],
+      { batchId, kind: 'import' },
+    );
+    if (!res.written.includes(r.media_id)) skipped += 1;
   }
 
   // Only timestamps left (reader_checked_at / last_activity_at): they go with a row
@@ -215,7 +220,7 @@ export async function applyImport(plan: ImportPlan, sel: ImportSelection, rows: 
   for (let i = 0; i < todo.length; i += CHUNK) {
     const entries: JournalEntry[] = [];
     for (const r of todo.slice(i, i + CHUNK)) {
-      const res = await applyRow(r, snap.get(r.media_id), sel, userId);
+      const res = await applyRow(r, snap.get(r.media_id), sel, userId, batchId);
       out.skipped += res.skipped;
       // Journal whatever landed, even when a later part of the row failed.
       if (res.entry) { entries.push(res.entry); if (!res.error) out.updated += 1; }

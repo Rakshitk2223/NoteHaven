@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, LayoutGrid, Replace, RotateCcw, SlidersHorizontal, Upload,
+  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, ImageOff, LayoutGrid, Replace, RotateCcw, SlidersHorizontal, Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -23,6 +23,8 @@ interface MediaMoreViewProps {
   onExportJson: () => void;
   onExportCsv: () => void;
   onExportTxt: () => void;
+  /** "Wrong covers · N": only while there are any (migration 29). Null hides it. */
+  wrongCovers?: { count: number; onClick: () => void } | null;
   /** "Link your library": only while unlinked titles exist and no run is going. Null hides it. */
   linkLibrary?: { hint: string; onClick: () => void } | null;
   /** Only while an un-undone bulk change exists (migration 29); null hides the row. */
@@ -112,9 +114,12 @@ export function MediaMoreView(p: MediaMoreViewProps) {
       </Group>
 
       {/* The library updates itself now (Updates); linking is the one manual job left here. */}
-      {p.linkLibrary && (
+      {(p.linkLibrary || p.wrongCovers) && (
         <Group title="Details & covers">
-          <Row icon={Replace} label="Link your library" hint={p.linkLibrary.hint} onClick={p.linkLibrary.onClick} />
+          {p.linkLibrary && <Row icon={Replace} label="Link your library" hint={p.linkLibrary.hint} onClick={p.linkLibrary.onClick} />}
+          {p.wrongCovers && (
+            <Row icon={ImageOff} label={`Wrong covers · ${p.wrongCovers.count.toLocaleString()}`} hint="Wrong kind of art, won’t load, or missing" onClick={p.wrongCovers.onClick} />
+          )}
         </Group>
       )}
 
