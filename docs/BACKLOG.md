@@ -40,13 +40,16 @@ Branch `media-v2`, not merged (`main` was merged into it on 2026-09-29). Design 
 `docs/media-v2/PLAN.md`, live state in `docs/media-v2/HANDOFF.md`.
 
 - **Done on the branch:** Phase 1 (link by search-and-pick, fetch by id, fast logging, History), U0
-  (pin guards on every cover writer, Edit → Saved · Undo, stats over the whole library, one `latestOf`),
-  U2a (Dropped / On Hold, platform + resume link) and U2b (the Tachimanga import with its bulk journal
-  and "Undo last bulk change").
-- **Next:** U3, link your library. Then U4 (library update + Updates) and U5 (covers).
+  (pin guards, Edit → Saved · Undo, stats over the whole library, one `latestOf`), U2a (Dropped / On
+  Hold, platform + resume link), U2b (the Tachimanga import, the bulk journal, "Undo last bulk change"),
+  U3 (Link your library), U4 (the Updates tab and the library update pass) and U5 (one cover judge and
+  writer, Change cover…, Wrong covers). Removed with them: Refresh Library, Settings → Sync activity, the
+  "new seasons" flag, the cover slot machine and `backfill:covers`.
+- **Still open before it ships:** E1, the one edge-function redeploy, and the phone browser pass.
 - **Database:** migrations 28 and 29 are live on production.
-- **Edge function:** the v2 actions are **not deployed**; they go out in one redeploy when the branch
-  ships. The import, linking and library update need no deploy.
+- **Edge function:** the v2 actions are **not deployed**. Browse, Fix match, Link your library and the
+  update pass all call them (`action=search` / `action=detail`, which now also returns `last_aired`), so
+  they only work against `npm run edge:dev` until E1. The Tachimanga import needs no edge function.
 - Push notifications and recommendations stay declined.
 
 ## Parked (not on the roadmap; revisit after U5)
@@ -54,11 +57,14 @@ Branch `media-v2`, not merged (`main` was merged into it on 2026-09-29). Design 
 Media v2 scope is frozen at U0–U5 (owner, 2026-09-29). These are wanted, just not now:
 
 - **⌘K navigation skips the dirty-edit guard.** Leaving Media through the palette with unsaved edits doesn't ask first.
-- **A client-side negative cache for no-match cover lookups**, so titles with no cover stop re-asking the edge function.
+- **A client-side negative cache for no-match cover lookups**, so titles with no cover stop re-asking the edge function. (Probably moot since U5: the display no longer searches for covers.)
 - **Mac `+` / `-` / `=` keys in the Log popover** (from `PLAN.md`'s Mac Log row).
 - **Hands-free sync through AniList tracking.** Needs AniList OAuth.
 - **Accept Tachimanga's lighter Tachiyomi-compatible `.tachibk` backup as an import format**, next to `.tmb` (U2b).
 - **U6 polish:** hold-to-repeat, the season picker, "Caught up", Mac hover +1.
+- **Cross-source duplicate detection through `alt_ids`**: spot two of his titles that are the same work
+  linked on different sources (for example AniList vs MangaUpdates). Today the link queue only catches
+  the same `source` + `source_id` twice.
 
 ## Known limitations
 

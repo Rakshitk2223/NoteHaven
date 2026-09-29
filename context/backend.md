@@ -33,7 +33,7 @@ where the table is created (`00` = the baseline).
 | `tasks` | `task_text`, `is_completed`, `is_pinned`, `due_date` · upd | per-op | 00 | `Tasks`, `Dashboard`, calendar quick-add |
 | `notes` | `title`, `content` (HTML), `is_pinned`, `calendar_date`, `background_color` (category key) · upd | per-op, owner only | 00 | `Notes` (+ realtime), `Dashboard`; share RPCs |
 | `prompts` | `title`, `prompt_text`, `category`, `is_favorited`, `is_pinned` · **no `updated_at`** | per-op | 00 | `Library`, `Dashboard`, `CommandsTab` |
-| `media_tracker` | `title`, `type` CHECK (Movie, Series, Anime, Manga, Manhwa, Manhua, KDrama, JDrama), `status` CHECK (Watching, Reading, Plan to Watch, Plan to Read, Completed, **Dropped, On Hold** since 29), `rating` 1–10, `current_season/episode/chapter`, `cover_image`, `release_date`, `last_known_total_episodes/seasons`, `has_new_content`, `last_activity_at` · trigram GIN on `title` · upd + activity trigger. **28 and 29 add** the link, latest and reader columns — see "Media v2" below | per-op | 00, 28, 29 | `MediaTracker`, `hooks/media/*`, `lib/media-*`, `simple-image-fetcher`, scripts |
+| `media_tracker` | `title`, `type` CHECK (Movie, Series, Anime, Manga, Manhwa, Manhua, KDrama, JDrama), `status` CHECK (Watching, Reading, Plan to Watch, Plan to Read, Completed, **Dropped, On Hold** since 29), `rating` 1–10, `current_season/episode/chapter`, `cover_image`, `release_date`, `last_known_total_episodes/seasons`, `has_new_content` (legacy; nothing reads or writes it since U4), `last_activity_at` · trigram GIN on `title` · upd + activity trigger. **28 and 29 add** the link, latest and reader columns — see "Media v2" below | per-op | 00, 28, 29 | `MediaTracker`, `hooks/media/*`, `lib/media-*`, `simple-image-fetcher`, scripts |
 | `code_snippets` | `title`, `code`, `language`, `category`, `folder_id` → `snippet_folders` (SET NULL), `filename`, `description`, `is_favorited`, `is_pinned` · upd | per-op | 00 | `lib/codeSnippets.ts` |
 | `snippet_folders` | `name` (unique per user), `color`, `sort_order` · upd. **Also the project list for `commands`** | ALL | 00 | `lib/codeSnippets.ts`, `lib/commands.ts` |
 | `commands` | `folder_id` → `snippet_folders` (SET NULL), `category` (free text), `label`, `command`, `description`, `is_favorited`, `is_pinned`, `sort_order` · upd | ALL | 21 | `lib/commands.ts` |
@@ -93,12 +93,12 @@ Refresh then fetches by id instead of re-guessing from the title. **User-owned**
 
 | Table / columns | Notes | RLS | File |
 |---|---|---|---|
-| `media_tracker` + `source` CHECK (anilist, mangaupdates, mangadex, jikan, tmdb, tvmaze), `source_id` TEXT, `alt_ids` JSONB, `link_status` CHECK (unlinked, linked, review) default `unlinked`, `linked_at`, `cover_pinned` BOOL default false, `platform`, `resume_url` (CHECK `^https?://`), `last_known_latest_chapter`, `latest_checked_at`, `latest_changed_at` | `linked` requires `source` + `source_id` (CHECK). Indexes `(user_id, link_status)` and partial `(source, source_id)`. `cover_pinned` = "keep my cover" (pinned with a null cover means "no cover wanted"); linking, sweeps and background fills never replace a pinned cover. `last_known_latest_chapter` / `latest_checked_at` mirror the source's latest chapter on link and on by-id refresh; `latest_changed_at` moves only when the latest grows (nothing reads it yet: it's for the U4 Updates tab) | per-op (existing) | 28 |
-| `media_tracker` + `reader_latest_chapter`, `reader_checked_at` (the reader app's own latest; **written only by the import**), `cover_origin` CHECK (manual, source, reader, search; NULL = unknown / set before 29; today only the import sets it, as `reader`), `last_known_latest_season` / `last_known_latest_episode` (the source's latest aired, for watch types in U4; nothing writes them yet) | N behind = the **higher** of the source's and the reader's latest (`latestOf` in `components/media/progress-view.ts`); shelved titles (Completed, On Hold, Dropped) never show a badge | per-op (existing) | 29 |
+| `media_tracker` + `source` CHECK (anilist, mangaupdates, mangadex, jikan, tmdb, tvmaze), `source_id` TEXT, `alt_ids` JSONB, `link_status` CHECK (unlinked, linked, review) default `unlinked`, `linked_at`, `cover_pinned` BOOL default false, `platform`, `resume_url` (CHECK `^https?://`), `last_known_latest_chapter`, `latest_checked_at`, `latest_changed_at` | `linked` requires `source` + `source_id` (CHECK). Indexes `(user_id, link_status)` and partial `(source, source_id)`. `cover_pinned` = "keep my cover" (pinned with a null cover means "no cover wanted"); linking, sweeps and background fills never replace a pinned cover. `last_known_latest_chapter` / `latest_checked_at` mirror the source's latest chapter on link and on by-id refresh; `latest_changed_at` moves only when a known latest grows (the Updates tab reads it). A stored latest is never lowered | per-op (existing) | 28 |
+| `media_tracker` + `reader_latest_chapter`, `reader_checked_at` (the reader app's own latest; **written only by the import**), `cover_origin` CHECK (manual, source, reader, search; NULL = unknown / set before 29; written with every cover by `setCover(s)`, `linkEntry` and the import), `last_known_latest_season` / `last_known_latest_episode` (the source's latest **aired** episode for watch types, written by the library update pass) | N behind = the **higher** of the source's and the reader's latest (`latestOf` in `components/media/progress-view.ts`); shelved titles (Completed, On Hold, Dropped) never show a badge | per-op (existing) | 29 |
 | `media_source_meta` | PK `(source, source_id)`. `title`, `alt_titles[]`, `description`, `authors[]`, `genres[]`, `status` CHECK (ongoing, completed, hiatus, cancelled, upcoming), `score` 0–10, `cover`, `banner`, `format`, `medium` CHECK (comic, novel, anime, screen, other), `country`, `year`, `chapters`, `episodes`, `latest_chapter`, `total_seasons`, `seasons`, `episodes_detail`, `cast_members`, `runtime`, `next_airing`, `alt_ids`, `source_url` (CHECK `^https?://`), `fetched_at`. No `user_id`: it's what public APIs publish | public SELECT; **no write policies, and INSERT / UPDATE / DELETE revoked from anon + authenticated** — only the edge function (service role) writes it | 28 |
 | `media_progress_log` | `id` identity, `user_id` default `auth.uid()`, `media_id` → `media_tracker` (cascade), `field` CHECK (current_chapter, current_episode, current_season), `from_value`, `to_value`, `season`, `kind` CHECK (log, undo), `origin` (29: NULL = by hand, `tachimanga` = the import), `created_at`. Indexes `(user_id, created_at DESC)`, `(media_id, created_at DESC)` | SELECT own; INSERT own **and** the `media_id` must be the caller's (an EXISTS check, because FK checks bypass RLS); **append-only**: no UPDATE / DELETE policies, and both revoked | 28 |
 
-| `media_link_proposals` | PK `media_id` → `media_tracker` (cascade), `user_id`, staleness snapshot `input_title` / `input_type` / `input_progress`, `band` CHECK (auto, review, none, error, duplicate), `candidates` JSONB (top 3), `sources` JSONB, `resolved_at`, `decision` CHECK (linked, skipped, not_listed), `decided_at`. Scratch data for U3; nothing writes it yet | own rows, all four ops; INSERT / UPDATE also need the caller's `media_id` (EXISTS) | 29 |
+| `media_link_proposals` | PK `media_id` → `media_tracker` (cascade), `user_id`, staleness snapshot `input_title` / `input_type` / `input_progress`, `band` CHECK (auto, review, none, error, duplicate), `candidates` JSONB (top 3), `sources` JSONB, `resolved_at`, `decision` CHECK (linked, skipped, not_listed), `decided_at`. Written by the "Link your library" resolver (`lib/media-resolve.ts`), one row per unlinked title; a renamed or retyped title is re-proposed, never linked | own rows, all four ops; INSERT / UPDATE also need the caller's `media_id` (EXISTS) | 29 |
 | `media_import_map` | PK `(user_id, origin, origin_key)`; `origin` CHECK (tachimanga), `origin_key` = sha256 hex of `source:url` (**no reader title or URL is stored**), `media_id` → `media_tracker` (cascade; many keys may map to one row), `reader_cover` (CHECK `^https?://`), `last_seen_at`. Survives relinks; never stored in `alt_ids` | own rows, all four ops; INSERT / UPDATE need the caller's `media_id` | 29 |
 | `media_bulk_journal` | `id`, `user_id`, `batch_id` uuid, `kind` CHECK (link, import, cover), `op` CHECK (update, insert), `media_id` → `media_tracker` (cascade), `before` / `after` JSONB, `created_at`, `undone_at`. Indexes `(user_id, created_at DESC)`, `(batch_id)` | SELECT / INSERT own (+ `media_id` EXISTS); **append-only except marking undone**: an UPDATE policy only from `undone_at IS NULL` to a timestamp, and a column grant on `undone_at` alone; DELETE revoked | 29 |
 
@@ -113,8 +113,8 @@ blocks or rolls back progress. A lost race re-plans a relative ±N and refuses a
 (`ProgressConflictError`). Undo writes its own `kind = 'undo'` rows and never deletes one. The History tab
 only reads the log.
 
-**One bulk journal:** `lib/media-bulk.ts`. Every bulk change (the import today; U3 linking and U5 cover
-passes later) writes a before / after per row (`writeJournal`) before reporting done. "Undo last bulk
+**One bulk journal:** `lib/media-bulk.ts`. Every bulk change (the import, "Link your library" approve as
+`kind = 'link'`, and every cover change as `kind = 'cover'`) writes a before / after per row (`writeJournal`) before reporting done. "Undo last bulk
 change" (`undoBatch`) is one compare-and-swap restore: `op = 'update'` puts `before` back only where the
 row still holds `after`; `op = 'insert'` deletes the row it created under the same guard. Rows changed
 since are skipped and counted, never clobbered. Bookkeeping timestamps are restored but not compared
@@ -203,6 +203,9 @@ client helpers are in `src/lib/edge-function.ts`.
   constant, so production builds always use `${VITE_SUPABASE_URL}/functions/v1/media-search`.
 - **CORS:** `ALLOWED_ORIGINS` (comma-separated secret); unset means `*`. A request from an origin that
   isn't listed gets the first allowed origin echoed back.
+- **Legacy paths** (below: `q=` search, `source=` and the batch POST). Since U4 / U5 **the app no longer
+  calls any of them**; the only caller left is `scripts/backfill-media-metadata.ts`. They stay deployed
+  until that script goes.
 - **GET** `?q=` (required, truncated to 200 characters) `&type=` `&limit=` (default 10, clamped 1–50)
   `&source=` `&refresh=1`:
   - *search mode* (default): check `media_metadata` (`ilike`, skipped when `refresh` is set), then query
@@ -211,15 +214,13 @@ client helpers are in `src/lib/edge-function.ts`.
     jdrama: TMDB + TVmaze + Wikidata; anything else: AniList + TMDB. Results are de-duplicated and
     ranked by type match, with per-source pacing and one retry on 429.
   - *source mode* (`source=anilist|jikan|mangadex|mangaupdates|tvmaze|tmdb|wikidata|fanart`): one
-    source, cache skipped. `media-refresh.ts` uses it for TMDB, Wikidata and Fanart so those keys stay
-    server-side.
+    source, cache skipped.
   - Response: `{ success, source, query, type, count, results[], duration? }`, where `source` is
     `database`, the named source, a comma-joined list of sources, or `none`.
 - **POST** `{ items: [{ id, title, type }] }` (no `q`): batch cover lookup, at most 50 items, of which the
   first 20 cache misses are fetched; returns `{ success, results: [{ id, cover_image }] }`. Nothing in
   the repo calls it today.
-- **v2 actions** (`v2.ts`; GET only, chosen by `?action=`; the legacy paths
-  above are untouched and still serve unlinked entries):
+- **v2 actions** (`v2.ts`; GET only, chosen by `?action=`; everything the app calls):
   - `GET ?action=search&q&type&limit` (limit default 8, clamped 1–10): fans out to the **type-correct**
     sources only — manhwa: AniList + MangaUpdates + MangaDex; manhua: MangaUpdates + AniList + MangaDex;
     manga: AniList + Jikan + MangaUpdates; anime: AniList + Jikan; series / kdrama / jdrama: TMDB +
@@ -230,7 +231,10 @@ client helpers are in `src/lib/edge-function.ts`.
     `/v1/series/{id}`, MangaDex `/manga/{uuid}` + `/aggregate` for the latest chapter, Jikan `/full`,
     TMDB with credits, TVmaze with embedded episodes and cast), **upserts `media_source_meta`** on
     `(source, source_id)`, and returns the normalised detail (`detail: null` + `error` when not found
-    or rate-limited).
+    or rate-limited). For watch types the detail also carries `next_airing` (with its season) and
+    `last_aired` (`{ season, episode, air_date }`: TMDB `last_episode_to_air`, or TVmaze's episode list
+    by airstamp, specials skipped; `airedPositions` is pure and Vitest-covered in `v2-aired.test.ts`).
+    `last_aired` goes to the client only; `media_source_meta` has no column for it.
   - There is no batch `resolve` action (removed 2026-09-29, BE2). Phase 2's "link your library" will
     call `action=search` in a client-paced loop and score candidates with `src/lib/media-match.ts`.
   - Guarantees the client relies on: unknown values are `null` (never `0`, `''` or `'upcoming'`),
@@ -269,25 +273,27 @@ client helpers are in `src/lib/edge-function.ts`.
 
 ## Cover images in the client
 
-Linked entries (Media v2) get their cover from `linkEntry` in `lib/media-link.ts`: never when
-`cover_pinned`; for a new entry, or when the current cover is missing or fails `isUsableCover`, or when
-the user accepts "use new cover". By-id refresh (`refreshLinked`) never touches the cover. Everything
-below is the path for **unlinked** entries, and since U0 every one of those writers (per-card refresh,
-bulk refresh, the sweep, Sync activity retry) skips a pinned cover and no longer bumps
-`last_activity_at`. Every path refuses wrong-medium art (`lib/cover-medium.ts`
-`isUsableCover`: a donghua poster on a manhua, a TV poster on a manhwa, MangaDex hotlinks), and search
-hits must match the typed title (`lib/title-match.ts`, bigram Dice ≥ `TITLE_MATCH_MIN` 0.6).
-
-- `lib/simple-image-fetcher.ts` `fetchImagesFromSupabase(items)`: localStorage cache
-  (`lib/image-cache.ts`, 24 h TTL) → `media_tracker.cover_image` → `media_metadata` by `(title, type)`
-  (both as `IN` queries chunked at 100) → the edge function for what's still missing, 10 at a time with
-  100 ms between batches. Returns `{ found, notFound, fetchedFromAPI, results[] }`.
-- `lib/media-refresh.ts` `refreshCoverImage(title, type, currentApiSource, mediaId)`: each type has a
-  source priority list and each click moves on to the next source. It writes the new cover to
-  `media_tracker` (by id) and `media_metadata` (upsert), then invalidates the cache entry. MangaDex and
-  MangaUpdates are deliberately left out (no browser CORS).
-- `lib/media-metadata.ts` `refreshLibrary`: the Refresh Library sweep, run through
-  `RefreshActivityContext`. It fills missing covers and metadata only, and never writes personal progress.
+One judge, one writer (U5):
+- **Judge:** `coverVerdict(url, type, origin)` in `lib/cover-medium.ts` → `ok` / `wrong-medium` /
+  `blocked` / `unverified`. Provenance (`source`, `manual`, `reader`) only vouches for an unknown host; it
+  never excuses a provably wrong medium. It runs at write time, in review counts and in
+  `audit:covers`, never at display time.
+- **Writer:** `setCover` / `setCovers` in `lib/media-cover.ts`, the only path that changes a cover from
+  the app (plus `setCoverPinned` for pinning and `linkEntry`'s own cover rule). A compare-and-swap UPDATE
+  guarded on `cover_pinned = false` and the cover he saw; it writes `cover_image` + `cover_origin`,
+  journals `kind = 'cover'`, and puts the rows back if the journal can't be written. A non-manual cover
+  that's wrong-medium or blocked is refused.
+- **Priority:** a pin always wins → the linked source's art (the default for linked titles) → the reader
+  app's thumbnail (`media_import_map.reader_cover`; the default for unlinked ones) → the existing cover if
+  it passes → the letter tile. **Web search runs only when he taps "Search the web"** in Change cover….
+- **Display** (`lib/simple-image-fetcher.ts`): localStorage cache (`lib/image-cache.ts`, 24 h TTL) →
+  `media_tracker.cover_image` → `media_metadata` by `(title, type)` (chunked `IN`). It never searches; a
+  missing cover stays missing until he picks one.
+- `linkEntry` sets `cover_origin = 'source'` when it applies the source's art, only if the title isn't
+  pinned and the current cover is missing or fails the judge (or it's a new title, or he accepted the new
+  cover); `keepCover` skips it. By-id refresh and the update pass never touch covers.
+- Gone: the per-card cover refresh (`media-refresh.ts`), bulk refresh covers, the Refresh Library sweep,
+  the legacy `removeCoverImage`, the display-time cover search and `backfill-cover-images.ts`.
 
 ## Migrations
 
@@ -335,12 +341,11 @@ listed in `README.md`.
 
 | Script | Talks to |
 |---|---|
-| `backfill-cover-images.ts` | the upstream APIs **directly**, one item at a time (AniList, Kitsu, Jikan, MangaDex, MangaUpdates, TVmaze, TMDB, OMDB), then `media_tracker.cover_image` |
-| `backfill-media-metadata.ts` | the deployed edge function (source mode), authenticated with the service-role key (which the function accepts since fix batch 1) → `media_metadata` and `media_tracker.last_known_total_*` |
+| `backfill-media-metadata.ts` | the deployed edge function (source mode; the last caller of the legacy paths), authenticated with the service-role key (which the function accepts since fix batch 1) → `media_metadata` and `media_tracker.last_known_total_*` |
 | `backfill-release-dates.ts` | cached `media_metadata.episodes_detail` → `media_tracker.release_date` (no network) |
 | `backup-media.ts` | `media_tracker`, `media_metadata`, `media_tags`, `media_progress_log` and the three migration 29 tables → `./backups/<timestamp>/`; a 29 table that doesn't exist yet is noted as "not set up", not a failure. Doesn't include `media_source_meta` (rebuildable from the sources) |
 | `backup-vault.ts` | **read-only**: every Vault object's bytes plus `vault_files` / `vault_folders` rows, with SHA-256 manifest and `RESTORE.md` → `./backups/vault-<stamp>/`; orphan objects are backed up and flagged |
-| `audit-cover-medium.ts` | reads a local JSON export (no database, no network) and lists covers that are provably the wrong medium (`lib/cover-medium.ts`) |
+| `audit-cover-medium.ts` | reads a local JSON export (no database, no network) and counts covers by `coverVerdict` (`lib/cover-medium.ts`, the same judge the app uses) |
 | `audit-metadata-coverage.ts` | read-only coverage report |
 | `smoke-media-apis.ts` | the upstream APIs, to check the fields the edge function relies on |
 | `link-dry-run.ts` (`npm run link:dry-run`, run with `node --import tsx`) | Media v2 Phase 2 prep. For every `media_tracker` row in a local export, runs the edge function's own `searchAll` **in-process** (same sources, adult filters and pacing) and scores it with `lib/media-match.ts`. The database client it hands the edge code **throws if touched**, so it can't write. Output goes to gitignored `backups/link-dry-run/` (`progress.jsonl` resume log, `summary.json`, `review.md`). Flags: `<export.json>`, `--fresh`, `--rescore` (offline re-score of stored candidates), `--retry-errors`. TMDB titles need `TMDB_API_KEY` |

@@ -1,7 +1,8 @@
 # NoteHaven
 
 A personal productivity and media companion: notes, tasks, a prompt / snippet / command library, a
-media tracker with automatic covers, a money ledger with accounts, subscriptions, a private file vault,
+media tracker whose titles link to public catalogues (AniList, MangaUpdates, TMDB, …) and keep their
+latest chapters and episodes current, a money ledger with accounts, subscriptions, a private file vault,
 recipes, a work log, a wishlist, a bucket list, birthdays and a unified calendar, all behind a
 customizable dashboard and a ⌘K launcher.
 
@@ -41,7 +42,7 @@ cp .env.example .env
 | `VITE_SUPABASE_PROJECT_ID` | — | in the template, unused by the code |
 | `VITE_MEDIA_SEARCH_URL` | dev builds only | optional; points the app at the local edge function (`http://127.0.0.1:8787`). Production builds ignore it |
 | `SUPABASE_SERVICE_ROLE_KEY` | maintenance scripts | bypasses RLS — never put it in client code |
-| `TMDB_API_KEY`, `OMDB_API_KEY` | `backfill:covers`; `TMDB_API_KEY` also for `edge:dev` and `link:dry-run` | optional; the deployed edge function gets its keys from Supabase secrets, not from `.env` |
+| `TMDB_API_KEY` | `edge:dev` and `link:dry-run` | optional; the deployed edge function gets its keys from Supabase secrets, not from `.env`. (`OMDB_API_KEY` in the template is unused since `backfill:covers` was removed) |
 
 ### 3. Database
 
@@ -134,7 +135,6 @@ All run locally (with `tsx`, apart from `edge:dev`) and read `./.env`. The ones 
 
 | Command | What it does |
 |---|---|
-| `npm run backfill:covers` | fills missing `media_tracker.cover_image`, calling AniList, Kitsu, Jikan, MangaDex, MangaUpdates, TVmaze, TMDB and OMDB directly |
 | `npm run backfill:metadata` | fills `media_metadata` through the deployed edge function, authenticated with the service-role key (`--force`, `--limit N`) |
 | `npm run backfill:releases` | fills `media_tracker.release_date` from cached episode data; dry run by default, `--apply` writes |
 | `npm run backup:media` | dumps the media tables (tracker, legacy metadata, tags, History, and the migration 29 tables) to `./backups/<timestamp>/` with row counts and SHA-256 checksums |
@@ -154,9 +154,11 @@ All run locally (with `tsx`, apart from `edge:dev`) and read `./.env`. The ones 
 Supabase client throws `supabaseUrl is required.` at startup. Check `.env`, then restart the dev server
 (Vite reads env files only at startup).
 
-**Media covers don't load.** You must be signed in — the edge function rejects anonymous calls. Then
-check that the function is deployed, its `TMDB_API_KEY` secret is set (movies and series), and
-`ALLOWED_ORIGINS` includes the origin you're browsing from (the browser console shows CORS errors).
+**A title has no cover.** Covers are never searched for automatically. A linked title gets its source's
+art when it's linked; otherwise open the title, then ⋮ → Change cover… (it can search the web on request),
+or use More → Wrong covers. Search and linking need you signed in, the edge function deployed, its
+`TMDB_API_KEY` secret set (movies and series), and `ALLOWED_ORIGINS` including the origin you're browsing
+from (the browser console shows CORS errors).
 
 **The edge function returns 401.** Expected without a user session: it accepts a signed-in user's access
 token (or the service-role key, for the maintenance scripts) and rejects the anon key. Never deploy it with `--no-verify-jwt`
