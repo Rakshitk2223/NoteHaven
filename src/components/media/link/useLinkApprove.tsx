@@ -16,6 +16,7 @@ export function useLinkApprove(run: LinkRun) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const refreshAll = useCallback(async () => {
     for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] });
@@ -25,8 +26,11 @@ export function useLinkApprove(run: LinkRun) {
   const approve = useCallback(async (items: LinkApproval[]): Promise<boolean> => {
     if (!items.length || busy || !gate.check()) return false;
     setBusy(true);
+    // The resolver pauses while we write (it would otherwise keep proposing for rows being linked).
+    const wasRunning = run.progress?.state === 'running' || run.progress?.state === 'waiting';
+    if (wasRunning) run.pause();
     try {
-      const r = await applyLinks(items);
+      const r = await applyLinks(items, undefined, (done, total) => setProgress({ done, total }));
       await refreshAll();
       toast({
         title: r.stoppedEarly ? 'Linking stopped' : r.linked ? `Linked ${r.linked} title${r.linked === 1 ? '' : 's'}` : 'Nothing linked',
@@ -52,8 +56,12 @@ export function useLinkApprove(run: LinkRun) {
       return false;
     } finally {
       setBusy(false);
+      setProgress(null);
+      if (wasRunning) run.resume();
     }
-  }, [busy, gate, refreshAll, toast]);
+  }, [busy, gate, refreshAll, toast, run]);
 
-  return { gate, approve, busy };
+  /** "Linking 3/40…" while approving. */
+  const busyLabel = progress ? `Linking ${progress.done.toLocaleString()}/${progress.total.toLocaleString()}…` : 'Linking…';
+  return { gate, approve, busy, busyLabel };
 }

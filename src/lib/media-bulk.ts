@@ -40,8 +40,11 @@ export interface UndoOutcome {
 // so an equality guard on them would always miss. They're bookkeeping, not user
 // values; they're restored, but not compared.
 // JSON columns (alt_ids) can't be equality-guarded through PostgREST either.
+// last_known_latest_chapter is bookkeeping the library-update pass moves on its
+// own within hours: guarding on it would make a link Undo skip everything.
 export const UNGUARDED_COLUMNS = new Set([
   'last_activity_at', 'reader_checked_at', 'latest_checked_at', 'latest_changed_at', 'linked_at', 'updated_at', 'alt_ids',
+  'last_known_latest_chapter',
 ]);
 
 const CHUNK = 500;
@@ -181,16 +184,25 @@ export async function undoBatch(batchId: string): Promise<UndoOutcome> {
 
   const out: UndoOutcome = { restored: 0, removed: 0, skipped: 0, failed: 0 };
   const handled: number[] = [];
+  const unlinked: number[] = [];
   for (const e of entries) {
     try {
       const r = await restoreEntry(e, e.kind, userId);
       out[r] += 1;
+      if (r === 'restored' && e.kind === 'link') unlinked.push(e.media_id);
       // Removed rows took their journal row with them (ON DELETE CASCADE).
       if (r !== 'removed') handled.push(e.id);
     } catch (err) {
       console.error('Bulk undo failed for one row:', err);
       out.failed += 1;
     }
+  }
+
+  // An undone link is undecided again: its proposal goes back to the queue / auto list.
+  for (let i = 0; i < unlinked.length; i += CHUNK) {
+    const { error } = await supabase.from('media_link_proposals' as never)
+      .update({ decision: null, decided_at: null } as never).in('media_id', unlinked.slice(i, i + CHUNK));
+    if (error) console.error('Could not reopen proposals after undo:', error);
   }
 
   // Close the batch: every row we acted on or had to skip is done with (a skipped

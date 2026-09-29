@@ -5,6 +5,7 @@ type Row = Record<string, unknown>;
 const tracker = new Map<number, Row>();
 let journal: Row[] = [];
 const decided: number[] = [];
+const reopened: number[] = [];
 let failJournal = false;
 
 function builder(table: string) {
@@ -24,9 +25,11 @@ function builder(table: string) {
     },
     eq(c: string, v: unknown) { q._filters.push(['eq', c, v]); return q; },
     is(c: string, v: unknown) { q._filters.push(['is', c, v]); return q; },
+    neq(c: string, v: unknown) { q._filters.push(['neq', c, v]); return q; },
+    limit() { return q.run(); },
     in(c: string, v: unknown[]) {
       q._in = [c, v];
-      if (table === 'media_link_proposals') { decided.push(...(v as number[])); return Promise.resolve({ error: null }); }
+      if (table === 'media_link_proposals') { (q._patch?.decision === null ? reopened : decided).push(...(v as number[])); return Promise.resolve({ error: null }); }
       return q.run();
     },
     order() { return q; },
@@ -37,7 +40,7 @@ function builder(table: string) {
       if (o?.head) return q;
       return q._op === 'select' ? q : q.run();
     },
-    matches(r: Row) { return q._filters.every(([op, c, v]) => (op === 'is' ? (r[c] ?? null) === v : r[c] === v)); },
+    matches(r: Row) { return q._filters.every(([op, c, v]) => (op === 'is' ? (r[c] ?? null) === v : op === 'neq' ? r[c] !== v : r[c] === v)); },
     run() {
       if (table === 'media_bulk_journal') {
         if (q._op === 'update' && q._in) { for (const r of journal) if ((q._in[1] as number[]).includes(r.id as number)) Object.assign(r, q._patch); return Promise.resolve({ error: null }); }
@@ -72,7 +75,7 @@ const fakeLink = vi.fn(async (id: number, _c: unknown, opts: { keepCover?: boole
 });
 const item = (id: number, over: Record<string, unknown> = {}) => ({ mediaId: id, candidate: cand, expect: { title: `[audit] ${id}`, type: 'Manhwa' }, ...over });
 
-beforeEach(() => { tracker.clear(); journal = []; decided.length = 0; failJournal = false; fakeLink.mockClear(); });
+beforeEach(() => { tracker.clear(); journal = []; decided.length = 0; reopened.length = 0; failJournal = false; fakeLink.mockClear(); });
 
 describe('applyLinks (Approve for Link your library)', () => {
   it('links, journals only the link columns that changed, marks the proposal decided, and never touches progress', async () => {
@@ -80,7 +83,8 @@ describe('applyLinks (Approve for Link your library)', () => {
     const r = await applyLinks([item(1)], { link: fakeLink as never });
     expect(r).toMatchObject({ linked: 1, skipped: 0, failed: 0, linkedIds: [1] });
     expect(journal[0]).toMatchObject({ kind: 'link', op: 'update' });
-    expect(Object.keys(journal[0].after as Row).sort()).toEqual(['alt_ids', 'cover_image', 'last_known_latest_chapter', 'link_status', 'linked_at', 'source', 'source_id']);
+    // cover_pinned rides along whenever the cover changed (Undo respects a later pin).
+    expect(Object.keys(journal[0].after as Row).sort()).toEqual(['alt_ids', 'cover_image', 'cover_pinned', 'last_known_latest_chapter', 'link_status', 'linked_at', 'source', 'source_id']);
     expect(tracker.get(1)!.current_chapter).toBe(12);
     expect(decided).toEqual([1]);
   });
@@ -117,5 +121,45 @@ describe('applyLinks (Approve for Link your library)', () => {
     const u = await undoBatch(r.batchId);
     expect(u.restored).toBe(1);
     expect(tracker.get(1)).toMatchObject({ link_status: 'unlinked', source: null, source_id: null, alt_ids: null, cover_image: 'https://mine/c.jpg' });
+  });
+
+  // ---- consultant Job 9 must-fixes ----------------------------------------------
+  it('#1 never links a second title to a work another of his titles already holds', async () => {
+    tracker.set(1, base(1, { link_status: 'linked', source: 'anilist', source_id: '7' }));
+    tracker.set(2, base(2));
+    const r = await applyLinks([item(2)], { link: fakeLink as never });
+    expect(r).toMatchObject({ linked: 0, skipped: 1 });
+    expect(fakeLink).not.toHaveBeenCalled();
+  });
+
+  it('#3 Undo leaves a cover alone if he pinned it after linking', async () => {
+    tracker.set(1, base(1));
+    const r = await applyLinks([item(1)], { link: fakeLink as never });
+    expect(journal[0].after).toMatchObject({ cover_pinned: false });
+    tracker.set(1, { ...tracker.get(1)!, cover_pinned: true }); // pinned the new cover since
+    const u = await undoBatch(r.batchId);
+    expect(u.skipped).toBe(1);
+    expect(tracker.get(1)).toMatchObject({ cover_image: 'https://src/c.jpg', cover_pinned: true, link_status: 'linked' });
+  });
+
+  it('#4 an undone link reopens its proposal (it shows in the lists again)', async () => {
+    tracker.set(1, base(1));
+    const r = await applyLinks([item(1)], { link: fakeLink as never });
+    await undoBatch(r.batchId);
+    expect(reopened).toEqual([1]);
+  });
+
+  it('Undo still works after the update pass moved the latest chapter (unguarded bookkeeping)', async () => {
+    tracker.set(1, base(1));
+    const r = await applyLinks([item(1)], { link: fakeLink as never });
+    tracker.set(1, { ...tracker.get(1)!, last_known_latest_chapter: 145 }); // the pass ran since
+    expect((await undoBatch(r.batchId)).restored).toBe(1);
+  });
+
+  it('reports n / N progress while approving', async () => {
+    tracker.set(1, base(1)); tracker.set(2, base(2));
+    const seen: string[] = [];
+    await applyLinks([item(1), { ...item(2), candidate: { source: 'anilist', source_id: '8', title: 'Work', cover: 'https://src/c.jpg' } as never }], { link: fakeLink as never }, (d, t) => seen.push(`${d}/${t}`));
+    expect(seen).toEqual(['0/2', '1/2', '2/2']);
   });
 });

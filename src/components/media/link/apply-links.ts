@@ -49,16 +49,30 @@ export interface LinkDeps {
   link: typeof linkEntry;
 }
 
-export async function applyLinks(items: LinkApproval[], deps: LinkDeps = { link: linkEntry }): Promise<LinkOutcome> {
+/** Another of his titles already holds this work (a pick in this same batch included). */
+async function workTakenElsewhere(id: number, c: Candidate): Promise<boolean> {
+  const { data, error } = await supabase.from('media_tracker').select('id')
+    .eq('source', c.source).eq('source_id', c.source_id).eq('link_status', 'linked').neq('id', id).limit(1);
+  if (error) throw error;
+  return !!data?.length;
+}
+
+export async function applyLinks(
+  items: LinkApproval[],
+  deps: LinkDeps = { link: linkEntry },
+  onProgress?: (done: number, total: number) => void,
+): Promise<LinkOutcome> {
   const { data: { session } } = await supabase.auth.getSession();
   const userId = session?.user?.id;
   if (!userId) throw new Error('Not signed in');
   const out: LinkOutcome = { batchId: newBatchId(), linked: 0, skipped: 0, failed: 0, stoppedEarly: false, notPutBack: 0, linkedIds: [] };
 
+  let seen = 0;
   for (let i = 0; i < items.length; i += CHUNK) {
     const entries: JournalEntry[] = [];
     const ids: number[] = [];
     for (const it of items.slice(i, i + CHUNK)) {
+      onProgress?.(seen++, items.length);
       try {
         const before = await readRow(it.mediaId);
         // Compare-and-swap on what the proposal was about.
@@ -66,6 +80,8 @@ export async function applyLinks(items: LinkApproval[], deps: LinkDeps = { link:
           out.skipped += 1;
           continue;
         }
+        // One work, one title: never link a second title to it.
+        if (await workTakenElsewhere(it.mediaId, it.candidate)) { out.skipped += 1; continue; }
         const res = await deps.link(it.mediaId, it.candidate, { keepCover: !!it.keepCover });
         if (res.ok === false) { out.failed += 1; continue; }
         const after = await readRow(it.mediaId);
@@ -76,6 +92,9 @@ export async function applyLinks(items: LinkApproval[], deps: LinkDeps = { link:
           if (k === 'id' || k === 'title' || k === 'type' || k === 'cover_pinned') continue;
           if (!same(before[k], after[k])) { b[k] = before[k] ?? null; a[k] = after[k] ?? null; }
         }
+        // A cover this link changed is only undone while it's still unpinned: a pin
+        // set since is his decision (without this, Undo put the old cover over it).
+        if ('cover_image' in a) { a.cover_pinned = false; b.cover_pinned = before.cover_pinned ?? false; }
         if (Object.keys(a).length) { entries.push({ media_id: it.mediaId, op: 'update', before: b, after: a }); ids.push(it.mediaId); }
       } catch (e) {
         console.error('Linking failed for one title:', e);
@@ -101,5 +120,6 @@ export async function applyLinks(items: LinkApproval[], deps: LinkDeps = { link:
       if (error) console.warn('Could not mark proposals linked (they re-show as linked rows are filtered out):', error.message);
     }
   }
+  onProgress?.(items.length, items.length);
   return out;
 }

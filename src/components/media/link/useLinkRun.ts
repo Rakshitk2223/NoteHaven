@@ -5,8 +5,8 @@
 // It survives a tab close: the intent ("running" / "paused") is kept on this
 // device, and the resolver resumes from the proposals it already saved.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ProposalRow, ResolveRow, ResolverProgress } from '@/lib/media-resolve';
-import { type LinkState, loadLinkState, needsPick, unlinkedCount, type QueueItem } from './link-data';
+import type { ResolverProgress } from '@/lib/media-resolve';
+import { type LinkState, buildLinkView, loadLinkState, unlinkedCount, type QueueItem } from './link-data';
 
 type ResolveModule = typeof import('@/lib/media-resolve');
 type Intent = 'running' | 'paused' | null;
@@ -29,8 +29,10 @@ export interface LinkRun {
   queue: QueueItem[];
   /** Proposals the resolver auto-matched (band 'auto'), undecided and current: U3-4's list. */
   autoMatched: QueueItem[];
-  /** Rows whose best candidate is the same work as another of his rows (link one, not both). */
+  /** Rows whose best candidate is the same work as another of his rows, or one already linked. */
   duplicateIds: Set<number>;
+  /** Works already linked to one of his titles (source:source_id): can't be picked again. */
+  takenWorks: Set<string>;
   start: () => void;
   pause: () => void;
   resume: () => void;
@@ -93,17 +95,8 @@ export function useLinkRun(enabled: boolean): LinkRun {
   }, [mod, setIntent]);
   const cancel = useCallback(() => { if (!mod) return; setIntent(null); mod.getResolver().cancel(); }, [mod, setIntent]);
 
-  const isCurrent = mod ? (p: ProposalRow, r: ResolveRow) => mod.isCurrent(p, r) : null;
-  const queue = state && isCurrent ? needsPick(state, isCurrent) : [];
-  const rowById = state ? new Map(state.rows.map((r) => [r.id, r])) : null;
-  const autoMatched = state && isCurrent && rowById
-    ? state.proposals
-      .filter((p) => p.band === 'auto' && !p.decision && p.candidates?.length)
-      .flatMap((p) => {
-        const row = rowById.get(p.media_id);
-        return row && row.link_status !== 'linked' && isCurrent(p, row) ? [{ row, proposal: p }] : [];
-      })
-    : [];
+  // One view for the pill, the chips, the queue and the auto list (duplicates never auto-link).
+  const view = mod && state ? buildLinkView(state, mod.isCurrent, mod.findDuplicates) : null;
   // "812/1,259" even when no run is live in this tab (paused before a reload, say).
   const counts = progress && ACTIVE.has(progress.state) ? { done: progress.done, total: progress.total }
     : mod && state ? mod.tally(state.rows, state.proposals) : null;
@@ -114,9 +107,10 @@ export function useLinkRun(enabled: boolean): LinkRun {
     intent,
     unlinked: state ? unlinkedCount(state) : 0,
     counts,
-    queue,
-    autoMatched,
-    duplicateIds: mod && state ? new Set([...mod.findDuplicates(state.proposals).values()].flat()) : new Set(),
+    queue: view?.queue ?? [],
+    autoMatched: view?.autoMatched ?? [],
+    duplicateIds: view?.duplicateIds ?? new Set(),
+    takenWorks: view?.takenWorks ?? new Set(),
     start, pause, resume, cancel, refresh,
   };
 }

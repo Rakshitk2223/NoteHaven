@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import type { TrackerType } from '@/lib/media-sources';
 import { ReviewCard } from '../ReviewCard';
 import { candidateLine } from '../picker-utils';
-import { decide } from './link-data';
+import { decide, workKey } from './link-data';
 import { BackupNote } from '../import/BackupNote';
 import { useLinkApprove } from './useLinkApprove';
 import type { LinkRun } from './useLinkRun';
@@ -29,7 +29,7 @@ interface LinkQueueProps {
  */
 export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPicks }: LinkQueueProps) {
   const { toast } = useToast();
-  const { gate, approve, busy: linking } = useLinkApprove(run);
+  const { gate, approve, busy: linking, busyLabel } = useLinkApprove(run);
   // Only picks still in the queue (one decided elsewhere drops out).
   const picked = run.queue.filter(({ row }) => picks.has(row.id));
   const linkPicks = () => void approve(picked.map(({ row, proposal }) => ({
@@ -61,7 +61,7 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
           <div className="min-w-0 flex-1">
             <SheetTitle className="text-lg font-semibold text-foreground">Needs a pick</SheetTitle>
             <SheetDescription className="text-sm text-muted-foreground">
-              {run.queue.length.toLocaleString()} title{run.queue.length === 1 ? '' : 's'} with more than one likely match. Your progress and covers stay as they are.
+              {run.queue.length.toLocaleString()} title{run.queue.length === 1 ? '' : 's'} with more than one likely match. Your progress stays; a missing or wrong-kind cover is replaced by the source’s (pinned covers never are).
             </SheetDescription>
           </div>
           <Button size="icon" variant="ghost" className="h-10 w-10 flex-shrink-0" onClick={() => onOpenChange(false)} aria-label="Close">
@@ -88,6 +88,8 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
                       alt: c.alt_titles?.[0] ?? null,
                       line: [candidateLine(c, row.type as TrackerType), c.year].filter(Boolean).join(' · ') || null,
                       cover: c.cover,
+                      // One work, one title: a work already linked to another of his titles can't be picked.
+                      disabledReason: run.takenWorks.has(workKey(c)) ? 'Already linked to another of your titles' : null,
                     }))}
                     picked={picks.has(row.id) ? String(picks.get(row.id)) : undefined}
                     onPick={(key) => {
@@ -113,7 +115,7 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
             )}
             {picked.length > 0 && (
               <Button variant="gradient" className="h-11" disabled={!gate.backedUp || linking} onClick={linkPicks}>
-                {linking ? 'Linking…' : `Link ${picked.length.toLocaleString()} picked`}
+                {linking ? busyLabel : `Link ${picked.length.toLocaleString()} picked`}
               </Button>
             )}
           </div>

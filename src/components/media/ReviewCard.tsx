@@ -8,6 +8,8 @@ export interface ReviewCandidate {
   /** One short line: year · format, or "Ch 140 · ongoing", or a NoteHaven type. */
   line?: string | null;
   cover?: string | null;
+  /** Can't be picked, with the reason shown (e.g. already linked to another of his titles). */
+  disabledReason?: string | null;
 }
 
 interface ReviewCardProps {
@@ -54,7 +56,8 @@ export function ReviewCard({ title, subtitle, cover, candidates, picked, onPick,
           const on = picked === c.key;
           return covers ? (
             <button key={c.key} type="button" role="radio" aria-checked={on} onClick={() => onPick(c.key)}
-              className={cn('flex min-h-11 min-w-0 flex-col gap-1 rounded-lg p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              disabled={!!c.disabledReason} title={c.disabledReason ?? undefined}
+              className={cn('flex min-h-11 min-w-0 flex-col gap-1 rounded-lg p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
                 on ? 'bg-primary/15 ring-2 ring-primary' : 'ring-1 ring-border hover:bg-secondary/60')}>
               <span className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-muted">
                 <CoverArt src={c.cover ?? null} title={c.title} initials={1} lazy letterClassName="text-lg" />
@@ -62,6 +65,7 @@ export function ReviewCard({ title, subtitle, cover, candidates, picked, onPick,
               <span className="line-clamp-2 text-xs font-medium leading-snug text-foreground">{c.title}</span>
               {c.alt && <span className="line-clamp-1 text-[11px] text-muted-foreground">{c.alt}</span>}
               {c.line && <span className="line-clamp-1 text-[11px] font-medium text-foreground/80">{c.line}</span>}
+              {c.disabledReason && <span className="line-clamp-2 text-[11px] font-medium text-warning">{c.disabledReason}</span>}
             </button>
           ) : (
             <button key={c.key} type="button" role="radio" aria-checked={on} onClick={() => onPick(c.key)}

@@ -20,7 +20,7 @@ import type { LinkRun } from './useLinkRun';
 export default function AutoMatched({ open, onOpenChange, run, phone }: {
   open: boolean; onOpenChange: (o: boolean) => void; run: LinkRun; phone: boolean;
 }) {
-  const { gate, approve, busy } = useLinkApprove(run);
+  const { gate, approve, busy, busyLabel } = useLinkApprove(run);
   const [excluded, setExcluded] = useState<Set<number>>(() => new Set());
   const [keepCover, setKeepCover] = useState<Set<number>>(() => new Set());
   const items = run.autoMatched;
@@ -88,7 +88,7 @@ export default function AutoMatched({ open, onOpenChange, run, phone }: {
               onClick={() => void approve(chosen.map(({ row, proposal }) => ({
                 mediaId: row.id, candidate: proposal.candidates[0], expect: { title: row.title, type: row.type }, keepCover: keepCover.has(row.id),
               }))).then((ok) => { if (ok) onOpenChange(false); })}>
-              {busy ? 'Linking…' : `Approve ${chosen.length.toLocaleString()}`}
+              {busy ? busyLabel : `Approve ${chosen.length.toLocaleString()}`}
             </Button>
           </div>
         </div>

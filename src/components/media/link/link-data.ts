@@ -5,8 +5,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetch-all';
 import type { ProposalRow, ResolveRow } from '@/lib/media-resolve';
 
+/** His rows as the resolver sees them, plus the link (to spot works already linked elsewhere). */
+export type LinkRow = ResolveRow & { source?: string | null; source_id?: string | null };
+
 export interface LinkState {
-  rows: ResolveRow[];
+  rows: LinkRow[];
   proposals: ProposalRow[];
 }
 
@@ -16,8 +19,8 @@ export async function loadLinkState(): Promise<LinkState> {
   const uid = session?.user?.id;
   if (!uid) return { rows: [], proposals: [] };
   const [rows, proposals] = await Promise.all([
-    fetchAllRows<ResolveRow>(() => supabase.from('media_tracker')
-      .select('id, title, type, current_chapter, current_episode, link_status, updated_at, last_activity_at')
+    fetchAllRows<LinkRow>(() => supabase.from('media_tracker')
+      .select('id, title, type, current_chapter, current_episode, link_status, source, source_id, updated_at, last_activity_at')
       .eq('user_id', uid).order('id') as never),
     fetchAllRows<ProposalRow>(() => supabase.from('media_link_proposals' as never)
       .select('media_id, input_title, input_type, input_progress, band, candidates, sources, resolved_at, decision, decided_at')
@@ -27,29 +30,51 @@ export async function loadLinkState(): Promise<LinkState> {
 }
 
 export interface QueueItem {
-  row: ResolveRow;
+  row: LinkRow;
   proposal: ProposalRow;
 }
 
+export const workKey = (c: { source: string; source_id: string }) => `${c.source}:${c.source_id}`;
+
+export interface LinkView {
+  /** Needs HIS pick: review / duplicate bands, plus auto matches that collide (below). */
+  queue: QueueItem[];
+  /** Confident, collision-free matches: the Auto-matched list. */
+  autoMatched: QueueItem[];
+  /** Rows whose best candidate collides with another row's (or with a work already linked). */
+  duplicateIds: Set<number>;
+  /** Works already linked to one of his titles: never offered for a second one. */
+  takenWorks: Set<string>;
+}
+
 /**
- * Proposals waiting for HIS pick: band review (or duplicate), undecided, still
- * about the row as it is now (not renamed/retyped since), and the row still
- * unlinked. `isCurrent` is the resolver's own rule (injected: keeps this pure).
+ * One pass over rows + proposals for the whole Link UI. A DUPLICATE (two of his
+ * rows → one work, or a work already linked to another row) never auto-links:
+ * it goes to the queue, where the already-linked work can't be picked.
+ * `isCurrent` / `findDuplicates` are the resolver's own rules (injected: pure).
  */
-export function needsPick(
+export function buildLinkView(
   s: LinkState,
   isCurrent: (p: ProposalRow, r: ResolveRow) => boolean,
-): QueueItem[] {
+  findDuplicates: (p: ProposalRow[]) => Map<string, number[]>,
+): LinkView {
   const byId = new Map(s.rows.map((r) => [r.id, r]));
-  const out: QueueItem[] = [];
-  for (const p of s.proposals) {
-    if ((p.band !== 'review' && p.band !== 'duplicate') || p.decision) continue;
+  const takenWorks = new Set(s.rows.filter((r) => r.link_status === 'linked' && r.source && r.source_id)
+    .map((r) => workKey({ source: r.source!, source_id: r.source_id! })));
+  const open = s.proposals.filter((p) => {
     const row = byId.get(p.media_id);
-    if (!row || row.link_status === 'linked' || !isCurrent(p, row)) continue;
-    if (!p.candidates?.length) continue;
-    out.push({ row, proposal: p });
+    return !p.decision && p.candidates?.length && row && row.link_status !== 'linked' && isCurrent(p, row);
+  });
+  const duplicateIds = new Set<number>([...findDuplicates(open).values()].flat());
+  for (const p of open) if ((p.band === 'auto' || p.band === 'review') && takenWorks.has(workKey(p.candidates[0]))) duplicateIds.add(p.media_id);
+  const queue: QueueItem[] = [];
+  const autoMatched: QueueItem[] = [];
+  for (const p of open) {
+    const item = { row: byId.get(p.media_id)!, proposal: p };
+    if (p.band === 'auto' && !duplicateIds.has(p.media_id)) autoMatched.push(item);
+    else if (p.band === 'review' || p.band === 'duplicate' || p.band === 'auto') queue.push(item);
   }
-  return out;
+  return { queue, autoMatched, duplicateIds, takenWorks };
 }
 
 /** Unlinked rows: "Link your library" is only offered while there are any. */
