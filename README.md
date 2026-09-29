@@ -56,6 +56,9 @@ In the Supabase SQL editor, run the files in `supabase/migrations/` **in filenam
 7. `24_share_owner_check.sql` … `27_notes_realtime.sql` (fix batch 1: share-owner check, calendar RPC,
    tag counts, notes realtime)
 8. `28_media_source_links.sql` — Media v2 source links, `media_source_meta`, `media_progress_log`
+9. `29_media_v2_import_link.sql` — the Tachimanga import map, the bulk-change journal, link proposals,
+   reader-latest columns, and the Dropped / On Hold statuses. It runs as one transaction and stops,
+   changing nothing, if an existing status wouldn't fit the new list
 
 There is no migration runner — don't use `supabase db push`. `00` and `20` are not safe to re-run;
 `21` onwards are idempotent.
@@ -100,8 +103,10 @@ VITE_MEDIA_SEARCH_URL=http://127.0.0.1:8787 npm run dev     # terminal 2 (or put
 
 `edge:dev` needs `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`
 (TMDB titles also need `TMDB_API_KEY`). It binds to loopback only and checks every bearer token against
-Supabase Auth, as the hosted gateway would. It talks to the **production database**, so its cache writes
-are real. The override is dev-only: production builds ignore `VITE_MEDIA_SEARCH_URL`.
+Supabase Auth, as the hosted gateway would. It reads the **production database** but never writes the
+shared caches (`media_metadata`, `media_source_meta`) unless you start it with `EDGE_DEV_CACHE_WRITES=1`.
+Anything you do in the app through it (progress, links, History) is still a real production write.
+Behind a TLS-intercepting proxy, start it with `DENO_TLS_CA_STORE=mozilla,system`. The override is dev-only: production builds ignore `VITE_MEDIA_SEARCH_URL`.
 
 ## Build and deploy
 
@@ -132,15 +137,16 @@ All run locally (with `tsx`, apart from `edge:dev`) and read `./.env`. The ones 
 | `npm run backfill:covers` | fills missing `media_tracker.cover_image`, calling AniList, Kitsu, Jikan, MangaDex, MangaUpdates, TVmaze, TMDB and OMDB directly |
 | `npm run backfill:metadata` | fills `media_metadata` through the deployed edge function, authenticated with the service-role key (`--force`, `--limit N`) |
 | `npm run backfill:releases` | fills `media_tracker.release_date` from cached episode data; dry run by default, `--apply` writes |
-| `npm run backup:media` | dumps the media tables to `./backups/<timestamp>/` with row counts and SHA-256 checksums |
+| `npm run backup:media` | dumps the media tables (tracker, legacy metadata, tags, History, and the migration 29 tables) to `./backups/<timestamp>/` with row counts and SHA-256 checksums |
 | `npm run backup:vault` | read-only: downloads every Vault file plus its rows to `./backups/vault-<stamp>/`, with a SHA-256 manifest and `RESTORE.md` |
 | `npm run audit:covers -- <export.json> [--list]` | offline: counts (and lists) covers that are the wrong medium, from a Settings → Data export |
 | `npm run link:dry-run [-- <export.json>] [--fresh \| --rescore \| --retry-errors]` | Media v2: proposes a source link for every title in an export and reports auto / review / unlinked counts. **Writes nothing** to any database; output goes to `backups/link-dry-run/`. `--rescore` re-scores stored candidates offline |
 | `npm run edge:dev` | the local edge function (see Setup, step 5) |
+| `npx tsx scripts/make-tachimanga-fixture.ts [--variant minimal\|extra] [--pad-chapters N] [--out path]` | writes a **synthetic** Tachimanga backup for testing the import: every title is invented and prefixed `[audit]`, nothing comes from a real backup. Output defaults to your temp directory, and the script **refuses any path inside the repo** (it's public). `--pad-chapters 225000` makes a ~45 MB library for the phone memory test. To test on an iPhone, rename it to `.zip` so iOS doesn't offer to restore it in the reader app |
 | `npm run audit:coverage` | read-only report of metadata coverage per media type (`--list <type>`) |
 | `npm run smoke:apis` | hits the upstream media APIs to check the fields the edge function relies on (`--rounds N`) |
 | `npm run test:insights` | assertion script for the pure media-insight helpers (also run by CI) |
-| `npm test` | Vitest: match scoring, progress rollover, linking rules, the edge adult filter (also run by CI) |
+| `npm test` | Vitest: match scoring, progress rollover and the one progress writer, linking rules, the bulk journal, export / restore, the Tachimanga parser (on synthetic fixtures) and planner, the edge adult filter (also run by CI) |
 
 ## Troubleshooting
 

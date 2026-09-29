@@ -33,7 +33,7 @@ where the table is created (`00` = the baseline).
 | `tasks` | `task_text`, `is_completed`, `is_pinned`, `due_date` · upd | per-op | 00 | `Tasks`, `Dashboard`, calendar quick-add |
 | `notes` | `title`, `content` (HTML), `is_pinned`, `calendar_date`, `background_color` (category key) · upd | per-op, owner only | 00 | `Notes` (+ realtime), `Dashboard`; share RPCs |
 | `prompts` | `title`, `prompt_text`, `category`, `is_favorited`, `is_pinned` · **no `updated_at`** | per-op | 00 | `Library`, `Dashboard`, `CommandsTab` |
-| `media_tracker` | `title`, `type` CHECK (Movie, Series, Anime, Manga, Manhwa, Manhua, KDrama, JDrama), `status` CHECK (Watching, Reading, Plan to Watch, Plan to Read, Completed), `rating` 1–10, `current_season/episode/chapter`, `cover_image`, `release_date`, `last_known_total_episodes/seasons`, `has_new_content`, `last_activity_at` · trigram GIN on `title` · upd + activity trigger. **28 adds** the link columns — see "Media v2" below | per-op | 00, 28 | `MediaTracker`, `hooks/media/*`, `lib/media-*`, `simple-image-fetcher`, scripts |
+| `media_tracker` | `title`, `type` CHECK (Movie, Series, Anime, Manga, Manhwa, Manhua, KDrama, JDrama), `status` CHECK (Watching, Reading, Plan to Watch, Plan to Read, Completed, **Dropped, On Hold** since 29), `rating` 1–10, `current_season/episode/chapter`, `cover_image`, `release_date`, `last_known_total_episodes/seasons`, `has_new_content`, `last_activity_at` · trigram GIN on `title` · upd + activity trigger. **28 and 29 add** the link, latest and reader columns — see "Media v2" below | per-op | 00, 28, 29 | `MediaTracker`, `hooks/media/*`, `lib/media-*`, `simple-image-fetcher`, scripts |
 | `code_snippets` | `title`, `code`, `language`, `category`, `folder_id` → `snippet_folders` (SET NULL), `filename`, `description`, `is_favorited`, `is_pinned` · upd | per-op | 00 | `lib/codeSnippets.ts` |
 | `snippet_folders` | `name` (unique per user), `color`, `sort_order` · upd. **Also the project list for `commands`** | ALL | 00 | `lib/codeSnippets.ts`, `lib/commands.ts` |
 | `commands` | `folder_id` → `snippet_folders` (SET NULL), `category` (free text), `label`, `command`, `description`, `is_favorited`, `is_pinned`, `sort_order` · upd | ALL | 21 | `lib/commands.ts` |
@@ -83,7 +83,7 @@ Share recipients never touch these tables: they use the `get_shared_note` / `upd
 below. Every writer of `media_metadata` upserts on `(title, type)`; the edge function writes with the
 service role. Since Media v2 it is the **legacy** cache, used only for unlinked entries.
 
-### Media v2: source links and history (migration 28)
+### Media v2: source links, history, import and journal (migrations 28–29)
 
 Each tracker entry can be bound once, by search-and-pick, to one source work (`source` + `source_id`).
 Refresh then fetches by id instead of re-guessing from the title. **User-owned** fields stay on
@@ -93,14 +93,39 @@ Refresh then fetches by id instead of re-guessing from the title. **User-owned**
 
 | Table / columns | Notes | RLS | File |
 |---|---|---|---|
-| `media_tracker` + `source` CHECK (anilist, mangaupdates, mangadex, jikan, tmdb, tvmaze), `source_id` TEXT, `alt_ids` JSONB, `link_status` CHECK (unlinked, linked, review) default `unlinked`, `linked_at`, `cover_pinned` BOOL default false, `platform`, `resume_url` (CHECK `^https?://`), `last_known_latest_chapter`, `latest_checked_at`, `latest_changed_at` | `linked` requires `source` + `source_id` (CHECK). Indexes `(user_id, link_status)` and partial `(source, source_id)`. `cover_pinned` = "keep my cover" (pinned with a null cover means "no cover wanted"); linking, sweeps and background fills never replace a pinned cover. `last_known_latest_chapter` / `latest_checked_at` mirror the source's latest chapter on link and on by-id refresh; `latest_changed_at` moves only when the latest grows. Nothing reads it yet: it's for the Phase 3 Updates tab | per-op (existing) | 28 |
+| `media_tracker` + `source` CHECK (anilist, mangaupdates, mangadex, jikan, tmdb, tvmaze), `source_id` TEXT, `alt_ids` JSONB, `link_status` CHECK (unlinked, linked, review) default `unlinked`, `linked_at`, `cover_pinned` BOOL default false, `platform`, `resume_url` (CHECK `^https?://`), `last_known_latest_chapter`, `latest_checked_at`, `latest_changed_at` | `linked` requires `source` + `source_id` (CHECK). Indexes `(user_id, link_status)` and partial `(source, source_id)`. `cover_pinned` = "keep my cover" (pinned with a null cover means "no cover wanted"); linking, sweeps and background fills never replace a pinned cover. `last_known_latest_chapter` / `latest_checked_at` mirror the source's latest chapter on link and on by-id refresh; `latest_changed_at` moves only when the latest grows (nothing reads it yet: it's for the U4 Updates tab) | per-op (existing) | 28 |
+| `media_tracker` + `reader_latest_chapter`, `reader_checked_at` (the reader app's own latest; **written only by the import**), `cover_origin` CHECK (manual, source, reader, search; NULL = unknown / set before 29; today only the import sets it, as `reader`), `last_known_latest_season` / `last_known_latest_episode` (the source's latest aired, for watch types in U4; nothing writes them yet) | N behind = the **higher** of the source's and the reader's latest (`latestOf` in `components/media/progress-view.ts`); shelved titles (Completed, On Hold, Dropped) never show a badge | per-op (existing) | 29 |
 | `media_source_meta` | PK `(source, source_id)`. `title`, `alt_titles[]`, `description`, `authors[]`, `genres[]`, `status` CHECK (ongoing, completed, hiatus, cancelled, upcoming), `score` 0–10, `cover`, `banner`, `format`, `medium` CHECK (comic, novel, anime, screen, other), `country`, `year`, `chapters`, `episodes`, `latest_chapter`, `total_seasons`, `seasons`, `episodes_detail`, `cast_members`, `runtime`, `next_airing`, `alt_ids`, `source_url` (CHECK `^https?://`), `fetched_at`. No `user_id`: it's what public APIs publish | public SELECT; **no write policies, and INSERT / UPDATE / DELETE revoked from anon + authenticated** — only the edge function (service role) writes it | 28 |
-| `media_progress_log` | `id` identity, `user_id` default `auth.uid()`, `media_id` → `media_tracker` (cascade), `field` CHECK (current_chapter, current_episode, current_season), `from_value`, `to_value`, `season`, `kind` CHECK (log, undo), `created_at`. Indexes `(user_id, created_at DESC)`, `(media_id, created_at DESC)` | SELECT own; INSERT own **and** the `media_id` must be the caller's (an EXISTS check, because FK checks bypass RLS); **append-only**: no UPDATE / DELETE policies, and both revoked | 28 |
+| `media_progress_log` | `id` identity, `user_id` default `auth.uid()`, `media_id` → `media_tracker` (cascade), `field` CHECK (current_chapter, current_episode, current_season), `from_value`, `to_value`, `season`, `kind` CHECK (log, undo), `origin` (29: NULL = by hand, `tachimanga` = the import), `created_at`. Indexes `(user_id, created_at DESC)`, `(media_id, created_at DESC)` | SELECT own; INSERT own **and** the `media_id` must be the caller's (an EXISTS check, because FK checks bypass RLS); **append-only**: no UPDATE / DELETE policies, and both revoked | 28 |
 
-The progress writer (`hooks/media/useProgressMutation.ts`) does a compare-and-swap UPDATE on
-`media_tracker`, then a **separate** log insert once the update confirms. A failed log insert never
-blocks or rolls back the progress write. Undo inserts its own `kind = 'undo'` row and never deletes one.
-The History tab only reads this table.
+| `media_link_proposals` | PK `media_id` → `media_tracker` (cascade), `user_id`, staleness snapshot `input_title` / `input_type` / `input_progress`, `band` CHECK (auto, review, none, error, duplicate), `candidates` JSONB (top 3), `sources` JSONB, `resolved_at`, `decision` CHECK (linked, skipped, not_listed), `decided_at`. Scratch data for U3; nothing writes it yet | own rows, all four ops; INSERT / UPDATE also need the caller's `media_id` (EXISTS) | 29 |
+| `media_import_map` | PK `(user_id, origin, origin_key)`; `origin` CHECK (tachimanga), `origin_key` = sha256 hex of `source:url` (**no reader title or URL is stored**), `media_id` → `media_tracker` (cascade; many keys may map to one row), `reader_cover` (CHECK `^https?://`), `last_seen_at`. Survives relinks; never stored in `alt_ids` | own rows, all four ops; INSERT / UPDATE need the caller's `media_id` | 29 |
+| `media_bulk_journal` | `id`, `user_id`, `batch_id` uuid, `kind` CHECK (link, import, cover), `op` CHECK (update, insert), `media_id` → `media_tracker` (cascade), `before` / `after` JSONB, `created_at`, `undone_at`. Indexes `(user_id, created_at DESC)`, `(batch_id)` | SELECT / INSERT own (+ `media_id` EXISTS); **append-only except marking undone**: an UPDATE policy only from `undone_at IS NULL` to a timestamp, and a column grant on `undone_at` alone; DELETE revoked | 29 |
+
+All three 29 tables revoke everything from `anon`. Migration 29 is one transaction with a pre-check (it
+raises, changing nothing, if any existing status is outside the new list) and `lock_timeout` 5 s.
+
+**One progress writer:** `lib/media-progress-write.ts` `casProgressWrite` (used by
+`hooks/media/useProgressMutation.ts` for every tap, the Log sheet and Undo, and by the Tachimanga import).
+It does a compare-and-swap UPDATE on `media_tracker` (every changed column matched on the base it planned
+from), then a **separate** `media_progress_log` insert once the update confirms. A failed log insert never
+blocks or rolls back progress. A lost race re-plans a relative ±N and refuses an explicit target
+(`ProgressConflictError`). Undo writes its own `kind = 'undo'` rows and never deletes one. The History tab
+only reads the log.
+
+**One bulk journal:** `lib/media-bulk.ts`. Every bulk change (the import today; U3 linking and U5 cover
+passes later) writes a before / after per row (`writeJournal`) before reporting done. "Undo last bulk
+change" (`undoBatch`) is one compare-and-swap restore: `op = 'update'` puts `before` back only where the
+row still holds `after`; `op = 'insert'` deletes the row it created under the same guard. Rows changed
+since are skipped and counted, never clobbered. Bookkeeping timestamps are restored but not compared
+(`UNGUARDED_COLUMNS`), and an entry with no comparable column is refused (`hasGuard`).
+
+**Tachimanga import** (U2b; frontend detail in `context/frontend.md`): parsing and planning happen
+**entirely in the browser**. Nothing about the backup reaches the edge function or any log. Approve
+writes only his own rows: progress through `casProgressWrite` (History `origin = 'tachimanga'`),
+guarded status / cover / reader-latest / platform-if-empty updates, new titles, `media_import_map`
+upserts (hash keys + thumbnail URL only), and a `media_bulk_journal` batch for Undo. It never writes
+`resume_url`, rating, title or type, and never touches `media_source_meta`.
 
 ### Vault, lifestyle, work
 
@@ -219,30 +244,37 @@ client helpers are in `src/lib/edge-function.ts`.
 - **Pacing:** `SOURCE_SPACING_MS` per upstream; AniList is **2100 ms** (it runs at a reduced 30 req/min),
   Jikan 400, Wikidata 300, MangaDex / MangaUpdates / TVmaze / Fanart 250, TMDB 60.
 - **Writes:** fire-and-forget upserts into `media_metadata` on `(title, type)` with the service role —
-  the top 10 results in search and source modes, and cover-only rows in batch mode. v2 `detail` writes
+  the top 10 results in search and source modes, and cover-only rows in batch mode. Each site reads the
+  existing rows first and **merges** (a sparser hit never downgrades a richer row; a guessed `completed`
+  never beats a real status), and upserts only rows that changed. U4 removes these writes. v2 `detail` writes
   `media_source_meta`; v2 `search` writes nothing.
 - **Errors:** `{ error }` with 400, 401 or 500; internal details are never returned.
 - **Secrets:** `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS`; `SUPABASE_URL` and
   `SUPABASE_SERVICE_ROLE_KEY` come from the runtime.
 - **Deploy:** `deploy-edge-function.sh` checks the CLI and login, runs
-  `supabase link --project-ref ylefihvjlyzabhvgdnoe` and `supabase functions deploy media-search` (JWT
+  `supabase link --project-ref ylefihvjlyzabhvgdnoe` and `supabase functions deploy media-search --use-api` (JWT
   verification comes from `config.toml`), then sets `TMDB_API_KEY`, `FANART_API_KEY` and
-  `ALLOWED_ORIGINS` from the environment when they're present. CI parses the function with esbuild on
+  `ALLOWED_ORIGINS` from the environment when they're present (an unexported one is left unchanged on
+  the server, never cleared). It deploys with `--use-api`, so Docker needn't be running. CI parses the function with esbuild on
   every push (bundling `v2.ts` and `adult.ts` through the import).
 - **Local dev** (`npm run edge:dev` → `scripts/edge-dev/serve.ts`): runs the **real** `index.ts` in real
   Deno (pinned `deno@2.9.6` through npx; no Docker, no Supabase CLI) on `127.0.0.1:8787`
   (`EDGE_DEV_PORT` changes it). Three shims: env comes from `.env` (`SUPABASE_URL` falls back to
   `VITE_SUPABASE_URL`; it needs the service-role and anon keys and never prints them); `Deno.serve` is
   pinned to loopback; and `verify_jwt` is emulated by checking each bearer token against
-  `/auth/v1/user` (or accepting the service-role key), with a 60 s cache. **It runs against the
-  production database**, so its cache writes (`media_metadata`, `media_source_meta`) are real.
+  `/auth/v1/user` (or accepting the service-role key), with a 60 s cache. **It reads the production
+  database**, but a fourth shim forces `EDGE_CACHE_WRITES=0`, so it never writes `media_metadata` or
+  `media_source_meta` (opt in with `EDGE_DEV_CACHE_WRITES=1`). Writes the app makes through it (progress,
+  links, History) are still real production writes.
 
 ## Cover images in the client
 
 Linked entries (Media v2) get their cover from `linkEntry` in `lib/media-link.ts`: never when
 `cover_pinned`; for a new entry, or when the current cover is missing or fails `isUsableCover`, or when
 the user accepts "use new cover". By-id refresh (`refreshLinked`) never touches the cover. Everything
-below is the path for **unlinked** entries. Every path refuses wrong-medium art (`lib/cover-medium.ts`
+below is the path for **unlinked** entries, and since U0 every one of those writers (per-card refresh,
+bulk refresh, the sweep, Sync activity retry) skips a pinned cover and no longer bumps
+`last_activity_at`. Every path refuses wrong-medium art (`lib/cover-medium.ts`
 `isUsableCover`: a donghua poster on a manhua, a TV poster on a manhwa, MangaDex hotlinks), and search
 hits must match the typed title (`lib/title-match.ts`, bigram Dice ≥ `TITLE_MATCH_MIN` 0.6).
 
@@ -276,9 +308,11 @@ privileges.
 | `26_tag_usage_triggers.sql` | usage-count triggers on `code_snippet_tags` and `work_project_tags`, plus a one-time recount (writes only rows whose count is wrong) | yes |
 | `27_notes_realtime.sql` | adds `notes` to `supabase_realtime` (checks `pg_publication_tables` first) | yes |
 | `28_media_source_links.sql` | Media v2: 11 link / latest columns on `media_tracker`, `media_source_meta`, `media_progress_log` (see "Media v2" above). **Additive only**; ends with a verify SELECT (expect 11, true, true) | yes |
+| `29_media_v2_import_link.sql` | `media_link_proposals`, `media_import_map`, `media_bulk_journal`; 5 `media_tracker` columns (reader latest, cover origin, latest season / episode); `media_progress_log.origin`; the `status` CHECK widened to Dropped / On Hold (found by column, not by name; the only change that isn't an ADD). One transaction; a status pre-check raises before anything changes; ends with a verify SELECT | yes |
 
-All of `00`–`28` are applied on production (24–27 with fix batch 1; 28 on 2026-09-28, ahead of the
-Media v2 code that uses it). **Next new file: `29_*.sql`.**
+All of `00`–`29` are applied on production (24–27 with fix batch 1; 28 on 2026-09-28 and 29 on
+2026-09-29, each ahead of the code that uses it). **Next new file: `30_*.sql`**, needed only if the
+cover Storage copy (E2) turns out to be necessary.
 
 `00` sections: 01 core tables · 02 tags, ledger, subscriptions, birthdays, countdowns, shared notes,
 snippets, calendar RPC · 03 `media_metadata` · 04 `user_preferences` · 05 `cover_image` + pg_trgm ·
@@ -304,13 +338,14 @@ listed in `README.md`.
 | `backfill-cover-images.ts` | the upstream APIs **directly**, one item at a time (AniList, Kitsu, Jikan, MangaDex, MangaUpdates, TVmaze, TMDB, OMDB), then `media_tracker.cover_image` |
 | `backfill-media-metadata.ts` | the deployed edge function (source mode), authenticated with the service-role key (which the function accepts since fix batch 1) → `media_metadata` and `media_tracker.last_known_total_*` |
 | `backfill-release-dates.ts` | cached `media_metadata.episodes_detail` → `media_tracker.release_date` (no network) |
-| `backup-media.ts` | `media_tracker`, `media_metadata`, `media_tags` → `./backups/<timestamp>/`. Doesn't include `media_source_meta` or `media_progress_log` |
+| `backup-media.ts` | `media_tracker`, `media_metadata`, `media_tags`, `media_progress_log` and the three migration 29 tables → `./backups/<timestamp>/`; a 29 table that doesn't exist yet is noted as "not set up", not a failure. Doesn't include `media_source_meta` (rebuildable from the sources) |
 | `backup-vault.ts` | **read-only**: every Vault object's bytes plus `vault_files` / `vault_folders` rows, with SHA-256 manifest and `RESTORE.md` → `./backups/vault-<stamp>/`; orphan objects are backed up and flagged |
 | `audit-cover-medium.ts` | reads a local JSON export (no database, no network) and lists covers that are provably the wrong medium (`lib/cover-medium.ts`) |
 | `audit-metadata-coverage.ts` | read-only coverage report |
 | `smoke-media-apis.ts` | the upstream APIs, to check the fields the edge function relies on |
 | `link-dry-run.ts` (`npm run link:dry-run`, run with `node --import tsx`) | Media v2 Phase 2 prep. For every `media_tracker` row in a local export, runs the edge function's own `searchAll` **in-process** (same sources, adult filters and pacing) and scores it with `lib/media-match.ts`. The database client it hands the edge code **throws if touched**, so it can't write. Output goes to gitignored `backups/link-dry-run/` (`progress.jsonl` resume log, `summary.json`, `review.md`). Flags: `<export.json>`, `--fresh`, `--rescore` (offline re-score of stored candidates), `--retry-errors`. TMDB titles need `TMDB_API_KEY` |
 | `edge-dev/serve.ts` (`npm run edge:dev`, runs in Deno) | the local edge-function server (see "Edge function" above) |
+| `make-tachimanga-fixture.ts` (`npx tsx scripts/make-tachimanga-fixture.ts [--variant minimal\|extra] [--pad-chapters N] [--out path]`) | no database, no network: writes a **synthetic** Tachimanga `.tmb` (every title and category invented and prefixed `[audit]`; `--pad-chapters 225000` gives the ~45 MB memory test). Defaults to `$TMPDIR` and **refuses any path inside the repo** |
 
 ## Live-database health check
 

@@ -227,6 +227,12 @@ disaster floor; `media_bulk_journal` is the undo.
   `removeCoverImage`, `backfill-cover-images`.
 
 ### F. Migration `29` (one paste, idempotent)
+> **Live on production since 2026-09-29** as `29_media_v2_import_link.sql`. As built, it also adds
+> `media_bulk_journal.op` (update | insert, so Undo can remove a title the import created),
+> `media_tracker.last_known_latest_season` / `last_known_latest_episode` (for U4's watch-type latest), and
+> a `cover_origin` CHECK (manual, source, reader, search). It runs as one transaction behind a status
+> pre-check. The list below is the scope as planned.
+
 1. `media_link_proposals` (no `applied` or `batch_id` columns).
 2. `media_import_map` (`user_id`, `origin`, `origin_key` = sha256 of `source:url`, `media_id` FK cascade,
    `reader_cover`, `last_seen_at`; PK `user_id + origin + origin_key`).
@@ -251,12 +257,22 @@ needed).
 the library update need **no** deploy. E2 only if needed.
 
 ### G. Roadmap U0 → U6 (U6 parked; scope frozen at U0–U5, 2026-09-29)
+**Status (2026-09-29): U0, U2a and U2b are done on `media-v2`; U3 is next.**
+| Unit | Status |
+|---|---|
+| U0 | ✅ done on the branch: pin guards on every legacy cover writer, cover writes no longer bump `last_activity_at`, Edit → Update stays with "Saved · Undo", Library stats over the whole library, one `latestOf` (pulled forward from U4) for badge + Behind filter, `resolve` removed, `main` merged in (`84fadef`). **Still open: E1, the one edge redeploy, at ship** |
+| U2a | ✅ done: migration 29 live, Dropped / On Hold, platform + resume link in Edit and PickPreview |
+| U2b | ✅ done: the Worker + sql.js parser, the pure planner, the preview, guarded apply through the one progress writer (`lib/media-progress-write.ts`), the journal and "Undo last bulk change" (`lib/media-bulk.ts`), the backup gate (`lib/full-export.ts`), a synthetic fixture generator, and Vitest |
+| U3 | **next** |
+| U4, U5 | not started |
+| U6 | parked (`docs/BACKLOG.md`) |
+
 | Unit | Contents | Removes | Depends on | Size |
 |---|---|---|---|---|
-| **U0** Phase 1 ship, now | the Phase 1 fixes; the gate at 390 / 820 / 1180 / 1440; pin guards on the 3 legacy cover writers (bulk refresh, `refreshCoverImage`, Sync activity retry); Sync activity "Remove" uses `setCoverPinned`; cover writes stop bumping `last_activity_at`; the Behind filter uses `behindCount`; E1; merge | `resolveBatch`, edge `resolve` | his deploy | S–M |
-| **U2a** statuses and fields | paste 29; Dropped / On Hold in filters, rails and badge suppression (**before any badge lights up**); `platform` + `resume_url` in Edit and PickPreview | — | 29 | S |
-| **U2b** Tachimanga import | a Worker + sql.js; the matcher (import map → title → linked alt titles, reading rows only; a new title's type is a required pick); the preview; apply through a compare-and-swap lib extracted from `useProgressMutation`; History `origin`; the reader latest in the badge and sort; the backup gate; journal Undo; a fixture + Vitest | the "Import JSON" row | U2a, sql.js | L |
-| **U3** Link your library | the resolver, proposals, one-tap auto band, the `ReviewCard` queue (watch types and unmapped reading rows first), duplicates, suspect covers → the source cover via `setCover`; grid, rails, genres and sorts read `media_source_meta` for linked rows (legacy becomes a read-only fallback) | — | U2b | L |
+| **U0** ✅ Phase 1 ship | the Phase 1 fixes; the gate at 390 / 820 / 1180 / 1440; pin guards on the 3 legacy cover writers (bulk refresh, `refreshCoverImage`, Sync activity retry); Sync activity "Remove" uses `setCoverPinned`; cover writes stop bumping `last_activity_at`; the Behind filter uses `behindCount`; E1; merge | `resolveBatch`, edge `resolve` | his deploy | S–M |
+| **U2a** ✅ statuses and fields | paste 29; Dropped / On Hold in filters, rails and badge suppression (**before any badge lights up**); `platform` + `resume_url` in Edit and PickPreview | — | 29 | S |
+| **U2b** ✅ Tachimanga import | a Worker + sql.js; the matcher (import map → title → linked alt titles, reading rows only; a new title's type is a required pick); the preview; apply through a compare-and-swap lib extracted from `useProgressMutation`; History `origin`; the reader latest in the badge and sort; the backup gate; journal Undo; a fixture + Vitest | the "Import JSON" row | U2a, sql.js | L |
+| **U3** Link your library (next) | the resolver, proposals, one-tap auto band, the `ReviewCard` queue (watch types and unmapped reading rows first), duplicates, suspect covers → the source cover via `setCover`; grid, rails, genres and sorts read `media_source_meta` for linked rows (legacy becomes a read-only fallback) | — | U2b | L |
 | **U4** library update + Updates | paced `refreshLinked` on open and on pull; `release_date` moves here; episode latest for watch types (anime from TMDB / TVmaze seasons, since AniList splits seasons); the Updates feed (it needs two observations); one `latestOf(item, meta)` for badge, filter, sort, clamp and Updates | Refresh Library, Sync activity, `has_new_content` reads, the display-time search, the `media_metadata` merge-upsert | U3 | L |
 | **U5** covers | `setCover` everywhere, `coverVerdict`, the "Change cover…" picker, "Wrong covers · N"; E2 only if needed | the slot machine, bulk refresh, the legacy remove, the cover backfill | U3 (+ U2b) | M |
 | ~~**U6** rest of Phase 3~~ **parked, see `docs/BACKLOG.md`** (scope frozen at U0–U5, 2026-09-29) | hold-to-repeat, season picker, "Caught up", Mac hover +1 | — | U4 | M |

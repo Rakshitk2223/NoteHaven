@@ -17,9 +17,10 @@ and polish to existing features are always in scope.
 
 - ✅ **Vitest for `lib/*`: runner in place** (Media v2 branch, 2026-09-28). `npm test` runs
   `src/**/*.test.ts` and `supabase/functions/**/*.test.ts` (`vitest.config.ts`, node environment); CI
-  runs it. It covers the pure Media v2 logic (`media-match`, `nextProgress`, `media-link` against a
-  stubbed client) and the edge adult filter. The older data modules (ledger, tags, restore, …) still have
-  no tests: add them here as they're touched. `npm run test:insights` stays as the `tsx` script.
+  runs it (164 tests on 2026-09-29). It covers the Media v2 logic (matching, progress and its one
+  writer, linking, the bulk journal, the Tachimanga parser and planner, the import UI's pure parts),
+  export / restore, and the edge adult filter. The older data modules (ledger, tags, …) still have no
+  tests: add them as they're touched. `npm run test:insights` stays as the `tsx` script.
 - 🔲 **Extract Notes autosave** (`src/pages/Notes.tsx`, deferred on purpose). Saving is spread across
   refs (`hasLocalChangesRef`, `lastSavedUpdatedAtRef`, `lastLoadedNoteIdRef`, pending title/content
   refs), per-field debounced saves and realtime echo suppression — a likely home for subtle "my edit
@@ -35,12 +36,18 @@ and polish to existing features are always in scope.
 
 ## In flight: Media v2
 
-Branch `media-v2`, not merged. Design in `docs/media-v2/PLAN.md`, live state in
-`docs/media-v2/HANDOFF.md`. Phase 1 (link by search-and-pick, fetch by id, fast logging, History) is
-finishing its browser gate. Migration 28 is on production; the edge function's v2 actions are **not
-deployed** and go out in one redeploy when Phase 1 ships. Phase 2 (link the whole library, with a review
-queue) and Phase 3 (Updates / "N behind", platform + resume link) follow. Push notifications and
-recommendations stay declined.
+Branch `media-v2`, not merged (`main` was merged into it on 2026-09-29). Design and unit status in
+`docs/media-v2/PLAN.md`, live state in `docs/media-v2/HANDOFF.md`.
+
+- **Done on the branch:** Phase 1 (link by search-and-pick, fetch by id, fast logging, History), U0
+  (pin guards on every cover writer, Edit → Saved · Undo, stats over the whole library, one `latestOf`),
+  U2a (Dropped / On Hold, platform + resume link) and U2b (the Tachimanga import with its bulk journal
+  and "Undo last bulk change").
+- **Next:** U3, link your library. Then U4 (library update + Updates) and U5 (covers).
+- **Database:** migrations 28 and 29 are live on production.
+- **Edge function:** the v2 actions are **not deployed**; they go out in one redeploy when the branch
+  ships. The import, linking and library update need no deploy.
+- Push notifications and recommendations stay declined.
 
 ## Parked (not on the roadmap; revisit after U5)
 
