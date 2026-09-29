@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { SidebarProvider } from "@/contexts/SidebarContext";
-import { RefreshActivityProvider } from "@/contexts/RefreshActivityContext";
 import { PreferencesProvider, usePreferences } from "@/hooks/usePreferences";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { getCurrentTheme, applyTheme } from "@/lib/themes";
@@ -155,11 +154,9 @@ const App = () => (
       <QueryCacheAuthReset />
       <PreferencesProvider>
         <SidebarProvider>
-          <RefreshActivityProvider>
-            <TooltipProvider delayDuration={200}>
-              <AppShell />
-            </TooltipProvider>
-          </RefreshActivityProvider>
+          <TooltipProvider delayDuration={200}>
+            <AppShell />
+          </TooltipProvider>
         </SidebarProvider>
       </PreferencesProvider>
     </AuthProvider>

@@ -42,7 +42,7 @@ export interface MediaMeta {
   rating: number | null;        // external/community rating (0-10)
   status: string | null;        // 'ongoing' | 'completed' | 'upcoming' | 'hiatus'
   genres: string[] | null;
-  // V2: full per-episode list + cast (populated by the backfill / Refresh Library).
+  // V2: full per-episode list + cast (from the backfill, or a linked title's source).
   episodes_detail?: EpisodeDetail[] | null;
   cast_members?: CastMember[] | null;
   runtime?: number | null;       // typical episode/movie runtime in minutes

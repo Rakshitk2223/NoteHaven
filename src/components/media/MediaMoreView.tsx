@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, LayoutGrid, RefreshCw, Replace, RotateCcw, SlidersHorizontal, Upload,
+  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, LayoutGrid, Replace, RotateCcw, SlidersHorizontal, Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -16,7 +16,6 @@ interface MediaMoreViewProps {
   onStats: () => void;
   onSelect: () => void;
   onManageTabs: () => void;
-  onRefreshLibrary: () => void;
   onImport: () => void;
   importing: boolean;
   importLabel: string;
@@ -112,12 +111,12 @@ export function MediaMoreView(p: MediaMoreViewProps) {
         <Row icon={SlidersHorizontal} label="Type tabs" hint="Choose which types get a tab" onClick={p.onManageTabs} />
       </Group>
 
-      <Group title="Details & covers">
-        {p.linkLibrary && (
+      {/* The library updates itself now (Updates); linking is the one manual job left here. */}
+      {p.linkLibrary && (
+        <Group title="Details & covers">
           <Row icon={Replace} label="Link your library" hint={p.linkLibrary.hint} onClick={p.linkLibrary.onClick} />
-        )}
-        <Row icon={RefreshCw} label="Refresh library…" hint="Fetch missing covers, synopses and totals" onClick={p.onRefreshLibrary} />
-      </Group>
+        </Group>
+      )}
 
       <Group title="Import & export">
         <Row icon={Upload} label={p.importing ? 'Importing…' : p.importLabel} hint={p.importHint} onClick={p.onImport} disabled={p.importing} />

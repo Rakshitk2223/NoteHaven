@@ -44,7 +44,6 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fetchUserTags, fetchMediaTags, setMediaTags, createTag, type Tag } from "@/lib/tags";
 import { typeBadgeSoft, AIRING_STYLE, AIRING_LABEL, type CustomGroup, type ActiveCategory, itemBelongsToCustomGroup, isTypeCategory, typeOf } from "@/components/media/media-style";
 import { CustomGroupBuilder } from "@/components/media/CustomGroupBuilder";
-import { RefreshLibraryDialog } from "@/components/media/RefreshLibraryDialog";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { devLog } from "@/lib/logger";
 import { dateToYMD } from "@/lib/date-utils";
@@ -57,7 +56,7 @@ import { GenreRail } from "@/components/media/GenreRail";
 import { LibraryStatsDialog } from "@/components/media/LibraryStatsDialog";
 import {
   buildContinueQueue, buildAiringSoon, buildGenreCounts, itemHasGenre,
-  episodeDataFreshness, type QueueEntry,
+  type QueueEntry,
 } from "@/lib/media-insights";
 import { quoted, quotedList } from '@/components/confirm-copy';
 import { useProgressMutation, type ProgressResult } from '@/hooks/media/useProgressMutation';
@@ -476,7 +475,6 @@ const MediaTracker = () => {
       return next;
     });
   }, []);
-  const [refreshLibraryOpen, setRefreshLibraryOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Media v2 sections (History only once migration 28's log exists: NO HOLES rule 2).
   const [section, setSection] = useState<MediaSectionId>('library');
@@ -830,19 +828,6 @@ const MediaTracker = () => {
     return () => clearTimeout(t);
   }, [metadataMap]);
 
-  // Force a fresh metadata pull (e.g. after a library refresh sweep). Re-fetches
-  // for the loaded items and MERGES the result — it must never blank the map, or
-  // synopsis/cast would flash away until the background refetch lands (the old
-  // bug where everything "vanished" until a hard reload).
-  const reloadMetadata = useCallback(() => {
-    metadataAttemptedRef.current = new Set();
-    const loaded = mediaItems.map((i) => ({ id: i.id, title: i.title, type: i.type }));
-    loaded.forEach((i) => metadataAttemptedRef.current.add(i.id));
-    if (loaded.length === 0) return;
-    fetchMediaMetadataBatch(loaded)
-      .then((m) => { if (m.size) setMetadataMap((prev) => new Map([...prev, ...m])); })
-      .catch((err) => console.error('Metadata reload error:', err));
-  }, [mediaItems]);
 
   // Total count from all pages
   const totalCount = useMemo(() => data?.pages[0]?.count ?? 0, [data]);
@@ -1032,10 +1017,6 @@ const MediaTracker = () => {
     [railItems, metaById],
   );
 
-  const episodeFreshness = useMemo(
-    () => episodeDataFreshness(railItems, metaById),
-    [railItems, metaById],
-  );
 
   const finalItems = useMemo(() => {
     let base = categoryFilteredItems;
@@ -1926,123 +1907,6 @@ const MediaTracker = () => {
     return () => window.removeEventListener('beforeunload', warn);
   }, [editDirty]);
 
-  // Resolve the FULL set of items for a Refresh Library sweep by querying the DB
-  // with the active type/status/search filters (paginated past the 1000-row cap)
-  // — so "refresh all Anime" sweeps every Anime, not just the loaded page. Tag
-  // filters aren't DB-queryable here, so those fall back to the loaded set.
-  const getSweepItems = useCallback(async () => {
-    const toSweep = (rows: Array<Pick<MediaItem, 'id' | 'title' | 'type' | 'cover_image' | 'current_season' | 'current_episode' | 'current_chapter' | 'last_known_total_episodes' | 'last_known_total_seasons' | 'link_status' | 'source' | 'source_id' | 'cover_pinned'>>) =>
-      rows.map((i) => ({
-        id: i.id,
-        title: i.title,
-        type: i.type,
-        cover_image: i.cover_image ?? imageUrls.get(i.id) ?? null,
-        current_season: i.current_season,
-        current_episode: i.current_episode,
-        current_chapter: i.current_chapter,
-        last_known_total_episodes: i.last_known_total_episodes,
-        last_known_total_seasons: i.last_known_total_seasons,
-        // Linked entries refresh BY ID (refreshLinked): no title search, and no
-        // cover or user-field change.
-        link_status: i.link_status ?? null,
-        source: i.source ?? null,
-        source_id: i.source_id ?? null,
-        // Left undefined on a pre-28 database so refresh skips the pin guard there.
-        cover_pinned: i.cover_pinned,
-      }));
-
-    // Genre filtering is client-side over cached metadata and can't be expressed
-    // as a DB query, so honour it by sweeping only what's visible.
-    if (selectedGenres.length > 0) return toSweep(finalItems);
-
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) return toSweep(finalItems);
-
-    // Types implied by the selected category.
-    const types: string[] | null = activeCategory === 'all'
-      ? null
-      : isTypeCategory(activeCategory)
-      ? [typeOf(activeCategory)]
-      : (customGroups.find((g) => g.id === activeCategory)?.types ?? null);
-
-    const escaped = searchTerm.trim().replace(/[\\%_]/g, (m) => `\\${m}`);
-
-    const all: MediaItem[] = [];
-    const chunk = 1000;
-    const BASE_COLS = 'id, title, type, cover_image, current_season, current_episode, current_chapter, last_known_total_episodes, last_known_total_seasons';
-    // Migration 28's link columns; dropped once if this database doesn't have them.
-    let cols = `${BASE_COLS}, link_status, source, source_id, cover_pinned`;
-    let from = 0;
-    for (;;) {
-      let q = supabase
-        .from('media_tracker')
-        .select(cols)
-        .eq('user_id', user.id);
-      if (types && types.length) q = q.in('type', types);
-      if (filterStatus === 'Active') q = q.in('status', ['Watching', 'Reading']);
-      else if (filterStatus === 'Planned') q = q.in('status', ['Plan to Watch', 'Plan to Read']);
-      else if (filterStatus !== 'All') q = q.eq('status', filterStatus);
-      if (escaped) q = q.ilike('title', `%${escaped}%`);
-      q = q.range(from, from + chunk - 1);
-
-      const { data, error } = await q;
-      if (error && (error.code === '42703' || error.code === 'PGRST204') && cols !== BASE_COLS) { cols = BASE_COLS; continue; }
-      if (error || !data || data.length === 0) break;
-      all.push(...(data as unknown as MediaItem[]));
-      if (data.length < chunk) break;
-      from += chunk;
-    }
-    return toSweep(all);
-  }, [selectedGenres, finalItems, imageUrls, activeCategory, customGroups, filterStatus, searchTerm]);
-
-  // Refresh Library scope — resolved ONCE when the dialog opens, and the button
-  // count, the label and the swept list all come from that same array, so they can
-  // never disagree (UX-45: the label used cached per-type counts that ignored the
-  // search, so a one-title search said "Refresh 318 items" and refreshed 1). The
-  // dialog is modal, so the filters can't change while it's open.
-  const [sweepList, setSweepList] = useState<Awaited<ReturnType<typeof getSweepItems>> | null>(null);
-  useEffect(() => {
-    if (!refreshLibraryOpen) { setSweepList(null); return; }
-    let cancelled = false;
-    getSweepItems()
-      .then((items) => { if (!cancelled) setSweepList(items); })
-      .catch(() => { if (!cancelled) setSweepList([]); });
-    return () => { cancelled = true; };
-    // Once per open: getSweepItems' identity changes as covers stream in.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshLibraryOpen]);
-
-  const sweepScopeLabel = useMemo(() => {
-    if (sweepList == null) return 'the current view (counting…)';
-    const n = sweepList.length;
-    const noun = `item${n === 1 ? '' : 's'}`;
-    if (selectedGenres.length > 0) return `${n} filtered ${noun}`;
-    const catLabel = activeCategory === 'all'
-      ? ''
-      : isTypeCategory(activeCategory)
-      ? typeOf(activeCategory)
-      : (customGroups.find((g) => g.id === activeCategory)?.name ?? '');
-    const q = searchTerm.trim();
-    const statusLabel = filterStatus === 'Active' ? 'in-progress'
-      : filterStatus === 'Planned' ? 'planned'
-      : filterStatus === 'Completed' ? 'completed'
-      : filterStatus === 'On Hold' ? 'on-hold'
-      : filterStatus === 'Dropped' ? 'dropped' : '';
-    return [
-      activeCategory === 'all' && filterStatus === 'All' && !q ? 'all' : '',
-      String(n),
-      statusLabel,
-      catLabel,
-      noun,
-      q ? `matching “${q}”` : '',
-    ].filter(Boolean).join(' ');
-  }, [sweepList, selectedGenres, activeCategory, customGroups, filterStatus, searchTerm]);
-  const fetchResolvedSweep = useCallback(
-    () => (sweepList ? Promise.resolve(sweepList) : getSweepItems()),
-    [sweepList, getSweepItems],
-  );
-
   // ---- Browse (search-and-pick) + Fix match -------------------------------
   type PickState = { mode: 'add' | 'fix'; type: TrackerType; candidate: Candidate | null; title: string; forItem?: MediaItem };
   const [pick, setPick] = useState<PickState | null>(null);
@@ -2863,20 +2727,6 @@ const MediaTracker = () => {
             onOpenItem={(id) => { setStatsOpen(false); void openById(id); }}
           />
 
-          {/* Refresh Library sweep (covers / seasons / descriptions / ratings / status) */}
-          <RefreshLibraryDialog
-            open={refreshLibraryOpen}
-            onOpenChange={setRefreshLibraryOpen}
-            fetchItems={fetchResolvedSweep}
-            count={sweepList?.length ?? 0}
-            scopeLabel={sweepScopeLabel}
-            onComplete={() => {
-              refetch();
-              reloadMetadata();
-              queryClient.invalidateQueries({ queryKey: ['groupCounts'] });
-            }}
-          />
-
           {navTop && <MediaSectionNav<MediaSectionId> sections={mediaSections} active={section} onChange={setSection} placement="top" />}
 
           {/* Filters sheet (mobile + desktop) */}
@@ -2963,7 +2813,6 @@ const MediaTracker = () => {
                 onStats={() => setStatsOpen(true)}
                 onSelect={() => { setSection('library'); setSelectMode(true); }}
                 onManageTabs={() => setTabsManageOpen(true)}
-                onRefreshLibrary={() => setRefreshLibraryOpen(true)}
                 onImport={() => fileInputRef.current?.click()}
                 importLabel={v2Schema.importLink ? 'Import…' : 'Import JSON…'}
                 importHint={v2Schema.importLink ? 'A NoteHaven JSON backup, or a Tachimanga backup (.tmb)' : undefined}
@@ -3259,8 +3108,6 @@ const MediaTracker = () => {
                 <AiringSoon
                   episodes={airingSoon}
                   covers={imageUrls}
-                  freshness={episodeFreshness}
-                  onRefreshLibrary={() => setRefreshLibraryOpen(true)}
                   onOpen={(id) => {
                     const target = railItems.find((m) => m.id === id) ?? mediaItems.find((m) => m.id === id);
                     if (target) openDetails(target, 'view');

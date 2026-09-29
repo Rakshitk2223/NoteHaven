@@ -1,20 +1,13 @@
-import { CalendarClock, Radio, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { CalendarClock, Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { airingDayLabel, type UpcomingEpisode, type EpisodeFreshness } from '@/lib/media-insights';
+import { airingDayLabel, type UpcomingEpisode } from '@/lib/media-insights';
 import { CoverArt } from './CoverArt';
 
 interface AiringSoonProps {
   episodes: UpcomingEpisode[];
   covers: Map<number, string | null>;
   onOpen: (id: number) => void;
-  /** Lets the rail explain itself when it has nothing to show. */
-  freshness: EpisodeFreshness;
-  onRefreshLibrary: () => void;
 }
-
-/** Past this many days, cached air dates can no longer answer "what's next". */
-const STALE_AFTER_DAYS = 21;
 
 /**
  * Upcoming episodes for titles you track, read straight out of the cached
@@ -24,27 +17,9 @@ const STALE_AFTER_DAYS = 21;
  * the refresh sweep has always stored them — nothing ever read them back. This
  * is that data finally showing up.
  */
-export function AiringSoon({ episodes, covers, onOpen, freshness, onRefreshLibrary }: AiringSoonProps) {
-  // Nothing upcoming. If the cache is simply old, say so — an unexplained empty
-  // rail reads as "no shows are airing", which is usually wrong. If there is no
-  // episode data at all, or it is current, stay quiet.
-  if (episodes.length === 0) {
-    if (freshness.withEpisodeData === 0 || freshness.staleDays <= STALE_AFTER_DAYS) return null;
-    return (
-      <section className="mb-6">
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border/70 bg-card/40 px-4 py-3">
-          <CalendarClock className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-            <span className="font-semibold text-foreground">Airing schedule is {freshness.staleDays} days old.</span>{' '}
-            The newest episode date cached for your library is {freshness.newest}. Refresh to see what's coming up.
-          </p>
-          <Button size="sm" variant="outline" className="h-7 flex-shrink-0 gap-1.5 text-xs" onClick={onRefreshLibrary}>
-            <RefreshCw className="h-3 w-3" /> Refresh
-          </Button>
-        </div>
-      </section>
-    );
-  }
+export function AiringSoon({ episodes, covers, onOpen }: AiringSoonProps) {
+  // Nothing upcoming: stay quiet (the library-update pass keeps linked titles current).
+  if (episodes.length === 0) return null;
 
   // Group by day so the rail reads as a schedule rather than a flat list.
   const byDay = new Map<string, UpcomingEpisode[]>();

@@ -218,7 +218,7 @@ export function LibraryStatsDialog({
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  No genres cached yet — run Refresh Library with “Genres” ticked.
+                  No genres known yet. Linking your titles to a source (More → Link your library) fills them in.
                 </p>
               )}
             </div>
