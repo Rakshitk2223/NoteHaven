@@ -74,7 +74,10 @@ function builder(table: string) {
 // The one cover writer, emulated with its rules (unpinned + still the cover he saw);
 // calls are recorded so the test can check it journals into the import's batch.
 const coverCalls: Array<{ changes: Row[]; journal: Row }> = [];
+// E2 copy: 'unavailable' (an edge without E2) unless a test sets a storage URL.
+let copyTo: string | null = null;
 vi.mock('@/lib/media-cover', () => ({
+  copyCover: async () => (copyTo ? { url: copyTo, deduped: false } : { url: null, reason: 'unavailable' }),
   setCovers: async (changes: Row[], journal: Row) => {
     coverCalls.push({ changes, journal });
     const written: number[] = []; const skipped: Record<number, string> = {};
@@ -116,7 +119,7 @@ const plan = (over: Partial<ImportPlan> = {}): ImportPlan => ({
 });
 const put = (s: PlanTrackerRow) => tracker.set(s.id, { ...s, user_id: 'u', current_season: null, current_episode: null });
 
-beforeEach(() => { tracker.clear(); journal = []; logs.length = 0; importMap.length = 0; mediaTags.length = 0; coverCalls.length = 0; failJournal = false; failMap = false; failUpdate = null; });
+beforeEach(() => { tracker.clear(); journal = []; logs.length = 0; importMap.length = 0; mediaTags.length = 0; coverCalls.length = 0; copyTo = null; failJournal = false; failMap = false; failUpdate = null; });
 
 describe('applyImport', () => {
   it('moves progress forward with the reader latest in the same write, journals it, logs History and maps the key', async () => {
@@ -280,5 +283,15 @@ describe('applyImport', () => {
     expect(tracker.get(1)).toMatchObject({ current_chapter: 20, status: 'Reading', reader_latest_chapter: 25 });
     const allowed = new Set(['reader_latest_chapter', 'reader_checked_at', 'last_activity_at', 'platform']);
     expect(Object.keys(journal[0].after as Row).every((k) => allowed.has(k))).toBe(true);
+  });
+
+  it('E2: a reader cover is copied into storage first, and the COPY is what gets saved', async () => {
+    const s1 = snap(1); put(s1);
+    copyTo = 'https://proj.supabase.co/storage/v1/object/public/media-covers/abc.jpg';
+    const cover = { url: 'https://scan.example/thumb.jpg', reason: 'missing' as const, ticked: true };
+    const p = plan({ same: [planRow(1, { ticked: false, progress: null, auto: {}, cover })] });
+    await applyImport(p, initialSelection(p), [s1]);
+    expect(coverCalls[0].changes[0]).toMatchObject({ url: copyTo, origin: 'reader' });
+    expect(tracker.get(1)!.cover_image).toBe(copyTo);
   });
 });

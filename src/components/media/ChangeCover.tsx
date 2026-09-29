@@ -7,7 +7,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { undoBatch } from '@/lib/media-bulk';
 import type { CoverOrigin } from '@/lib/cover-medium';
-import { coverCandidates, setCover, type CoverOption } from '@/lib/media-cover';
+import { copyCover, coverCandidates, setCover, type CopyFailure, type CoverOption } from '@/lib/media-cover';
+import { COPY_FAILURE_TEXT } from '@/lib/cover-copy';
 import { setCoverPinned } from '@/lib/media-link';
 import { coverRowOf, pickCover } from './cover-row';
 import { SOURCE_LABEL, type MediaSource } from '@/lib/media-sources';
@@ -69,11 +70,13 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
     setSaving(o.url);
     try {
       // His pick always wins: the cover goes in AND gets pinned (see pickCover).
-      const res = await pickCover(row, o.url, o.origin, { setCover, setCoverPinned, undoBatch });
+      // E2: copied into NoteHaven storage first (copy-only MangaDex art needs it); see pickCover.
+      const res = await pickCover(row, o.url, o.origin, { copy: copyCover, setCover, setCoverPinned, undoBatch }, { copyOnly: !!o.copyOnly });
       if (res.ok === false) {
         toast({
           title: 'Cover not changed',
-          description: res.reason === 'pinned' ? 'It’s pinned: unpin it first.'
+          description: res.reason.startsWith('copy:') ? COPY_FAILURE_TEXT[res.reason.slice(5) as CopyFailure] ?? 'That cover couldn’t be copied.'
+            : res.reason === 'pinned' ? 'It’s pinned: unpin it first.'
             : res.reason === 'changed' ? 'It changed since you opened this. Try again.'
             : res.reason === 'rejected' ? 'That image isn’t the right kind of art for this title.'
             : 'This title couldn’t be found.',
@@ -81,7 +84,7 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
         });
         return;
       }
-      onChanged(o.url, o.url === row.cover_image ? row.cover_origin : o.origin, res.pinned);
+      onChanged(res.url, o.url === row.cover_image ? row.cover_origin : o.origin, res.pinned);
       onOpenChange(false);
       const was = { url: row.cover_image, origin: row.cover_origin, pinned: !!row.cover_pinned };
       toast({
@@ -101,7 +104,8 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
   };
 
   const label = (o: CoverOption) =>
-    o.from === 'source' ? (item.source ? SOURCE_LABEL[item.source as MediaSource] ?? 'Source' : 'Source')
+    o.copyOnly ? `${item.source ? SOURCE_LABEL[item.source as MediaSource] ?? 'Source' : 'Source'} cover`
+    : o.from === 'source' ? (item.source ? SOURCE_LABEL[item.source as MediaSource] ?? 'Source' : 'Source')
     : o.from === 'reader' ? 'Your reader app'
     : o.from === 'current' ? 'Current'
     : 'Web search';
@@ -124,8 +128,9 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
         ) : (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
             {options.map((o) => {
-              const note = VERDICT_NOTE[o.verdict];
-              const bad = o.verdict === 'wrong-medium' || o.verdict === 'blocked';
+              // Copy-only art (MangaDex) can't be shown as-is, but it IS pickable: it's copied on pick.
+              const note = o.copyOnly ? 'Copied on pick' : VERDICT_NOTE[o.verdict];
+              const bad = !o.copyOnly && (o.verdict === 'wrong-medium' || o.verdict === 'blocked');
               const current = o.url === row.cover_image;
               return (
                 <button key={o.url} type="button" onClick={() => void pick(o)} disabled={bad || !!saving || !!row.cover_pinned}
@@ -133,7 +138,7 @@ export default function ChangeCover({ item, onOpenChange, onChanged }: {
                   className={cn('flex min-w-0 flex-col gap-1 rounded-lg p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed',
                     current ? 'ring-2 ring-primary' : 'ring-1 ring-border hover:bg-secondary/60', bad && 'opacity-50')}>
                   <span className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-muted">
-                    <CoverArt src={o.url} title={item.title} initials={1} lazy letterClassName="text-lg" />
+                    <CoverArt src={o.copyOnly ? null : o.url} title={item.title} initials={1} lazy letterClassName="text-lg" />
                     {saving === o.url && <span className="absolute inset-0 grid place-items-center bg-background/60"><Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" /></span>}
                   </span>
                   <span className="truncate text-xs font-medium text-foreground">{label(o)}</span>

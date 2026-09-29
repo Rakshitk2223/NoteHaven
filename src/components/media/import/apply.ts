@@ -16,7 +16,8 @@
 import { supabase } from '@/integrations/supabase/client';
 import { casProgressWrite, ProgressConflictError } from '@/lib/media-progress-write';
 import { hasGuard, newBatchId, restoreEntries, writeJournal, type JournalEntry } from '@/lib/media-bulk';
-import { setCovers } from '@/lib/media-cover';
+import { copyCover, setCovers } from '@/lib/media-cover';
+import { urlToSave } from '@/lib/cover-copy';
 import type { ImportMapWrite, ImportPlan, PlanRow, PlanTrackerRow } from '@/lib/tachimanga/types';
 import { type ImportSelection, matchedRows, rowApplies } from './selection';
 
@@ -129,11 +130,18 @@ async function applyRowParts(
   // refuses wrong-medium art), journaled into this import's batch so the import's
   // one Undo takes it back too. It journals itself: not part of this row's entry.
   if (sel.cover.has(r.media_id) && r.cover) {
-    const res = await setCovers(
-      [{ id: r.media_id, url: r.cover.url, origin: 'reader', expect: snap?.cover_image ?? null }],
-      { batchId, kind: 'import' },
-    );
-    if (!res.written.includes(r.media_id)) skipped += 1;
+    // E2: reader thumbnails (scan sites) rarely hotlink: copy into storage first;
+    // before his deploy the copy is 'unavailable' and the original is saved as today.
+    const to = await urlToSave(copyCover, r.media_id, r.cover.url);
+    if ('reason' in to) {
+      skipped += 1;
+    } else {
+      const res = await setCovers(
+        [{ id: r.media_id, url: to.url, origin: 'reader', expect: snap?.cover_image ?? null }],
+        { batchId, kind: 'import' },
+      );
+      if (!res.written.includes(r.media_id)) skipped += 1;
+    }
   }
 
   // Only timestamps left (reader_checked_at / last_activity_at): they go with a row

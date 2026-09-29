@@ -3172,7 +3172,7 @@ const MediaTracker = () => {
                 )}
               </div>
             ) : (
-              <div ref={resultsRef} className="scroll-mt-4 space-y-6">
+              <div ref={resultsRef} className="scroll-mt-[calc(4.5rem+env(safe-area-inset-top))] lg:scroll-mt-4 space-y-6">
                 {viewMode === 'grid' ? (
                   <LibraryGrid
                     items={finalItems}

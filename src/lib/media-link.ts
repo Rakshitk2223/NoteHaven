@@ -17,6 +17,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { isMissingTableError } from '@/lib/work';
+import { urlToSave } from '@/lib/cover-copy';
 import { coverVerdict } from '@/lib/cover-medium';
 import {
   fetchSourceDetail,
@@ -203,19 +204,30 @@ export async function linkEntry(
   }
 
   // Cover rules (see header), judged by the one judge (cover-medium coverVerdict).
-  const newCover = coverOf(detail, candidate);
+  // E2: the source's art is COPIED into NoteHaven storage before it's saved; that's
+  // how a MangaDex-linked title (whose art only exists as copy-only cover_copy_from)
+  // gets a cover at all. Before his deploy the copy is 'unavailable': a hotlinkable
+  // cover is saved as today, a copy-only one isn't.
+  const hotlink = coverOf(detail, candidate);
+  const copyFrom = (detail as { cover_copy_from?: string | null } | null)?.cover_copy_from ?? null;
+  const newCover = hotlink ?? copyFrom;
+  const copyOnly = !hotlink && !!copyFrom;
   const pinned = x ? x.cover_pinned || before.cover_pinned : before.cover_pinned;
   let coverChanged = false;
   const loads = (url: string, origin: string | null | undefined) => {
     const v = coverVerdict(url, type, (origin ?? null) as never);
     return v !== 'wrong-medium' && v !== 'blocked';
   };
-  if (!opts.keepCover && !pinned && newCover && loads(newCover, 'source') && newCover !== before.cover_image) {
+  if (!opts.keepCover && !pinned && newCover && (copyOnly || loads(newCover, 'source')) && newCover !== before.cover_image) {
     const currentBad = !before.cover_image || !loads(before.cover_image, before.cover_origin);
     if (opts.useNewCover || opts.isNew || currentBad) {
-      patch.cover_image = newCover;
-      patch.cover_origin = 'source';
-      coverChanged = true;
+      const { copyCover } = await import('@/lib/media-cover'); // dynamic: media-cover imports this module
+      const to = await urlToSave(copyCover, trackerId, newCover, { copyOnly });
+      if (!('reason' in to) && loads(to.url, 'source')) {
+        patch.cover_image = to.url;
+        patch.cover_origin = 'source';
+        coverChanged = true;
+      }
     }
   }
 

@@ -8,7 +8,8 @@ import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { undoBatch } from '@/lib/media-bulk';
 import { holdReload } from '@/lib/app-update';
-import { loadWrongCovers, setCover, setCovers, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
+import { copyCover, copyCovers, loadWrongCovers, setCover, setCovers, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
+import { COPY_FAILURE_TEXT, urlToSave } from '@/lib/cover-copy';
 import { useBackupGate } from './import/useBackupGate';
 import { BackupNote } from './import/BackupNote';
 import { CoverArt } from './CoverArt';
@@ -61,6 +62,16 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
     });
   };
 
+  // "Use this": copy into storage first (E2), then the one cover writer. Pre-E2 = as-is.
+  const applySuggestion = async (w: WrongCover): Promise<CoverWriteResult> => {
+    const to = await urlToSave(copyCover, w.row.id, w.suggestion!.url);
+    if ('reason' in to) {
+      toast({ title: 'Cover not changed', description: COPY_FAILURE_TEXT[to.reason], variant: 'destructive' });
+      return { batchId: null, written: [], skipped: { [w.row.id]: 'rejected' } };
+    }
+    return setCover(w.row.id, to.url, w.suggestion!.origin, { expect: w.row.cover_image ?? null });
+  };
+
   const run = async (key: number | 'all', work: () => Promise<CoverWriteResult>, asked: number) => {
     setBusy(key);
     try { report(await work(), asked); } catch (e) {
@@ -73,7 +84,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
     if (busy || !gate.check()) return;
     setBusy('all');
     try {
-      report(await fixInChunks(fixable, setCovers, (done, total) => setProgress({ done, total })), fixable.length);
+      report(await fixInChunks(fixable, setCovers, (done, total) => setProgress({ done, total }), copyCovers), fixable.length);
     } catch (e) {
       const partial = (e as { partial?: CoverWriteResult }).partial;
       if (partial?.written.length) report(partial, fixable.length);
@@ -130,7 +141,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
                   </span>
                   {w.suggestion ? (
                     <Button variant="outline" className="h-11 flex-shrink-0 px-3" disabled={!!busy}
-                      onClick={() => void run(w.row.id, () => setCover(w.row.id, w.suggestion!.url, w.suggestion!.origin, { expect: w.row.cover_image ?? null }), 1)}>
+                      onClick={() => void run(w.row.id, () => applySuggestion(w), 1)}>
                       Use this
                     </Button>
                   ) : (
