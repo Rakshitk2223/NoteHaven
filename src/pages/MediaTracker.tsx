@@ -82,6 +82,7 @@ import { sniffFile } from '@/components/media/import/sniff';
 import { useLinkRun } from '@/components/media/link/useLinkRun';
 import { LinkBar } from '@/components/media/link/LinkBar';
 import { UpdatesView } from '@/components/media/UpdatesView';
+import { resultsOffScreen } from '@/components/media/view-switch';
 import { holdReload } from '@/lib/app-update';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { SOURCE_META_SLIM, detectMediaV2Schema, linkEntry, readSourceMeta, readSourceMetaBatch, setCoverPinned, type MediaV2Schema } from '@/lib/media-link';
@@ -417,6 +418,16 @@ const MediaTracker = () => {
   const queryClient = useQueryClient();
   const { toggle: toggleSidebar } = useSidebar();
   // Persisted view mode (grid = categorized, list = table). Initialize from localStorage.
+  // Grid ↔ list, and make the change visible: on a phone the results start below the
+  // fold (under search, chips and the rails), so bring them into view when they're off-screen.
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const chooseView = (mode: 'grid' | 'list') => {
+    setViewMode(mode);
+    requestAnimationFrame(() => {
+      const el = resultsRef.current;
+      if (el && resultsOffScreen(el.getBoundingClientRect(), window.innerHeight)) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  };
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
     try {
       const stored = typeof window !== 'undefined' ? localStorage.getItem('mediaTrackerViewMode') : null;
@@ -2476,22 +2487,7 @@ const MediaTracker = () => {
               <Button size="sm" variant="default" onClick={() => setSection('browse')} className="h-10 w-10 p-0 touch-manipulation" aria-label="Add a title" title="Add">
                 <Plus className="h-4 w-4" />
               </Button>
-              {/* Filter and view act on the Library only. */}
-              {section === 'library' && (
-                <>
-                  <Button size="sm" variant={hasActiveFilters ? 'default' : 'outline'} onClick={() => setFiltersOpen(true)} className="relative h-10 w-10 p-0 touch-manipulation" aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'} title="Filters">
-                    <Filter className="h-4 w-4" />
-                    {activeFilterCount > 0 && (
-                      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-medium">
-                        {activeFilterCount}
-                      </span>
-                    )}
-                  </Button>
-                  <Button size="sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')} className="h-10 w-10 p-0 touch-manipulation" aria-label={viewMode === 'grid' ? 'Switch to list view' : 'Switch to grid view'} title={viewMode === 'grid' ? 'List view' : 'Grid view'}>
-                    {viewMode === 'grid' ? <ListIcon className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
-                  </Button>
-                </>
-              )}
+              {/* The header keeps the menu and Add; Filter and the view switch sit with Sort, by the results. */}
             </div>
           </div>
 
@@ -2539,15 +2535,6 @@ const MediaTracker = () => {
                         <X className="h-4 w-4" />
                       </button>
                     )}
-                  </div>
-
-                  <div className="flex items-center gap-0.5 rounded-full border border-border/60 bg-background/40 backdrop-blur-md p-0.5">
-                    <Button size="icon-sm" variant={viewMode === 'grid' ? 'secondary' : 'ghost'} onClick={() => setViewMode('grid')} className="h-8 w-8 rounded-full" aria-label="Grid view" aria-pressed={viewMode === 'grid'} title="Grid view">
-                      <LayoutGrid className="h-4 w-4" />
-                    </Button>
-                    <Button size="icon-sm" variant={viewMode === 'list' ? 'secondary' : 'ghost'} onClick={() => setViewMode('list')} className="h-8 w-8 rounded-full" aria-label="List view" aria-pressed={viewMode === 'list'} title="List view">
-                      <ListIcon className="h-4 w-4" />
-                    </Button>
                   </div>
 
                   <Button variant="outline" size="sm" className="h-9 rounded-full" onClick={() => setFiltersOpen(true)} aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'}>
@@ -2890,7 +2877,7 @@ const MediaTracker = () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="hidden text-xs text-muted-foreground sm:inline">Sort</span>
                 <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
                   <SelectTrigger className="h-9 w-[150px] rounded-full border-border/60 bg-background/40 text-sm">
@@ -2915,6 +2902,36 @@ const MediaTracker = () => {
                 >
                   <ArrowDownUp className="h-4 w-4" />
                 </Button>
+                {/* Phone: Filter lives here, with Sort (the desktop toolbar has its own). */}
+                <Button size="sm" variant={hasActiveFilters ? 'default' : 'outline'} onClick={() => setFiltersOpen(true)}
+                  className="relative h-11 w-11 flex-shrink-0 rounded-full p-0 touch-manipulation lg:hidden"
+                  aria-label={hasActiveFilters ? `Filters (${activeFilterCount} active)` : 'Open filters'} title="Filters">
+                  <Filter className="h-4 w-4" />
+                  {activeFilterCount > 0 && (
+                    <span className="absolute -right-1 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </Button>
+                {/* Grid | List, beside Sort; switching brings the results into view (see chooseView). */}
+                <div role="group" aria-label="View" className="flex items-center gap-0.5 rounded-full border border-border/60 bg-background/40 p-0.5">
+                  {([['grid', LayoutGrid, 'Grid'], ['list', ListIcon, 'List']] as const).map(([mode, Icon, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => chooseView(mode)}
+                      aria-pressed={viewMode === mode}
+                      title={`${label} view`}
+                      className={cn(
+                        'grid h-11 w-11 place-items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        viewMode === mode ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <Icon className="h-4 w-4" aria-hidden="true" />
+                      <span className="sr-only">{label} view</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -3155,7 +3172,7 @@ const MediaTracker = () => {
                 )}
               </div>
             ) : (
-              <div className="space-y-6">
+              <div ref={resultsRef} className="scroll-mt-4 space-y-6">
                 {viewMode === 'grid' ? (
                   <LibraryGrid
                     items={finalItems}
