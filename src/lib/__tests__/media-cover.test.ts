@@ -179,11 +179,22 @@ describe('setCover / setCovers (the one writer)', () => {
     expect(new Set(journal.map((j) => j.batch_id)).size).toBe(1);
   });
 
+  it("joins an EXISTING batch when given one (the import's Undo takes its covers back)", async () => {
+    seed(base({ cover_image: null }));
+    const res = await setCovers([{ id: 1, url: READER, origin: 'reader', expect: null }], { batchId: 'import-batch-1', kind: 'import' });
+    expect(res.batchId).toBe('import-batch-1');
+    expect(journal).toHaveLength(1);
+    expect(journal[0]).toMatchObject({ batch_id: 'import-batch-1', kind: 'import', after: { cover_image: READER, cover_origin: 'reader', cover_pinned: false } });
+  });
+
   it('if the journal fails, the rows are put back and it throws (never done-but-undoable-not)', async () => {
     seed(base({ cover_image: TMDB }));
     failJournal = true;
     await expect(setCover(1, ANILIST_MANGA, 'source', { expect: TMDB })).rejects.toBeTruthy();
     expect(tracker.get(1)).toMatchObject({ cover_image: TMDB, cover_origin: null });
+    // Same rule when joining an existing batch.
+    await expect(setCovers([{ id: 1, url: ANILIST_MANGA, origin: 'source', expect: TMDB }], { batchId: 'b', kind: 'import' })).rejects.toBeTruthy();
+    expect(tracker.get(1)!.cover_image).toBe(TMDB);
   });
 
   it('Undo restores the old cover, but not once he has pinned the new one', async () => {

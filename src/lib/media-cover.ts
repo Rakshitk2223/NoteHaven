@@ -19,7 +19,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { coverVerdict, isReadingType, type CoverOrigin, type CoverVerdict } from '@/lib/cover-medium';
-import { newBatchId, writeJournal, type JournalEntry } from '@/lib/media-bulk';
+import { newBatchId, writeJournal, type BulkKind, type JournalEntry } from '@/lib/media-bulk';
 import { readSourceMeta } from '@/lib/media-link';
 import { fetchSourceDetail, searchSources, type MediaSource, type TrackerType } from '@/lib/media-sources';
 
@@ -181,9 +181,14 @@ async function casWrite(uid: string, id: number, patch: { cover_image: string | 
  * THE cover writer: many rows, one journal batch (one Undo). Each row is
  * written only if it's unpinned and still shows the cover he saw; an automatic
  * cover must also pass the judge. Returns what was written and why the rest
- * wasn't.
+ * wasn't. THROWS (after putting the written rows back) if the journal can't be
+ * written: a change that can't be undone is never reported as done.
+ *
+ * `journal.batchId` (+ `kind`) adds the rows to an EXISTING bulk batch instead
+ * of opening a new one, e.g. the Tachimanga import passes its own batchId and
+ * kind 'import', so the import's one Undo also takes its covers back.
  */
-export async function setCovers(changes: CoverChange[]): Promise<CoverWriteResult> {
+export async function setCovers(changes: CoverChange[], journal: { batchId?: string; kind?: BulkKind } = {}): Promise<CoverWriteResult> {
   const uid = await sessionUserId();
   const rows = await readRows([...new Set(changes.map((c) => c.id))]);
   const skipped: Record<number, CoverWriteReason> = {};
@@ -201,7 +206,7 @@ export async function setCovers(changes: CoverChange[]): Promise<CoverWriteResul
   }
   if (!done.length) return { batchId: null, written: [], skipped };
 
-  const batchId = newBatchId();
+  const batchId = journal.batchId ?? newBatchId();
   // cover_pinned: false sits in `after`, so Undo's guard also requires the row
   // to be unpinned: pinning the cover afterwards makes it his, and Undo leaves it.
   const entries: JournalEntry[] = done.map(({ c, before }) => ({
@@ -211,7 +216,7 @@ export async function setCovers(changes: CoverChange[]): Promise<CoverWriteResul
     after: { cover_image: c.url, cover_origin: c.url === null ? null : c.origin, cover_pinned: false },
   }));
   try {
-    await writeJournal(batchId, 'cover', entries);
+    await writeJournal(batchId, journal.kind ?? 'cover', entries);
   } catch (e) {
     // Can't be undone → put every row back (guarded on what we wrote) and fail loudly.
     for (const { c, before } of done) {
