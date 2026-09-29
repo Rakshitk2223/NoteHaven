@@ -93,9 +93,11 @@ export function RefreshActivityProvider({ children }: { children: ReactNode }) {
     setFinishedAt(null);
     void (async () => {
       try {
-        const sweep: SweepItem[] = targets.map((t) => ({ id: t.id, title: t.title, type: t.type }));
+        const mm = await import('@/lib/media-metadata');
+        // Full rows, not just id/title/type: link + pin fields decide how each title refreshes.
+        const sweep: SweepItem[] = await mm.loadSweepItems(targets.map((t) => t.id));
         // Update each retried row in place as its fresh result comes back.
-        await (await import('@/lib/media-metadata')).refreshLibrary(optsRef.current!, sweep, undefined, (r) => {
+        await mm.refreshLibrary(optsRef.current!, sweep, undefined, (r) => {
           setItems((prev) => prev.map((it) => (it.id === r.id ? r : it)));
         });
         queryClient.invalidateQueries({ queryKey: ['groupCounts'] });

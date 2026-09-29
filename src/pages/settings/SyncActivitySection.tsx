@@ -13,8 +13,10 @@ import {
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
+import { setCoverPinned } from '@/lib/media-link';
 import { supabase } from '@/integrations/supabase/client';
-import { refreshCoverImage } from '@/lib/media-refresh';
+import { refreshCoverImage, isNewCover, isPinnedOutcome } from '@/lib/media-refresh';
 import { fetchMediaMetadataBatch, removeCoverImage, computeProgress, type MediaMeta } from '@/lib/media-metadata';
 import { SettingsSection } from '@/components/settings/primitives';
 import { useRefreshActivity } from '@/contexts/RefreshActivityContext';
@@ -144,7 +146,10 @@ export function SyncActivitySection() {
     setCoverBusyId(it.id);
     try {
       const res = await refreshCoverImage(it.title, it.type, undefined, it.id);
-      if (res) {
+      if (isPinnedOutcome(res)) {
+        setRows((prev) => { const r = prev.get(it.id); return r ? new Map(prev).set(it.id, { ...r, cover_pinned: true }) : prev; });
+        toast({ title: 'Cover is pinned', description: 'Unpin it in Media to refresh the cover.' });
+      } else if (isNewCover(res)) {
         setRows((prev) => {
           const r = prev.get(it.id);
           return r ? new Map(prev).set(it.id, { ...r, cover_image: res.coverImage }) : prev;
@@ -159,6 +164,24 @@ export function SyncActivitySection() {
   };
 
   const dropCover = async (id: number) => {
+    // Same meaning as Media's ⋮ "Remove cover": pinned + no cover, so no fill puts one back,
+    // with Undo. The legacy null-only write stays for a database without cover_pinned.
+    if (rows.get(id)?.cover_pinned !== undefined) {
+      const res = await setCoverPinned(id, true, { cover: null });
+      if (res.ok === false) { toast({ title: 'Could not remove cover', description: res.message || res.reason, variant: 'destructive' }); return; }
+      const before = rows.get(id);
+      setRows((prev) => { const r = prev.get(id); return r ? new Map(prev).set(id, { ...r, cover_image: null, cover_pinned: true }) : prev; });
+      toast({
+        title: 'Cover removed',
+        description: 'It stays off until you pick one.',
+        action: (
+          <ToastAction altText="Undo" onClick={() => { void res.undo().then((ok) => { if (ok && before) setRows((prev) => new Map(prev).set(id, before)); }); }}>
+            Undo
+          </ToastAction>
+        ),
+      });
+      return;
+    }
     const ok = await removeCoverImage(id);
     if (ok) {
       setRows((prev) => {

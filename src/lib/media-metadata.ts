@@ -126,9 +126,10 @@ export async function removeCoverImage(mediaId: number): Promise<boolean> {
     const user = session?.user;
     if (!user) return false;
 
+    // No last_activity_at bump: a cover change isn't activity, and bumping it reordered Continue.
     const { error } = await supabase
       .from('media_tracker')
-      .update({ cover_image: null, last_activity_at: new Date().toISOString() })
+      .update({ cover_image: null })
       .eq('id', mediaId)
       .eq('user_id', user.id);
 
@@ -345,6 +346,30 @@ export interface SweepItem {
   source_id?: string | null;
   /** Pinned (incl. "Remove cover" = pinned + null): refresh never fills or replaces its cover. */
   cover_pinned?: boolean | null;
+}
+
+const SWEEP_BASE_COLS = 'id, title, type, cover_image, current_season, current_episode, current_chapter, last_known_total_episodes, last_known_total_seasons';
+
+/**
+ * Re-read sweep items by id with every field refresh needs (link + pin included),
+ * e.g. for a retry: without them a linked title went down the title-guess path and
+ * a "Remove cover" title got a cover again. Rows deleted since are dropped.
+ */
+export async function loadSweepItems(ids: number[]): Promise<SweepItem[]> {
+  const out: SweepItem[] = [];
+  let cols = `${SWEEP_BASE_COLS}, link_status, source, source_id, cover_pinned`;
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    let { data, error } = await supabase.from('media_tracker').select(cols).in('id', chunk);
+    // Migration 28's columns; retry without them on a database that lacks them.
+    if (error && (error.code === '42703' || error.code === 'PGRST204') && cols !== SWEEP_BASE_COLS) {
+      cols = SWEEP_BASE_COLS;
+      ({ data, error } = await supabase.from('media_tracker').select(cols).in('id', chunk));
+    }
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as SweepItem[]));
+  }
+  return out;
 }
 
 export type ItemOutcome = 'updated' | 'failed' | 'skipped';

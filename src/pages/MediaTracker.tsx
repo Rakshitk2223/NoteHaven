@@ -48,7 +48,7 @@ import { RefreshLibraryDialog } from "@/components/media/RefreshLibraryDialog";
 import { fetchImagesFromSupabaseBatch } from "@/lib/simple-image-fetcher";
 import { devLog } from "@/lib/logger";
 import { dateToYMD } from "@/lib/date-utils";
-import { refreshCoverImage } from "@/lib/media-refresh";
+import { refreshCoverImage, isNewCover, isPinnedOutcome } from "@/lib/media-refresh";
 import { fetchMediaMetadataBatch, removeCoverImage, acknowledgeNewContent, computeProgress, type MediaMeta } from "@/lib/media-metadata";
 import { Progress } from "@/components/ui/progress";
 import { ContinueShelf } from "@/components/media/ContinueShelf";
@@ -1109,17 +1109,24 @@ const MediaTracker = () => {
     if (selectedItems.length === 0 || isRefreshingCovers) return;
     setIsRefreshingCovers(true);
     let updated = 0;
+    let pinned = 0;
     try {
       for (const item of selectedItems) {
+        // Pinned covers (incl. "Remove cover") are his call: skip without searching.
+        if (item.cover_pinned) { pinned += 1; continue; }
         const currentApi = imageApiSources.get(item.id);
         const res = await refreshCoverImage(item.title, item.type, currentApi, item.id);
-        if (res) {
+        if (isPinnedOutcome(res)) { pinned += 1; continue; }
+        if (isNewCover(res)) {
           updated += 1;
           setImageUrls(prev => new Map([...prev, [item.id, res.coverImage]]));
           setImageApiSources(prev => new Map([...prev, [item.id, res.apiSource]]));
         }
       }
-      toast({ title: 'Done', description: `Updated ${updated} of ${selectedItems.length} covers` });
+      toast({
+        title: 'Done',
+        description: `Updated ${updated} of ${selectedItems.length} covers${pinned ? ` · ${pinned} pinned, left as is` : ''}`,
+      });
     } finally {
       setIsRefreshingCovers(false);
     }
@@ -2069,7 +2076,9 @@ const MediaTracker = () => {
   const handleRefreshCover = useCallback(async (item: MediaItem) => {
     const src = imageApiSources.get(item.id);
     const res = await refreshCoverImage(item.title, item.type, src, item.id);
-    if (res) {
+    if (isPinnedOutcome(res)) {
+      toast({ title: 'Cover is pinned', description: 'Unpin it to refresh the cover.' });
+    } else if (isNewCover(res)) {
       setImageUrls(prev => new Map([...prev, [item.id, res.coverImage]]));
       setImageApiSources(prev => new Map([...prev, [item.id, res.apiSource]]));
       toast({ title: 'Cover updated', description: `Source: ${res.apiSource}` });

@@ -266,13 +266,18 @@ async function fetchFromFanart(title: string, type: string): Promise<RefreshResu
   return fetchFromEdgeSource('fanart', title, type);
 }
 
+/** A new cover, `{ pinned: true }` when the title's cover is pinned (nothing searched or written), or null (none found). */
+export type RefreshCoverOutcome = { coverImage: string; apiSource: string } | { pinned: true } | null;
+export const isNewCover = (r: RefreshCoverOutcome): r is { coverImage: string; apiSource: string } => !!r && 'coverImage' in r;
+export const isPinnedOutcome = (r: RefreshCoverOutcome): r is { pinned: true } => !!r && 'pinned' in r;
+
 // Main refresh function - FIXED: Cycles through ALL APIs
 export async function refreshCoverImage(
   title: string,
   type: string,
   currentApiSource?: string,
   mediaId?: number
-): Promise<{ coverImage: string; apiSource: string } | null> {
+): Promise<RefreshCoverOutcome> {
   const normalizedType = type.toLowerCase();
   const priority = API_PRIORITY[normalizedType] || ['anilist', 'tmdb'];
 
@@ -284,7 +289,10 @@ export async function refreshCoverImage(
   // and re-applied the very cover the user was trying to replace ("Refresh
   // cover does nothing"). Fall back to the source the current cover URL came
   // from, and never accept the same URL back.
-  const currentCover = mediaId ? await readCurrentCover(mediaId) : null;
+  const current = mediaId ? await readCurrentCover(mediaId) : { cover: null, pinned: undefined };
+  // A pinned cover (incl. "Remove cover" = pinned + none) is the user's call: don't even search.
+  if (current.pinned) return { pinned: true };
+  const currentCover = current.cover;
   let currentIndex = currentApiSource ? priority.indexOf(currentApiSource) : -1;
   if (currentIndex === -1) {
     const inferred = sourceFromCoverUrl(currentCover);
@@ -317,7 +325,8 @@ export async function refreshCoverImage(
 
     if (result) {
       devLog(`[COVER] [${i}/${priority.length}] ${apiToTry} SUCCESS - got cover from ${result.apiSource}`);
-      await updateMediaTracker(title, type, result, mediaId);
+      const written = await updateMediaTracker(title, type, result, mediaId, current.pinned !== undefined);
+      if (written === 'pinned') return { pinned: true }; // pinned while we searched
       invalidateImageCache(mediaId);
       return result;
     }
@@ -329,17 +338,18 @@ export async function refreshCoverImage(
   return null;
 }
 
-/** The cover currently stored on the tracker row (RLS scopes it to the caller). */
-async function readCurrentCover(mediaId: number): Promise<string | null> {
+/**
+ * The cover stored on the tracker row and its pin (RLS scopes it to the caller).
+ * `pinned` is undefined on a database without migration 28's cover_pinned.
+ */
+async function readCurrentCover(mediaId: number): Promise<{ cover: string | null; pinned: boolean | undefined }> {
   try {
-    const { data } = await supabase
-      .from('media_tracker')
-      .select('cover_image')
-      .eq('id', mediaId)
-      .maybeSingle();
-    return data?.cover_image ?? null;
+    const withPin = await supabase.from('media_tracker').select('cover_image, cover_pinned').eq('id', mediaId).maybeSingle();
+    if (!withPin.error) return { cover: withPin.data?.cover_image ?? null, pinned: !!withPin.data?.cover_pinned };
+    const { data } = await supabase.from('media_tracker').select('cover_image').eq('id', mediaId).maybeSingle();
+    return { cover: data?.cover_image ?? null, pinned: undefined };
   } catch {
-    return null;
+    return { cover: null, pinned: undefined };
   }
 }
 
@@ -359,13 +369,16 @@ function sourceFromCoverUrl(url: string | null): string | null {
   return null;
 }
 
-// Update media_tracker.cover_image (primary source) and media_metadata
+// Update media_tracker.cover_image (primary source) and media_metadata.
+// Never over a pin (when the column exists), and never bumps last_activity_at:
+// a cover isn't activity, and bumping it reordered Continue.
 async function updateMediaTracker(
   title: string,
   type: string,
   newData: { coverImage: string; apiSource: string },
-  mediaId?: number
-) {
+  mediaId?: number,
+  hasPinColumn = false,
+): Promise<'ok' | 'pinned'> {
   try {
     // Update media_tracker.cover_image if we have the ID
     if (mediaId) {
@@ -374,14 +387,18 @@ async function updateMediaTracker(
       if (!user) {
         console.error('Failed to update media_tracker: user not authenticated');
       } else {
-        const { error: trackerError } = await supabase
+        let q = supabase
           .from('media_tracker')
-          .update({ cover_image: newData.coverImage, last_activity_at: new Date().toISOString() })
+          .update({ cover_image: newData.coverImage })
           .eq('id', mediaId)
           .eq('user_id', user.id);
+        if (hasPinColumn) q = q.eq('cover_pinned', false);
+        const { data: hit, error: trackerError } = await q.select('id');
 
         if (trackerError) {
           console.error('Failed to update media_tracker:', trackerError);
+        } else if (hasPinColumn && (hit ?? []).length === 0) {
+          return 'pinned'; // the row exists (we just read it), so no match = pinned meanwhile
         } else {
           devLog('💾 Updated media_tracker.cover_image');
         }
@@ -406,6 +423,7 @@ async function updateMediaTracker(
   } catch (error) {
     console.error('Database update error:', error);
   }
+  return 'ok';
 }
 
 // Cache invalidation now lives in lib/image-cache.ts, so the keys are declared
