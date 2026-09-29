@@ -135,7 +135,6 @@ All run locally (with `tsx`, apart from `edge:dev`) and read `./.env`. The ones 
 
 | Command | What it does |
 |---|---|
-| `npm run backfill:metadata` | fills `media_metadata` through the deployed edge function, authenticated with the service-role key (`--force`, `--limit N`) |
 | `npm run backfill:releases` | fills `media_tracker.release_date` from cached episode data; dry run by default, `--apply` writes |
 | `npm run backup:media` | dumps the media tables (tracker, legacy metadata, tags, History, and the migration 29 tables) to `./backups/<timestamp>/` with row counts and SHA-256 checksums |
 | `npm run backup:vault` | read-only: downloads every Vault file plus its rows to `./backups/vault-<stamp>/`, with a SHA-256 manifest and `RESTORE.md` |

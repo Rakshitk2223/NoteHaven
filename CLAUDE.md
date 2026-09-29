@@ -30,7 +30,7 @@ no page — they live in a dashboard widget and the calendar's quick-add. Route 
 
 - React 18, TypeScript 5.8, Vite 5 (SWC). Path alias `@/` → `src/`.
 - Tailwind 3 + shadcn/ui (Radix; a trimmed set in `components/ui`) + lucide-react + framer-motion.
-- react-router-dom 6; TanStack Query 5 (MediaTracker, Library, CommandsTab, RefreshActivityContext —
+- react-router-dom 6; TanStack Query 5 (MediaTracker and its `components/media/*`, Library, CommandsTab —
   most other pages use manual `useState` + `useEffect`).
 - Tiptap 2 (Notes), CodeMirror 6 (snippets), recharts (ledger charts), cmdk (⌘K), date-fns, DOMPurify,
   jszip (vault downloads).
@@ -80,7 +80,7 @@ parse of the edge function.
 | Where | Variables | Notes |
 |---|---|---|
 | `.env` — client (copy `.env.example`) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | public by design; Vite inlines them at build time. `VITE_SUPABASE_PROJECT_ID` is in the template but no code reads it |
-| `.env` — local scripts only | `SUPABASE_SERVICE_ROLE_KEY`, `TMDB_API_KEY`, `OMDB_API_KEY` | the service-role key bypasses RLS: **never import it into `src/`**. OMDB is used only by `backfill:covers` |
+| `.env` — local scripts only | `SUPABASE_SERVICE_ROLE_KEY`, `TMDB_API_KEY` | the service-role key bypasses RLS: **never import it into `src/`**. `OMDB_API_KEY` is still in the template but unused (`backfill:covers` was removed) |
 | edge-function secrets (`supabase secrets set`) | `TMDB_API_KEY`, `FANART_API_KEY` (optional), `ALLOWED_ORIGINS` (CORS; unset means `*`) | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are injected by the Supabase runtime |
 
 ## Layout
@@ -93,7 +93,7 @@ src/
   components/             app-level pieces (AppSidebar, PageShell, CommandPalette, Tag*, ConfirmDialog, CodeEditor…)
     ui/                   shadcn primitives + DatePicker, empty-state, filter-pill, motion
     calendar/ dashboard/ ledger/ library/ media/ recipes/ settings/ vault/ work/   feature components
-  hooks/, contexts/       auth, preferences, calendar, sidebar, refresh activity, toast…
+  hooks/, contexts/       auth, preferences, calendar, sidebar, toast…; hooks/media/ (library query, progress)
   lib/                    data access (one module per feature) + pure helpers
   integrations/supabase/  client.ts (the only client) + types.ts
 supabase/                 config.toml, functions/media-search/, migrations/
@@ -219,16 +219,27 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     `hooks/media/useProgressMutation.ts` is only its React side (cache patches, toasts). Don't write
     `current_*` columns anywhere else. Compare-and-swap UPDATE first, then a separate log insert. A failed insert never blocks or rolls
     back progress. Undo writes a `kind = 'undo'` row and never deletes one. No UPDATE / DELETE grants.
-16. **`cover_pinned`** means "keep my cover" (pinned with a null cover means "no cover wanted"). Every
-    cover writer (linking, refresh, sweeps, bulk refresh) must skip a pinned cover.
+16. **Covers: one judge, one writer, no automatic search.** `coverVerdict` (`lib/cover-medium.ts`) is the
+    only judge (ok / wrong-medium / blocked / unverified), used at write time, in review counts and in
+    `audit:covers`, never at display time. `setCover` / `setCovers` (`lib/media-cover.ts`) is the only
+    way the app changes a cover: a compare-and-swap on `cover_pinned = false` and the cover he saw,
+    writing `cover_origin`, journaled as `kind = 'cover'` in chunks of 5 (a chunk that can't be journaled
+    is put back). The only other cover writes are `setCoverPinned` and `linkEntry`'s rule.
+    `cover_pinned` = "keep my cover" (pinned + null = "no cover wanted") and beats everything; **a
+    Change cover… pick pins** (Undo unpins and restores the old cover). Priority: pin → linked source art
+    → reader thumbnail → an existing cover that passes → letter tile. **Web search runs only when he taps
+    "Search the web"** in Change cover…; the display never searches (`simple-image-fetcher` reads stored covers only). Don't
+    reintroduce a per-card refresh, a bulk cover refresh or a display-time lookup.
 17. **Media v2 edge actions are not deployed** (as of 2026-09-29): `action=search|detail`,
     `adult.ts` and the 2100 ms AniList pacing exist only on `media-v2`, and ship in one redeploy with
     Phase 1. Don't describe them as live; `media-v2` must not merge to `main` before that redeploy.
-    There is no batch `resolve` action (removed); Phase 2 loops `action=search` at a client pace.
+    There is no batch `resolve` action (removed); Link your library loops `action=search` at a client
+    pace. Everything the app calls is `search` or `detail` (Browse, Fix match, linking, the update pass,
+    Change cover's search); only the Tachimanga import works without the redeploy.
 18. **Media roadmap is U0–U5, scope frozen** (2026-09-29): one writer per field, cover priority, entry
     points and migration 29 are in `docs/media-v2/PLAN.md` ("Re-cut 2026-09-29"). U6 and the other
     later ideas are parked in `docs/BACKLOG.md`; don't pull them forward. Unit status lives in
-    `PLAN.md` § G (U0, U2a, U2b done on the branch; U3 next).
+    `PLAN.md` § G: U0 → U5 are done on the branch; E1 (the edge redeploy) and the phone pass are open.
 19. **Tachimanga backups are personal data** (the repo is public). Docs, commits, tests and fixtures
     describe the import feature only: never a title, shelf name, count or other detail from his backup.
     In code: reader titles and shelf (category) names live **only in browser memory** during an import.
@@ -243,11 +254,27 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     and the backup gate in bulk dialogs). A complete run stamps `sessionStorage` `notehaven.fullExportAt`;
     bulk writes (the import's Approve today) stay disabled until `hasFullExportThisSession()` (60 min).
     Don't add a second exporter or a gate that accepts a partial export.
-21. **Every bulk change is journaled.** Anything that writes many `media_tracker` rows at once (import,
-    U3 linking, U5 cover passes) writes `media_bulk_journal` before/after rows through
+21. **Every bulk change is journaled.** Anything that writes many `media_tracker` rows at once (the
+    import, Link your library approve, every cover change) writes `media_bulk_journal` before/after rows through
     `lib/media-bulk.ts` `writeJournal` **before** it reports done, and must roll back a chunk it can't
     journal. "Undo last bulk change" (`undoBatch`) is a compare-and-swap restore that skips rows changed
-    since. Journal rows are never edited except `undone_at` (the grant allows nothing else).
+    since. Journal rows are never edited except `undone_at` (the grant allows nothing else). Bulk
+    Approves share one backup gate (`components/media/import/useBackupGate.ts`).
+22. **Source traffic is single-flight.** The Link-your-library resolver (`lib/media-resolve.ts`) and the
+    library update pass (`lib/media-update.ts`) share one Web Lock, `SOURCE_TRAFFIC_LOCK`
+    (`notehaven-source-traffic`), and each paces 2.5 s start to start, so together they stay inside
+    AniList's 30 requests a minute. Anything new that calls the sources in a loop takes the same lock.
+    The update pass runs once per Media open, checks linked Watching / Reading titles by id (each at most
+    every 6 h), writes bookkeeping columns only, never lowers a stored latest, and stamps
+    `latest_changed_at` only when a known latest grows. The resolver writes `media_link_proposals` only;
+    linking happens on Approve through `linkEntry(…, { expect })`, which skips a row that changed.
+23. **Removed in U4 / U5; don't bring them back:** Refresh Library (`RefreshLibraryDialog`),
+    `RefreshActivityContext`, Settings → Sync activity, reads of `has_new_content` (the column stays,
+    unused) and the "new seasons" filter, `media-refresh.ts` (the cover slot machine), bulk refresh
+    covers, `removeCoverImage`, the display-time cover search, `backfill-cover-images.ts` /
+    `backfill:covers`, `backfill-media-metadata.ts` / `backfill:metadata`. `release_date` is now written
+    by the update pass. The edge function's legacy `q=` / `source=` / batch paths have **no caller left**
+    in the repo: dead code in `index.ts`, still deployed; don't build on them.
 
 ## Decided — don't re-litigate
 

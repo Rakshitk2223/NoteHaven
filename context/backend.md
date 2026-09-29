@@ -195,7 +195,7 @@ client helpers are in `src/lib/edge-function.ts`.
 
 - **Auth:** `verify_jwt = true` in `supabase/config.toml` (sticky server-side, hence declared there),
   and the function also checks the JWT `role`: a signed-in user (`authenticated` with a `sub`) or
-  `service_role` (the maintenance scripts), so the anon key gets 401. `mediaSearchGet` sends `apikey: <anon key>` and `Authorization: Bearer <session access token>`; it
+  `service_role` (kept for scripts; none calls the function today), so the anon key gets 401. `mediaSearchGet` sends `apikey: <anon key>` and `Authorization: Bearer <session access token>`; it
   returns `null` when there's no session, on a non-2xx response or on a network error, and callers treat
   that as "not found".
 - **Dev-only override:** in a dev build, `VITE_MEDIA_SEARCH_URL` (e.g. `http://127.0.0.1:8787`, set in
@@ -203,9 +203,9 @@ client helpers are in `src/lib/edge-function.ts`.
   constant, so production builds always use `${VITE_SUPABASE_URL}/functions/v1/media-search`.
 - **CORS:** `ALLOWED_ORIGINS` (comma-separated secret); unset means `*`. A request from an origin that
   isn't listed gets the first allowed origin echoed back.
-- **Legacy paths** (below: `q=` search, `source=` and the batch POST). Since U4 / U5 **the app no longer
-  calls any of them**; the only caller left is `scripts/backfill-media-metadata.ts`. They stay deployed
-  until that script goes.
+- **Legacy paths** (below: `q=` search, `source=` and the batch POST). **Nothing in the repo calls them
+  any more**: the app stopped in U4 / U5, and their last caller, `backfill-media-metadata.ts`, was
+  deleted. They remain in `index.ts` (and deployed) as dead code.
 - **GET** `?q=` (required, truncated to 200 characters) `&type=` `&limit=` (default 10, clamped 1–50)
   `&source=` `&refresh=1`:
   - *search mode* (default): check `media_metadata` (`ilike`, skipped when `refresh` is set), then query
@@ -281,7 +281,7 @@ One judge, one writer (U5):
 - **Writer:** `setCover` / `setCovers` in `lib/media-cover.ts`, the only path that changes a cover from
   the app (plus `setCoverPinned` for pinning and `linkEntry`'s own cover rule). A compare-and-swap UPDATE
   guarded on `cover_pinned = false` and the cover he saw; it writes `cover_image` + `cover_origin`,
-  journals `kind = 'cover'`, and puts the rows back if the journal can't be written. A non-manual cover
+  journals `kind = 'cover'` in chunks of 5 (write 5 → journal 5), and puts a chunk back if the journal can't be written. A non-manual cover
   that's wrong-medium or blocked is refused.
 - **Priority:** a pin always wins → the linked source's art (the default for linked titles) → the reader
   app's thumbnail (`media_import_map.reader_cover`; the default for unlinked ones) → the existing cover if
@@ -341,7 +341,6 @@ listed in `README.md`.
 
 | Script | Talks to |
 |---|---|
-| `backfill-media-metadata.ts` | the deployed edge function (source mode; the last caller of the legacy paths), authenticated with the service-role key (which the function accepts since fix batch 1) → `media_metadata` and `media_tracker.last_known_total_*` |
 | `backfill-release-dates.ts` | cached `media_metadata.episodes_detail` → `media_tracker.release_date` (no network) |
 | `backup-media.ts` | `media_tracker`, `media_metadata`, `media_tags`, `media_progress_log` and the three migration 29 tables → `./backups/<timestamp>/`; a 29 table that doesn't exist yet is noted as "not set up", not a failure. Doesn't include `media_source_meta` (rebuildable from the sources) |
 | `backup-vault.ts` | **read-only**: every Vault object's bytes plus `vault_files` / `vault_folders` rows, with SHA-256 manifest and `RESTORE.md` → `./backups/vault-<stamp>/`; orphan objects are backed up and flagged |

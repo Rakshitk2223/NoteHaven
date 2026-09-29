@@ -170,10 +170,11 @@ items appended automatically.
     while pinned) lists options in priority order: the linked source's art → the reader app's thumbnail →
     the current cover → **web search, only when he taps "Search the web"**. Each option carries its
     `coverVerdict` (ok / unverified / wrong kind / won't load); wrong-kind and won't-load options can't
-    be picked. Picking one writes it through `setCover` with that option's origin; it does **not** pin
-    (pinning is a separate ⋮ action).
+    be picked. Picking one writes it through `setCover` with that option's origin **and pins it**, so
+    later linking and cover fixes keep it; Undo unpins and restores the previous cover.
     **Wrong covers · N** (`WrongCovers`, from More) lists covers that are wrong-medium, blocked or missing,
-    with a one-tap fix to the default (source art for linked titles, the reader thumbnail otherwise).
+    with a fix to the default (source art for linked titles, the reader thumbnail otherwise). "Fix all"
+    is a bulk write behind the shared backup gate, journaled every 5.
     **Pin / Unpin** and **Remove cover** (a pinned null cover) stay in the ⋮ menu. Every change goes
     through `setCover(s)` and is journaled, so "Undo last bulk change" covers it. The old per-card
     Refresh cover (the slot machine) and bulk refresh covers are gone.
