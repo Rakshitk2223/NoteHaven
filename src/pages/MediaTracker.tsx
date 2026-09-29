@@ -82,7 +82,8 @@ import { buildLibraryLookup, findInLibrary, type LibraryRow } from '@/lib/media-
 import { detectMediaV2Schema, linkEntry, readSourceMeta, setCoverPinned } from '@/lib/media-link';
 import { detailToMeta, mergeMeta } from '@/components/media/source-meta';
 import { isUsableCover } from '@/lib/cover-medium';
-import { initialsOf, progressFieldOf, type MediaFormData } from '@/components/media/types';
+import { progressFieldOf, type MediaFormData } from '@/components/media/types';
+import { CoverArt } from '@/components/media/CoverArt';
 import {
   type MediaItem, type MediaPages, type MediaSortBy, READABLE_TYPES, WATCHABLE_TYPES, getStatusCategory,
   VALID_TYPES, VALID_STATUSES, normalizeMediaItem,
@@ -266,12 +267,7 @@ const MediaListRow = ({
         className="relative h-[68px] w-[46px] flex-shrink-0 overflow-hidden rounded-md bg-muted shadow-sm ring-1 ring-border/50"
         aria-label={`Open ${item.title}`}
       >
-        <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center text-lg font-bold text-muted-foreground">
-          {initialsOf(item.title, 1)}
-        </span>
-        {cover && (
-          <img key={cover} src={cover} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.hidden = true; }} className="relative h-full w-full object-cover" />
-        )}
+        <CoverArt src={cover} title={item.title} initials={1} lazy letterClassName="text-lg" />
         {item.has_new_content && (
           <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[hsl(var(--success))] ring-2 ring-background" aria-hidden="true" />
         )}
@@ -2115,14 +2111,18 @@ const MediaTracker = () => {
   // Pin / unpin the current cover: pinned covers are never replaced.
   const togglePin = useCallback(async (item: MediaItem) => {
     const next = !item.cover_pinned;
-    const res = await setCoverPinned(item.id, next);
+    // Pinning a cover that's only on screen (looked up by title, cover_image still empty)
+    // saves it too; otherwise the pin would lock in "no cover". Undo restores both.
+    const shown = imageUrlsRef.current.get(item.id);
+    const saveShown = next && !item.cover_image && !!shown;
+    const res = await setCoverPinned(item.id, next, saveShown ? { cover: shown } : {});
     if (res.ok === false) { toast({ title: 'Could not change the pin', description: res.message || res.reason, variant: 'destructive' }); return; }
-    patchCachedItem(item.id, { cover_pinned: next });
+    patchCachedItem(item.id, saveShown ? { cover_pinned: next, cover_image: shown! } : { cover_pinned: next });
     toast({
       title: next ? 'Cover pinned' : 'Cover unpinned',
       description: next ? 'Refreshes and links will keep this cover.' : 'Refreshes may replace it again.',
       action: (
-        <ToastAction altText="Undo" onClick={() => { void res.undo().then((ok) => { if (ok) patchCachedItem(item.id, { cover_pinned: !next }); }); }}>
+        <ToastAction altText="Undo" onClick={() => { void res.undo().then((ok) => { if (ok) patchCachedItem(item.id, saveShown ? { cover_pinned: !next, cover_image: undefined } : { cover_pinned: !next }); }); }}>
           Undo
         </ToastAction>
       ),

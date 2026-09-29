@@ -5,6 +5,8 @@ import { initialsOf } from './types';
 interface CoverArtProps {
   src?: string | null;
   title: string;
+  /** How many initials the tile shows (1 on small or busy tiles). */
+  initials?: number;
   /** Letter size for the tile (the grid and the detail hero differ). */
   letterClassName?: string;
   imgClassName?: string;
@@ -16,13 +18,13 @@ interface CoverArtProps {
  * a missing, loading, failed or 1px-blank image never leaves an empty box.
  * Render inside a `relative` sized container.
  */
-export function CoverArt({ src, title, letterClassName = 'text-2xl', imgClassName, lazy }: CoverArtProps) {
+export function CoverArt({ src, title, initials = 2, letterClassName = 'text-2xl', imgClassName, lazy }: CoverArtProps) {
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [src]);
   return (
     <>
       <span aria-hidden="true" className={cn('absolute inset-0 grid place-items-center bg-gradient-brand-soft font-extrabold text-primary', letterClassName)}>
-        {initialsOf(title)}
+        {initialsOf(title, initials)}
       </span>
       {src && !failed && (
         <img

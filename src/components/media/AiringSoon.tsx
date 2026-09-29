@@ -2,6 +2,7 @@ import { CalendarClock, Radio, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { airingDayLabel, type UpcomingEpisode, type EpisodeFreshness } from '@/lib/media-insights';
+import { CoverArt } from './CoverArt';
 
 interface AiringSoonProps {
   episodes: UpcomingEpisode[];
@@ -95,19 +96,9 @@ export function AiringSoon({ episodes, covers, onOpen, freshness, onRefreshLibra
                       )}
                     >
                       <div className="relative aspect-[16/10] w-full overflow-hidden bg-muted">
-                        {cover ? (
-                          <img
-                            src={cover}
-                            alt=""
-                            loading="lazy"
-                            referrerPolicy="no-referrer"
-                            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          />
-                        ) : (
-                          <span className="flex h-full w-full items-center justify-center bg-gradient-brand-soft text-2xl font-black text-primary/70">
-                            {ep.item.title.charAt(0).toUpperCase()}
-                          </span>
-                        )}
+                        <CoverArt src={cover} title={ep.item.title} initials={1} lazy
+                          letterClassName="text-2xl font-black text-primary/70"
+                          imgClassName="transition-transform duration-500 group-hover:scale-105" />
                         <span className="absolute bottom-1 right-1 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-bold text-white">
                           {ep.label}
                         </span>

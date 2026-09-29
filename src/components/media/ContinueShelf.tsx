@@ -3,7 +3,8 @@ import { ChevronLeft, ChevronRight, Play, Sparkles, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { QueueEntry } from '@/lib/media-insights';
-import { initialsOf, isReadable } from './types';
+import { isReadable } from './types';
+import { CoverArt } from './CoverArt';
 
 interface ContinueShelfProps {
   entries: QueueEntry[];
@@ -78,20 +79,9 @@ export function ContinueShelf({ entries, covers, onAdvance, onOpen, busyIds }: C
                 aria-label={`Open ${item.title}`}
               >
                 <div className="relative aspect-[2/3] w-full overflow-hidden bg-muted">
-                  <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center bg-gradient-brand-soft text-4xl font-black text-primary/70">
-                    {initialsOf(item.title, 1)}
-                  </span>
-                  {cover && (
-                    <img
-                      key={cover}
-                      src={cover}
-                      alt=""
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      onError={(e) => { e.currentTarget.hidden = true; }}
-                      className="relative h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-                    />
-                  )}
+                  <CoverArt src={cover} title={item.title} initials={1} lazy
+                    letterClassName="text-4xl font-black text-primary/70"
+                    imgClassName="transition-transform duration-500 group-hover:scale-[1.04]" />
 
                   {isNew && (
                     <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[10px] font-bold text-white shadow-glow">

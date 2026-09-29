@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import type { MediaMeta } from '@/lib/media-metadata';
 import { type MediaItem, isReadable } from './types';
 import { knownLatest, progressValue, unitNoun, unitShort } from './progress-view';
+import { CoverArt } from './CoverArt';
 
 const CHIPS = [1, 5, 10, 50] as const;
 const MAX_DIGITS = 5;
@@ -73,8 +74,8 @@ export function LogPanel({ item, meta, cover, onCommit, onCancel, autoFocus }: L
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel(); } }}
     >
       <div className="flex items-center gap-3">
-        <span className="h-14 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted ring-1 ring-border">
-          {cover ? <img src={cover} alt="" className="h-full w-full object-cover" /> : null}
+        <span className="relative h-14 w-10 flex-shrink-0 overflow-hidden rounded-md bg-muted ring-1 ring-border">
+          <CoverArt src={cover} title={item.title} initials={1} letterClassName="text-base" />
         </span>
         <div className="min-w-0">
           <p className="truncate font-semibold text-foreground">{item.title}</p>

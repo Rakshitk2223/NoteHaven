@@ -4,6 +4,7 @@ import { formatDistanceToNowStrict, isToday, isYesterday, format } from 'date-fn
 import { RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { CoverArt } from './CoverArt';
 
 const PAGE = 50;
 
@@ -100,8 +101,8 @@ export function HistoryView({ onOpen }: { onOpen: (mediaId: number) => void }) {
                     onClick={() => onOpen(r.media_id)}
                     className="flex min-h-16 w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   >
-                    <span className="h-12 w-8 flex-shrink-0 overflow-hidden rounded bg-muted ring-1 ring-border">
-                      {m.cover_image ? <img src={m.cover_image} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" /> : null}
+                    <span className="relative h-12 w-8 flex-shrink-0 overflow-hidden rounded bg-muted ring-1 ring-border">
+                      <CoverArt src={m.cover_image} title={m.title} initials={1} lazy letterClassName="text-xs" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-foreground">{m.title}</span>

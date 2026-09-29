@@ -32,7 +32,10 @@ export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onToggleP
   const linked = item.link_status === 'linked' && !!item.source;
   // A pinned cover is kept as-is: Unpin first to refresh or remove it.
   const canRefresh = !!onRefreshCover && !linked && !item.cover_pinned;
-  const coverActions = !!(onTogglePin || canRefresh || (onRemoveCover && hasCover && !item.cover_pinned));
+  // Pinning nothing would lock the title coverless; "Remove cover" is the deliberate way to do that.
+  // Unpin stays on any pinned title (incl. pinned + no cover) so a cover can come back.
+  const canTogglePin = !!onTogglePin && (item.cover_pinned || !!hasCover);
+  const coverActions = canTogglePin || canRefresh || !!(onRemoveCover && hasCover && !item.cover_pinned);
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -52,8 +55,8 @@ export function MediaActionsMenu({ item, hasCover, onEdit, onFixMatch, onToggleP
           </DropdownMenuItem>
         )}
         {coverActions && (onEdit || onFixMatch) && <DropdownMenuSeparator />}
-        {onTogglePin && (
-          <DropdownMenuItem className="min-h-10" onSelect={() => onTogglePin(item)}>
+        {canTogglePin && (
+          <DropdownMenuItem className="min-h-10" onSelect={() => onTogglePin!(item)}>
             <Pin className="mr-2 h-4 w-4" /> {item.cover_pinned ? 'Unpin cover' : 'Pin cover'}
           </DropdownMenuItem>
         )}
