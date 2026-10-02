@@ -63,8 +63,9 @@ caches (`EDGE_CACHE_WRITES=0`; opt in with `EDGE_DEV_CACHE_WRITES=1`). Writes ma
 Maintenance scripts (`backfill:*`, `backup:*`, `audit:*`, `smoke:apis`, and the synthetic Tachimanga
 fixture generator `npx tsx scripts/make-tachimanga-fixture.ts`) are described in `README.md`.
 
-**Version:** every push to `main` bumps `package.json` by one patch (`npm version patch --no-git-tag-version`,
-which updates the lockfile too). Settings → About shows it with the commit and build time (`vite.config.ts`
+**Version:** `package.json`, retro-numbered by era (v1 launch Aug 2025 → v5 Media v2, Sep 2026). Every push to
+`main` bumps it: a fix push `npm version patch`, a push that adds a feature `npm version minor`, a real overhaul
+`major` (always `--no-git-tag-version`, which updates the lockfile too). Settings → About shows it with the commit and build time (`vite.config.ts`
 `define`: `__APP_VERSION__`, `__APP_COMMIT__`, `__APP_BUILT_AT__`), so he can tell which build his phone runs.
 
 **Done means** `npm run build`, `npm run lint` (zero errors), `npm test` and `npm run test:insights` all pass —
