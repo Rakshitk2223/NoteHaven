@@ -109,7 +109,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
 
   // "Use this": copy into storage first (E2), then the one cover writer. Pre-E2 = as-is.
   const applySuggestion = async (w: WrongCover): Promise<CoverWriteResult> => {
-    const to = await urlToSave(copyCover, w.row.id, w.suggestion!.url);
+    const to = await urlToSave(copyCover, w.row.id, w.suggestion!.url, { copyOnly: w.suggestion!.copyOnly });
     if ('reason' in to) return { batchId: null, written: [], skipped: { [w.row.id]: `copy:${to.reason}` } };
     return setCover(w.row.id, to.url, w.suggestion!.origin, { expect: w.row.cover_image ?? null });
   };
@@ -181,6 +181,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
                     <span className="line-clamp-2 break-words text-sm font-medium leading-snug text-foreground">{w.row.title}</span>
                     <span className="block truncate text-xs text-warning">{PROBLEM[w.problem]}</span>
                     {w.checking && <span className="block truncate text-xs text-muted-foreground">Checking the suggested cover…</span>}
+                    {w.suggestion?.copyOnly && <span className="block truncate text-xs text-muted-foreground">MangaDex cover, copied when you fix it</span>}
                   </span>
                   {w.checking ? null : w.suggestion ? (
                     <Button variant="outline" className="h-11 flex-shrink-0 px-3" disabled={!!busy}

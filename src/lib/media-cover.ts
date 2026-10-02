@@ -84,8 +84,11 @@ export interface WrongCover {
   row: CoverRow;
   /** 'missing' = no cover but a good one is available. */
   problem: 'wrong-medium' | 'blocked' | 'missing';
-  /** The one-tap fix, or null when nothing good is known (he picks in "Change cover…"). */
-  suggestion: { url: string; origin: CoverOrigin } | null;
+  /**
+   * The one-tap fix, or null when nothing good is known (he picks in "Change cover…").
+   * copyOnly: the linked source's art can't be shown directly (MangaDex); it must be copied first.
+   */
+  suggestion: { url: string; origin: CoverOrigin; copyOnly?: boolean } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +155,19 @@ export function defaultCover(row: Pick<CoverRow, 'type' | 'link_status'>, source
  */
 export function wrongCovers(
   rows: CoverRow[],
-  known: { sourceCoverOf?: (row: CoverRow) => string | null; readerCoverOf?: (row: CoverRow) => string | null } = {},
+  known: {
+    sourceCoverOf?: (row: CoverRow) => string | null;
+    readerCoverOf?: (row: CoverRow) => string | null;
+    /** A linked title's copy-only source art (MangaDex), used when nothing displayable is known. */
+    sourceCopyOf?: (row: CoverRow) => string | null;
+  } = {},
 ): WrongCover[] {
   const out: WrongCover[] = [];
   for (const row of rows) {
     if (row.cover_pinned) continue;
-    const suggestion = defaultCover(row, known.sourceCoverOf?.(row) ?? null, known.readerCoverOf?.(row) ?? null);
+    const copyOnly = row.link_status === 'linked' ? known.sourceCopyOf?.(row) ?? null : null;
+    const suggestion = defaultCover(row, known.sourceCoverOf?.(row) ?? null, known.readerCoverOf?.(row) ?? null)
+      ?? (copyOnly ? { url: copyOnly, origin: 'source' as CoverOrigin, copyOnly: true } : null);
     if (!row.cover_image) {
       if (suggestion) out.push({ row, problem: 'missing', suggestion });
       continue;
@@ -378,9 +388,22 @@ export async function loadWrongCovers(): Promise<WrongCover[]> {
     }
   }
   const reader = await readerCovers(rows.map((r) => r.id));
+  // MangaDex art is copy-only and never cached in media_source_meta; the link's own proposal carries it.
+  const copyFrom = new Map<number, string>();
+  const md = linked.filter((r) => r.source === 'mangadex' && !r.cover_pinned);
+  for (let i = 0; i < md.length; i += 100) {
+    const { data } = await supabase.from('media_link_proposals' as never).select('media_id, candidates')
+      .in('media_id', md.slice(i, i + 100).map((r) => r.id));
+    for (const p of (data ?? []) as Array<{ media_id: number; candidates: Array<{ source: string; source_id: string; cover_copy_from?: string | null }> | null }>) {
+      const row = md.find((r) => r.id === p.media_id);
+      const c = (p.candidates ?? []).find((x) => x.source === row?.source && x.source_id === row?.source_id);
+      if (c?.cover_copy_from) copyFrom.set(p.media_id, c.cover_copy_from);
+    }
+  }
   return wrongCovers(rows, {
     sourceCoverOf: (r) => (r.source && r.source_id ? metaCover.get(`${r.source}:${r.source_id}`) ?? null : null),
     readerCoverOf: (r) => reader.get(r.id)?.[0] ?? null,
+    sourceCopyOf: (r) => copyFrom.get(r.id) ?? null,
   });
 }
 

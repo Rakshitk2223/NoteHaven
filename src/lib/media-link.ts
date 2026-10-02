@@ -229,7 +229,9 @@ export async function linkEntry(
   // gets a cover at all. Before his deploy the copy is 'unavailable': a hotlinkable
   // cover is saved as today, a copy-only one isn't.
   const hotlink = coverOf(detail, candidate);
-  const copyFrom = (detail as { cover_copy_from?: string | null } | null)?.cover_copy_from ?? null;
+  // Copy-only art (MangaDex) rides on the search result too, so a link made from the proposal keeps it.
+  const copyFrom = (detail as { cover_copy_from?: string | null } | null)?.cover_copy_from
+    ?? (candidate as Candidate & { cover_copy_from?: string | null }).cover_copy_from ?? null;
   const newCover = hotlink ?? copyFrom;
   const copyOnly = !hotlink && !!copyFrom;
   const pinned = x ? x.cover_pinned || before.cover_pinned : before.cover_pinned;

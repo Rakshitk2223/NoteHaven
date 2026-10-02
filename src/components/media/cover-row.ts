@@ -38,6 +38,7 @@ export async function fixInChunks(
   for (let i = 0; i < fixable.length; i += 5) {
     let chunk = fixable.slice(i, i + 5).map((w) => ({
       id: w.row.id, url: w.suggestion!.url as string | null, origin: w.suggestion!.origin, expect: w.row.cover_image ?? null,
+      copyOnly: !!w.suggestion!.copyOnly,
     }));
     if (copyMany) {
       let copied: CopyOutcome[] = [];
@@ -45,7 +46,7 @@ export async function fixInChunks(
       chunk = chunk.flatMap((c, k) => {
         const r = copied[k] ?? { url: null, reason: 'unavailable' as const };
         if (r.url) return [{ ...c, url: r.url }];
-        if (r.reason === 'unavailable') return [c];          // pre-E2: save as-is
+        if (r.reason === 'unavailable' && !c.copyOnly) return [c]; // pre-E2: save as-is (never copy-only art)
         out.skipped[c.id] = `copy:${r.reason}`;              // couldn't be copied: never saved as a broken hotlink
         return [];
       });

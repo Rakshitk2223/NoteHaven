@@ -115,6 +115,19 @@ describe('buildCoverOptions ("Change cover…")', () => {
   });
 });
 
+describe('wrongCovers · copy-only source art (MangaDex)', () => {
+  it('a linked title with no displayable cover gets its MangaDex art as a copy-only fix; unlinked never does', () => {
+    const MD = 'https://uploads.mangadex.org/covers/x/y.jpg.512.jpg';
+    const rows = [
+      { id: 1, title: '[audit] MD', type: 'Manhwa', cover_image: null, cover_pinned: false, cover_origin: null, link_status: 'linked', source: 'mangadex', source_id: 'x' },
+      { id: 2, title: '[audit] Unlinked', type: 'Manhwa', cover_image: null, cover_pinned: false, cover_origin: null, link_status: 'unlinked', source: null, source_id: null },
+    ] as never[];
+    const out = wrongCovers(rows, { sourceCopyOf: () => MD });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ problem: 'missing', suggestion: { url: MD, origin: 'source', copyOnly: true } });
+  });
+});
+
 describe('defaultCover + wrongCovers', () => {
   it('linked reading → source art first; unlinked reading → reader art first', () => {
     expect(defaultCover({ type: 'Manhwa', link_status: 'linked' }, ANILIST_MANGA, READER)).toEqual({ url: ANILIST_MANGA, origin: 'source' });
