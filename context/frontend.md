@@ -188,7 +188,10 @@ items appended automatically.
     later linking and cover fixes keep it; Undo unpins and restores the previous cover.
     **Wrong covers · N** (`WrongCovers`, from More) lists covers that are wrong-medium, blocked or missing,
     with a fix to the default (source art for linked titles, the reader thumbnail otherwise). "Fix all"
-    is a bulk write behind the shared backup gate, journaled every 5.
+    is a bulk write behind the shared backup gate, journaled every 5. A copy that fails (`copy:<reason>`
+    in `skipped`) is named in the toast; lasting failures (the site refuses our server, not an image…)
+    are remembered on the device for 7 days (`media/copy-failures.ts`), so that row offers Change cover…
+    instead of the same failing one-tap fix.
     **Pin / Unpin** and **Remove cover** (a pinned null cover) stay in the ⋮ menu. Every change goes
     through `setCover(s)` and is journaled. A one-row cover batch (a single pick or fix) keeps its own
     toast Undo and never takes over "Undo last bulk change" (`isSingleCoverChange`).
@@ -201,25 +204,34 @@ items appended automatically.
   - **Updates** (`UpdatesView`, U4): titles whose latest chapter or aired episode **grew**, newest
     first, grouped by day, over the last 30 days ("Ch N out", "S2 · E5 aired"); tap opens the title;
     **Check now** forces a pass. The data comes from the **library update pass** (`lib/media-update.ts`):
-    once per Media open, paced 2.5 s start to start, it checks linked Watching / Reading titles (each at
-    most every 6 h) **by id** through `action=detail`. Reading types update `last_known_latest_chapter`;
+    once per Media open, after a link Approve and when a linking run ends (`media/update-pass.ts`),
+    paced 2.5 s start to start, it checks linked Watching / Reading titles (each at most every 6 h)
+    **by id** through `action=detail`, plus a **first look** at every title linked since its last check,
+    any status (`needsFirstLook`): that is what fills a freshly approved title's details. Reading types update `last_known_latest_chapter`;
     watch types update the latest **aired** season + episode (TMDB / TVmaze; AniList-linked anime have no
     episode latest) and move the next air date into `release_date` for the Calendar. A stored latest is
     never lowered, and `latest_changed_at` is stamped only when a *known* latest grows (the first sighting
     is a baseline). It writes bookkeeping columns only, each guarded on what it read.
   - **Link your library** (U3; More → Link your library, needs 29): `lib/media-resolve.ts` walks every
     **unlinked** title, one at a time, ≥ 2.5 s start to start (60 s back-off on a rate limit; it waits
-    while the tab is hidden or offline), searches the type-correct sources and stores a proposal in
+    while offline; a tab hidden for 15 s **hands the run off**, letting go of the lock so a visible tab,
+    or this one on return, picks it up through `useLinkRun`), searches the type-correct sources and stores a proposal in
     `media_link_proposals` (bands auto / review / none / error; error rows are retried). It never writes
     `media_tracker`. The run is resumable from any device (the server is the cursor; the run / pause
     intent is kept per device). **Auto-matched · N** (`AutoMatched`) lists the confident links, all
-    included by default, each with "keep my cover". **Needs a pick** (`LinkQueue`, one `ReviewCard` per
-    title, the same card the import uses) shows up to three candidates; a work already linked to another of
-    his titles can't be picked, and duplicates are flagged. Approve (`useLinkApprove` →
-    `link/apply-links.ts`) is behind the shared backup gate, links each title with `linkEntry(…, { expect,
-    keepCover })` (skipped if the row changed since the proposal), journals chunks of 5 as `kind = 'link'`,
-    and toasts Undo. Linking writes link fields, the latest mirror and (by its rules) the cover, never
-    progress, status, rating or title.
+    ticked, with the ones where something disagrees (`link/match-signals.ts`: he's past its count, another
+    kind, a name that isn't exact) first under "Worth a look". Tapping a row opens **`MatchCompare`**: his
+    title and the source's side by side, the deciding facts in aligned rows (a disagreeing row is marked),
+    the synopsis and other names; "keep my cover" lives there. **Needs a pick** (`LinkQueue`, one
+    `ReviewCard` per title, the same card the import uses) shows his cover and progress, why it's ambiguous
+    (`whyAmbiguous`: versions, years, close names) and up to three candidates with format · year · source,
+    each with Compare; a work already linked to another of his titles can't be picked, and duplicates are
+    flagged. Approve (`useLinkApprove` → `link/apply-links.ts`) is behind the shared backup gate: one read
+    of every row and of his linked works, then `linkEntry(…, { fromProposal, before, expect, keepCover })`
+    five at a time (no source call: it links from the stored candidate), journals each chunk as
+    `kind = 'link'`, toasts Undo, and queues the update pass for the details. Linking writes link fields and
+    (by its rules) the cover, never progress, status, rating or title. More → Details & covers always shows
+    the run's live state, Auto-matched, Needs a pick and Wrong covers (counted 3 s after Media opens).
   - **One lock for source traffic:** the resolver and the update pass share the Web Lock
     `notehaven-source-traffic` (`SOURCE_TRAFFIC_LOCK`), so across tabs and devices on one browser only one
     of them talks to the sources at a time and together they stay inside AniList's 30 requests a minute.
@@ -405,7 +417,7 @@ Fix match is open: the "In library" marks), `['mediaBulkLatest']` (the newest un
   `picker-utils.ts`, `media-style.ts`. `import/`: `ReaderImportDialog`, `ImportPreview`, `apply.ts`,
   `import-inputs.ts`, `selection.ts` (pure), `sniff.ts` (pure), `useBackupGate.ts` + `BackupNote` (the
   shared backup gate). `link/`: `LinkBar`, `AutoMatched`, `LinkQueue`, `useLinkRun`, `useLinkApprove`,
-  `apply-links.ts`, `link-data.ts`. Gone: `MediaCard`, `RefreshLibraryDialog`.
+  `apply-links.ts`, `link-data.ts`, `MatchCompare`, `match-signals.ts` (pure). Gone: `MediaCard`, `RefreshLibraryDialog`.
 - **`recipes/`:** `DictateParse`, `PantryPanel`. **`settings/`:** `primitives.tsx`.
 - **`vault/`:** `VaultFileCard`, `VaultFolderCard`, `FilePreviewModal`, `MoveToFolderDialog`, `DuplicateResolveDialog`.
 - **`work/`:** `ProjectCard`, `ProjectTable`, `PeopleInput`.
@@ -458,6 +470,7 @@ before an automatic update reload so the toast shows once).
 | `mediaTrackerViewMode`, `mediaTrackerActiveCategory`, `mediaTrackerVisibleTypeTabs`, `mediaTrackerCustomGroups`, `mediaTrackerSortBy`, `mediaTrackerSortOrder`, `mediaShowRails`, `media_meta_light_v1` | `MediaTracker` (view mode and sort also set from Behavior) |
 | `mediaGridSize` (`S` / `M` / `L`) | `media/grid-size.ts` |
 | `mediaLinkRun:v1` (`running` / `paused`) | `media/link/useLinkRun.ts` (this device's Link-your-library intent; the progress itself is on the server) |
+| `mediaCoverCopyFailed:v1` | `media/copy-failures.ts` (image URLs whose cover copy failed for a lasting reason, 7 days) |
 | `mediaImportCategoryMap:v1` | `media/import/import-inputs.ts` (reader shelf → status; device-only, never synced) |
 | `media_images_v2`, `media_image_sources_v2`, `media_images_stamp_v2` | `lib/image-cache.ts` |
 | `ledgerLastAccountId`, `ledgerSelectedMonth`, `ledgerSelectedYear` | `MoneyLedger` |

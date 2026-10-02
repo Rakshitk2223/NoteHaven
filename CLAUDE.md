@@ -165,7 +165,7 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
   `lib/restore.ts`. A table from a migration that may not be pasted yet goes in `NOT_YET_MIGRATED` too.
 - **Pure modules** (`media-insights`, `media-progress`, `media-match`, `cover-medium`, `title-match`,
   `tachimanga/plan`, `tachimanga/types`, `components/media/progress-view`, `components/media/import/selection`
-  and `sniff`, `secret-mask`, `recipe-parse`, `pantry-match`)
+  and `sniff`, `components/media/link/match-signals`, `secret-mask`, `recipe-parse`, `pantry-match`)
   must not import the Supabase client — it pulls in `import.meta.env` and breaks the `tsx` test.
 - **localStorage** holds UI preferences; guard every access in try/catch. Key list: `context/frontend.md`.
 - **Big pages** (MediaTracker, Library, Notes) mix fetching, state and JSX: extract when making
@@ -272,10 +272,13 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     library update pass (`lib/media-update.ts`) share one Web Lock, `SOURCE_TRAFFIC_LOCK`
     (`notehaven-source-traffic`), and each paces 2.5 s start to start, so together they stay inside
     AniList's 30 requests a minute. Anything new that calls the sources in a loop takes the same lock.
-    The update pass runs once per Media open, checks linked Watching / Reading titles by id (each at most
-    every 6 h), writes bookkeeping columns only, never lowers a stored latest, and stamps
-    `latest_changed_at` only when a known latest grows. The resolver writes `media_link_proposals` only;
-    linking happens on Approve through `linkEntry(…, { expect })`, which skips a row that changed.
+    The update pass runs once per Media open (and after a link Approve or a finished run), checks linked
+    Watching / Reading titles by id (each at most every 6 h) plus a first look at any title linked since
+    its last check, writes bookkeeping columns only, never lowers a stored latest, and stamps
+    `latest_changed_at` only when a known latest grows. The resolver writes `media_link_proposals` only,
+    and a tab hidden for 15 s hands the run to a visible one. Linking happens on Approve through
+    `linkEntry(…, { fromProposal, expect })`: no source call (details come from the update pass), and a
+    row that changed is skipped.
 23. **Removed in U4 / U5; don't bring them back:** Refresh Library (`RefreshLibraryDialog`),
     `RefreshActivityContext`, Settings → Sync activity, reads of `has_new_content` (the column stays,
     unused) and the "new seasons" filter, `media-refresh.ts` (the cover slot machine), bulk refresh
