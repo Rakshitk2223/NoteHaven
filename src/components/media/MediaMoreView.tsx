@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  BarChart3, CheckSquare, Download, Eye, FileSpreadsheet, FileText, ImageOff, LayoutGrid, Replace, RotateCcw, SlidersHorizontal, Upload,
+  BarChart3, CheckCheck, CheckSquare, ListChecks, Download, Eye, FileSpreadsheet, FileText, ImageOff, LayoutGrid, Replace, RotateCcw, SlidersHorizontal, Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -23,10 +23,18 @@ interface MediaMoreViewProps {
   onExportJson: () => void;
   onExportCsv: () => void;
   onExportTxt: () => void;
-  /** "Wrong covers · N": only while there are any (migration 29). Null hides it. */
-  wrongCovers?: { count: number; onClick: () => void } | null;
-  /** "Link your library": only while unlinked titles exist and no run is going. Null hides it. */
-  linkLibrary?: { hint: string; onClick: () => void } | null;
+  /**
+   * "Details & covers" (migration 29; null hides the group). Always laid out once
+   * known, so nothing pops in later: each row says "Checking…" until it knows.
+   */
+  details?: {
+    /** Link your library: its live state (running, paused, done) as label + hint; no onClick = nothing to do. */
+    link: { label: string; hint: string; onClick?: () => void };
+    autoMatched: { count: number; onClick: () => void } | null;
+    needsPick: { count: number; onClick: () => void } | null;
+    /** count null = still checking. */
+    wrongCovers: { count: number | null; onClick: () => void };
+  } | null;
   /** Only while an un-undone bulk change exists (migration 29); null hides the row. */
   undoBulk?: { hint: string; busy: boolean; onUndo: () => void } | null;
 }
@@ -114,11 +122,21 @@ export function MediaMoreView(p: MediaMoreViewProps) {
       </Group>
 
       {/* The library updates itself now (Updates); linking is the one manual job left here. */}
-      {(p.linkLibrary || p.wrongCovers) && (
+      {p.details && (
         <Group title="Details & covers">
-          {p.linkLibrary && <Row icon={Replace} label="Link your library" hint={p.linkLibrary.hint} onClick={p.linkLibrary.onClick} />}
-          {p.wrongCovers && (
-            <Row icon={ImageOff} label={`Wrong covers · ${p.wrongCovers.count.toLocaleString()}`} hint="Wrong kind of art, won’t load, or missing" onClick={p.wrongCovers.onClick} />
+          <Row icon={Replace} label={p.details.link.label} hint={p.details.link.hint} onClick={p.details.link.onClick} />
+          {p.details.autoMatched && (
+            <Row icon={CheckCheck} label={`Auto-matched · ${p.details.autoMatched.count.toLocaleString()}`} hint="Confident matches waiting for your OK" onClick={p.details.autoMatched.onClick} />
+          )}
+          {p.details.needsPick && (
+            <Row icon={ListChecks} label={`Needs a pick · ${p.details.needsPick.count.toLocaleString()}`} hint="More than one likely match" onClick={p.details.needsPick.onClick} />
+          )}
+          {p.details.wrongCovers.count === null ? (
+            <Row icon={ImageOff} label="Wrong covers" hint="Checking…" />
+          ) : p.details.wrongCovers.count === 0 ? (
+            <Row icon={ImageOff} label="Wrong covers" hint="Every cover looks right" />
+          ) : (
+            <Row icon={ImageOff} label={`Wrong covers · ${p.details.wrongCovers.count.toLocaleString()}`} hint="Wrong kind of art, won’t load, or missing" onClick={p.details.wrongCovers.onClick} />
           )}
         </Group>
       )}

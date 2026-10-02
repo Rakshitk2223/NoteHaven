@@ -66,7 +66,9 @@ export interface CoverChange {
   expect: string | null;
 }
 
-export type CoverWriteReason = 'pinned' | 'changed' | 'rejected' | 'not-found';
+export type CoverWriteReason = 'pinned' | 'changed' | 'rejected' | 'not-found'
+  /** The copy into NoteHaven storage failed (E2), so nothing was saved. */
+  | `copy:${CopyFailure}`;
 
 export interface CoverWriteResult {
   /** The journal batch (for Undo), when anything was written. */

@@ -75,6 +75,6 @@ describe('fixInChunks with E2', () => {
     const r = await fixInChunks([wrong(1), wrong(2), wrong(3)], write as never, undefined, copyMany as never);
     expect(write.mock.calls[0][0].map((c: { url: string }) => c.url)).toEqual([STORE, 'https://src/2.jpg']);
     expect(r.written).toEqual([1, 2]);
-    expect(r.skipped).toEqual({ 3: 'rejected' });
+    expect(r.skipped).toEqual({ 3: 'copy:not_image' });
   });
 });

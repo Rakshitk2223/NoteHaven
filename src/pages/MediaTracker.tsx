@@ -96,6 +96,7 @@ import {
   VALID_TYPES, VALID_STATUSES, normalizeMediaItem,
 } from '@/components/media/types';
 import { useMediaLibrary } from '@/hooks/media/useMediaLibrary';
+import { runUpdatePass } from '@/components/media/update-pass';
 
 type MediaSectionId = 'library' | 'updates' | 'history' | 'browse' | 'more';
 // Icons already in the app-wide icons chunk — new glyphs would grow first paint.
@@ -1930,15 +1931,11 @@ const MediaTracker = () => {
     queryFn: latestUndoableBatch,
   });
   // The library keeps itself up to date: one paced pass per Media open (the engine
-  // throttles each title to once per 6 h and shares the source lock with linking).
+  // throttles each title to once per 6 h, gives newly linked titles their first
+  // look, and shares the source lock with linking).
   useEffect(() => {
     if (!v2Schema.importLink) return;
-    let cancelled = false;
-    void import('@/lib/media-update').then(({ getUpdater }) => getUpdater().run()).then((p) => {
-      if (cancelled || !p || p.grew === 0) return;
-      for (const key of ['mediaItems', 'mediaRails', 'mediaUpdates']) void queryClient.invalidateQueries({ queryKey: [key] });
-    }).catch((e) => console.warn('Library update pass failed:', e));
-    return () => { cancelled = true; };
+    void runUpdatePass(queryClient);
   }, [v2Schema.importLink, queryClient]);
 
   // "Link your library" (migration 29): the resolver run, its pill and the review queue.
@@ -1948,14 +1945,38 @@ const MediaTracker = () => {
   // Covers (migration 29): "Change cover…" for one title, "Wrong covers · N" for the library.
   const [changeCoverFor, setChangeCoverFor] = useState<MediaItem | null>(null);
   const [wrongOpen, setWrongOpen] = useState(false);
-  const { data: wrongCount = 0 } = useQuery({
+  // Counted a few seconds after Media opens (off the first paint), so More shows it at once.
+  const [warm, setWarm] = useState(false);
+  useEffect(() => { const t = window.setTimeout(() => setWarm(true), 3000); return () => window.clearTimeout(t); }, []);
+  const { data: wrongCount } = useQuery({
     queryKey: ['mediaWrongCovers', 'count'],
-    enabled: v2Schema.importLink && section === 'more',
+    enabled: v2Schema.importLink && (warm || section === 'more'),
     staleTime: 5 * 60 * 1000,
     queryFn: async () => (await (await import('@/lib/media-cover')).loadWrongCovers()).length,
   });
   const [linkPicks, setLinkPicks] = useState<Map<number, number>>(() => new Map());
-  const linkLive = ['running', 'waiting', 'paused'].includes(linkRun.progress?.state ?? '') || linkRun.intent === 'paused';
+
+  // More → "Link your library": what the run is doing right now, and the one useful tap.
+  const linkRow = ((): { label: string; hint: string; onClick?: () => void } => {
+    const p = linkRun.progress;
+    const c = linkRun.counts;
+    const n = c ? `${c.done.toLocaleString()}/${c.total.toLocaleString()}` : '';
+    if (!linkRun.ready) return { label: 'Link your library', hint: 'Checking…' };
+    if (p?.runningElsewhere) return { label: `Linking · ${n}`, hint: 'Running in another tab; it moves here when that tab is in the background' };
+    if (p?.state === 'running' || p?.state === 'waiting') {
+      return { label: `Linking · ${n}`, hint: 'Matching your titles to their sources. Tap to pause', onClick: linkRun.pause };
+    }
+    if (p?.state === 'paused' || linkRun.intent === 'paused') return { label: `Linking paused · ${n}`, hint: 'Tap to carry on', onClick: linkRun.resume };
+    if (linkRun.unlinked === 0) return { label: 'Link your library', hint: 'Every title is linked' };
+    if (c && c.done < c.total) {
+      return {
+        label: 'Link your library',
+        hint: `${(c.total - c.done).toLocaleString()} title${c.total - c.done === 1 ? '' : 's'} not checked yet`,
+        onClick: () => { linkRun.start(); setSection('library'); },
+      };
+    }
+    return { label: 'Link your library', hint: `All checked · ${linkRun.unlinked.toLocaleString()} not linked (skipped or not found)` };
+  })();
 
   const [undoBulkOpen, setUndoBulkOpen] = useState(false);
   const [undoingBulk, setUndoingBulk] = useState(false);
@@ -2782,10 +2803,11 @@ const MediaTracker = () => {
                 onExportJson={handleExportJson}
                 onExportCsv={handleExportCsv}
                 onExportTxt={() => setTxtExportDialogOpen(true)}
-                wrongCovers={v2Schema.importLink && wrongCount > 0 ? { count: wrongCount, onClick: () => setWrongOpen(true) } : null}
-                linkLibrary={v2Schema.importLink && linkRun.ready && linkRun.unlinked > 0 && !linkLive && !linkRun.progress?.runningElsewhere ? {
-                  hint: `${linkRun.unlinked.toLocaleString()} title${linkRun.unlinked === 1 ? ' isn’t' : 's aren’t'} linked to a source yet`,
-                  onClick: () => { linkRun.start(); setSection('library'); },
+                details={v2Schema.importLink ? {
+                  link: linkRow,
+                  autoMatched: linkRun.autoMatched.length ? { count: linkRun.autoMatched.length, onClick: () => setAutoOpen(true) } : null,
+                  needsPick: linkRun.queue.length ? { count: linkRun.queue.length, onClick: () => setQueueOpen(true) } : null,
+                  wrongCovers: { count: wrongCount ?? null, onClick: () => setWrongOpen(true) },
                 } : null}
                 undoBulk={v2Schema.importLink && lastBatch && lastBatch.rows > 0 ? {
                   hint: `${BULK_KIND_LABEL[lastBatch.kind]} · ${lastBatch.rows.toLocaleString()} title${lastBatch.rows === 1 ? '' : 's'} · ${formatDistanceToNowStrict(new Date(lastBatch.created_at), { addSuffix: true })}`,

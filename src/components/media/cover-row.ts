@@ -46,7 +46,7 @@ export async function fixInChunks(
         const r = copied[k] ?? { url: null, reason: 'unavailable' as const };
         if (r.url) return [{ ...c, url: r.url }];
         if (r.reason === 'unavailable') return [c];          // pre-E2: save as-is
-        out.skipped[c.id] = 'rejected';                      // couldn't be copied: never saved as a broken hotlink
+        out.skipped[c.id] = `copy:${r.reason}`;              // couldn't be copied: never saved as a broken hotlink
         return [];
       });
     }

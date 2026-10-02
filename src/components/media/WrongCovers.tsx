@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Image as ImageIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,12 +8,13 @@ import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { undoBatch } from '@/lib/media-bulk';
 import { holdReload } from '@/lib/app-update';
-import { copyCover, copyCovers, loadWrongCovers, setCover, setCovers, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
+import { copyCover, copyCovers, loadWrongCovers, setCover, setCovers, type CopyFailure, type CoverWriteResult, type WrongCover } from '@/lib/media-cover';
 import { COPY_FAILURE_TEXT, urlToSave } from '@/lib/cover-copy';
 import { useBackupGate } from './import/useBackupGate';
 import { BackupNote } from './import/BackupNote';
 import { CoverArt } from './CoverArt';
 import { fixInChunks } from './cover-row';
+import { copyFailedRecently, rememberCopyFailures } from './copy-failures';
 
 const PROBLEM: Record<WrongCover['problem'], string> = {
   'wrong-medium': 'Wrong kind of art',
@@ -28,6 +29,8 @@ const TOUCHED = ['mediaItems', 'mediaRails', 'mediaWrongCovers', 'mediaBulkLates
  * "Wrong covers · N": covers that are the wrong kind of art, won't load, or are
  * missing while a good one is known. One tap per row, or Fix all (one Undo).
  * Rows with no good suggestion open "Change cover…". Pinned covers never show.
+ * A suggestion whose copy already failed for good (the site refuses our server)
+ * isn't offered again: that row says so and opens "Change cover…" instead.
  */
 export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }: {
   open: boolean;
@@ -45,15 +48,32 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
   // An app update never reloads mid-fix (lib/app-update).
   useEffect(() => { holdReload('media-cover-fix', !!busy); return () => holdReload('media-cover-fix', false); }, [busy]);
   const q = useQuery({ queryKey: ['mediaWrongCovers'], queryFn: loadWrongCovers, enabled: open, staleTime: 60 * 1000 });
-  const items = q.data ?? [];
+  const [failures, setFailures] = useState(0); // bumps when a copy fails, so the list re-reads what's remembered
+  const items = useMemo(() => (q.data ?? []).map((w) => {
+    const failed = w.suggestion ? copyFailedRecently(w.suggestion.url) : null;
+    return failed ? { ...w, suggestion: null, copyFailed: failed } : { ...w, copyFailed: null as CopyFailure | null };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- failures: re-read localStorage after a failed copy
+  }), [q.data, failures]);
   const fixable = items.filter((w) => w.suggestion);
 
-  const report = (res: CoverWriteResult, asked: number) => {
+  const report = (res: CoverWriteResult, asked: WrongCover[]) => {
     for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] });
-    const skipped = asked - res.written.length - (res.unchanged?.length ?? 0);
+    // Copies that failed: say why (the old toast blamed "pinned or changed"), and stop offering them.
+    const copyFails: Array<{ url: string; reason: CopyFailure }> = [];
+    for (const w of asked) {
+      const why = res.skipped[w.row.id];
+      if (w.suggestion && typeof why === 'string' && why.startsWith('copy:')) copyFails.push({ url: w.suggestion.url, reason: why.slice(5) as CopyFailure });
+    }
+    if (copyFails.length) { rememberCopyFailures(copyFails); setFailures((n) => n + 1); }
+    const other = asked.length - res.written.length - (res.unchanged?.length ?? 0) - copyFails.length;
+    const firstWhy = copyFails[0] ? COPY_FAILURE_TEXT[copyFails[0].reason] : '';
     toast({
       title: res.written.length ? `Fixed ${res.written.length} cover${res.written.length === 1 ? '' : 's'}` : 'Nothing changed',
-      description: skipped ? `${skipped} skipped (pinned or changed since)` : undefined,
+      description: [
+        copyFails.length ? `${copyFails.length} couldn’t be copied (${firstWhy.replace(/\.$/, '').toLowerCase()}). Use Change cover… for those` : '',
+        other > 0 ? `${other} skipped (pinned or changed since)` : '',
+      ].filter(Boolean).join(' · ') || undefined,
+      variant: !res.written.length && copyFails.length ? 'destructive' : undefined,
       action: res.batchId && res.written.length ? (
         <ToastAction altText="Undo cover fixes" onClick={() => {
           void undoBatch(res.batchId!).then(() => { for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] }); });
@@ -65,14 +85,11 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
   // "Use this": copy into storage first (E2), then the one cover writer. Pre-E2 = as-is.
   const applySuggestion = async (w: WrongCover): Promise<CoverWriteResult> => {
     const to = await urlToSave(copyCover, w.row.id, w.suggestion!.url);
-    if ('reason' in to) {
-      toast({ title: 'Cover not changed', description: COPY_FAILURE_TEXT[to.reason], variant: 'destructive' });
-      return { batchId: null, written: [], skipped: { [w.row.id]: 'rejected' } };
-    }
+    if ('reason' in to) return { batchId: null, written: [], skipped: { [w.row.id]: `copy:${to.reason}` } };
     return setCover(w.row.id, to.url, w.suggestion!.origin, { expect: w.row.cover_image ?? null });
   };
 
-  const run = async (key: number | 'all', work: () => Promise<CoverWriteResult>, asked: number) => {
+  const run = async (key: number | 'all', work: () => Promise<CoverWriteResult>, asked: WrongCover[]) => {
     setBusy(key);
     try { report(await work(), asked); } catch (e) {
       toast({ title: 'Couldn’t fix covers', description: e instanceof Error ? e.message : 'Error', variant: 'destructive' });
@@ -84,10 +101,10 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
     if (busy || !gate.check()) return;
     setBusy('all');
     try {
-      report(await fixInChunks(fixable, setCovers, (done, total) => setProgress({ done, total }), copyCovers), fixable.length);
+      report(await fixInChunks(fixable, setCovers, (done, total) => setProgress({ done, total }), copyCovers), fixable);
     } catch (e) {
       const partial = (e as { partial?: CoverWriteResult }).partial;
-      if (partial?.written.length) report(partial, fixable.length);
+      if (partial?.written.length) report(partial, fixable);
       toast({ title: 'Stopped fixing covers', description: `${e instanceof Error ? e.message : 'Error'}. The last few were put back; the rest can be undone.`, variant: 'destructive' });
     } finally {
       setBusy(null);
@@ -138,10 +155,11 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
                   <span className="min-w-0 flex-1">
                     <span className="line-clamp-2 break-words text-sm font-medium leading-snug text-foreground">{w.row.title}</span>
                     <span className="block truncate text-xs text-warning">{PROBLEM[w.problem]}</span>
+                    {w.copyFailed && <span className="block truncate text-xs text-muted-foreground">The suggested cover can’t be copied. Pick one</span>}
                   </span>
                   {w.suggestion ? (
                     <Button variant="outline" className="h-11 flex-shrink-0 px-3" disabled={!!busy}
-                      onClick={() => void run(w.row.id, () => applySuggestion(w), 1)}>
+                      onClick={() => void run(w.row.id, () => applySuggestion(w), [w])}>
                       Use this
                     </Button>
                   ) : (
