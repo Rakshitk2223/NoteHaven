@@ -1,5 +1,5 @@
 // Pure helpers for the source picker (kept out of the .tsx for fast refresh).
-import type { Candidate, TrackerType } from '@/lib/media-sources';
+import { SOURCE_LABEL, type Candidate, type TrackerType } from '@/lib/media-sources';
 
 export const TRACKER_TYPES: TrackerType[] = ['Manhwa', 'Manhua', 'Manga', 'Anime', 'Series', 'KDrama', 'JDrama', 'Movie'];
 
@@ -18,3 +18,8 @@ export function candidateLine(c: Candidate, type: TrackerType): string {
   return bits.join(' · ');
 }
 
+
+/** "Manhwa · 2021 · AniList": which version of the story, and where the entry comes from. */
+export function candidateFacts(c: Pick<Candidate, 'format' | 'year' | 'source'>): string {
+  return [c.format, c.year, SOURCE_LABEL[c.source] ?? c.source].filter(Boolean).join(' · ');
+}

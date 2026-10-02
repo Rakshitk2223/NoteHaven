@@ -6,7 +6,7 @@ import { fetchAllRows } from '@/lib/fetch-all';
 import type { ProposalRow, ResolveRow } from '@/lib/media-resolve';
 
 /** His rows as the resolver sees them, plus the link (to spot works already linked elsewhere). */
-export type LinkRow = ResolveRow & { source?: string | null; source_id?: string | null };
+export type LinkRow = ResolveRow & { source?: string | null; source_id?: string | null; cover_image?: string | null; status?: string | null };
 
 export interface LinkState {
   rows: LinkRow[];
@@ -20,7 +20,7 @@ export async function loadLinkState(): Promise<LinkState> {
   if (!uid) return { rows: [], proposals: [] };
   const [rows, proposals] = await Promise.all([
     fetchAllRows<LinkRow>(() => supabase.from('media_tracker')
-      .select('id, title, type, current_chapter, current_episode, link_status, source, source_id, updated_at, last_activity_at')
+      .select('id, title, type, status, cover_image, current_chapter, current_episode, link_status, source, source_id, updated_at, last_activity_at')
       .eq('user_id', uid).order('id') as never),
     fetchAllRows<ProposalRow>(() => supabase.from('media_link_proposals' as never)
       .select('media_id, input_title, input_type, input_progress, band, candidates, sources, resolved_at, decision, decided_at')

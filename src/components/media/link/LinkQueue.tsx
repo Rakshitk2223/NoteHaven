@@ -6,8 +6,10 @@ import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import type { TrackerType } from '@/lib/media-sources';
 import { ReviewCard } from '../ReviewCard';
-import { candidateLine } from '../picker-utils';
-import { decide, workKey } from './link-data';
+import { candidateFacts, candidateLine } from '../picker-utils';
+import { decide, workKey, type QueueItem } from './link-data';
+import { MatchCompare } from './MatchCompare';
+import { whyAmbiguous } from './match-signals';
 import { BackupNote } from '../import/BackupNote';
 import { useLinkApprove } from './useLinkApprove';
 import type { LinkRun } from './useLinkRun';
@@ -23,10 +25,18 @@ interface LinkQueueProps {
 }
 
 /**
- * "Needs a pick": each uncertain match as a ReviewCard (his title, the top 3
- * works side by side). Skip / Not listed are saved as he taps; picks wait for
- * Approve, which links them with the same backup gate and Undo as the rest.
+ * "Needs a pick": each uncertain match as a ReviewCard (his title and cover, why
+ * it's ambiguous, the top 3 works side by side, each with Compare). Skip / Not
+ * listed are saved as he taps; picks wait for "Link N picked", which links them
+ * with the same backup gate and Undo as the rest.
  */
+const READING = new Set(['Manga', 'Manhwa', 'Manhua']);
+/** "ch 134" / "ep 5": where he is, so a candidate's count can be read against it. */
+const progressText = (row: QueueItem['row']) => {
+  const n = READING.has(row.type) ? row.current_chapter : row.current_episode;
+  return n != null ? `${READING.has(row.type) ? 'ch' : 'ep'} ${n}` : null;
+};
+
 export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPicks }: LinkQueueProps) {
   const { toast } = useToast();
   const { gate, approve, busy: linking, busyLabel } = useLinkApprove(run);
@@ -40,6 +50,9 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
     onPicks(next);
   });
   const [busy, setBusy] = useState<number | null>(null);
+  const [comparing, setComparing] = useState<{ item: QueueItem; index: number } | null>(null);
+  const reasonFor = (c: { source: string; source_id: string }) => (run.takenWorks.has(workKey(c)) ? 'Already linked to another of your titles' : null);
+  const pick = (mediaId: number, index: number) => { const next = new Map(picks); next.set(mediaId, index); onPicks(next); };
 
   const record = async (mediaId: number, decision: 'skipped' | 'not_listed') => {
     setBusy(mediaId);
@@ -61,7 +74,7 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
           <div className="min-w-0 flex-1">
             <SheetTitle className="text-lg font-semibold text-foreground">Needs a pick</SheetTitle>
             <SheetDescription className="text-sm text-muted-foreground">
-              {run.queue.length.toLocaleString()} title{run.queue.length === 1 ? '' : 's'} with more than one likely match. Your progress stays; a missing or wrong-kind cover is replaced by the source’s (pinned covers never are).
+              {run.queue.length.toLocaleString()} title{run.queue.length === 1 ? '' : 's'} with more than one likely match. Tap Compare to see one next to yours. Skip leaves a title unlinked.
             </SheetDescription>
           </div>
           <Button size="icon" variant="ghost" className="h-10 w-10 flex-shrink-0" onClick={() => onOpenChange(false)} aria-label="Close">
@@ -81,21 +94,23 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
                   <ReviewCard
                     covers
                     title={row.title}
-                    subtitle={row.type}
+                    cover={row.cover_image ?? null}
+                    subtitle={[row.type, progressText(row)].filter(Boolean).join(' · ')}
+                    hint={whyAmbiguous(proposal.candidates.slice(0, 3))}
+                    onInspect={(key) => setComparing({ item: { row, proposal }, index: Number(key) })}
                     candidates={proposal.candidates.slice(0, 3).map((c, i) => ({
                       key: String(i),
                       title: c.title,
-                      alt: c.alt_titles?.[0] ?? null,
-                      line: [candidateLine(c, row.type as TrackerType), c.year].filter(Boolean).join(' · ') || null,
+                      alt: candidateFacts(c),
+                      line: candidateLine(c, row.type as TrackerType) || null,
                       cover: c.cover,
                       // One work, one title: a work already linked to another of his titles can't be picked.
-                      disabledReason: run.takenWorks.has(workKey(c)) ? 'Already linked to another of your titles' : null,
+                      disabledReason: reasonFor(c),
                     }))}
                     picked={picks.has(row.id) ? String(picks.get(row.id)) : undefined}
                     onPick={(key) => {
-                      const next = new Map(picks);
-                      if (key == null) { next.delete(row.id); onPicks(next); void record(row.id, 'skipped'); return; }
-                      next.set(row.id, Number(key)); onPicks(next);
+                      if (key == null) { const next = new Map(picks); next.delete(row.id); onPicks(next); void record(row.id, 'skipped'); return; }
+                      pick(row.id, Number(key));
                     }}
                     onNotListed={() => void record(row.id, 'not_listed')}
                   />
@@ -120,6 +135,12 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
             )}
           </div>
         </div>
+        {comparing && (
+          <MatchCompare open onOpenChange={(o) => { if (!o) setComparing(null); }}
+            row={comparing.item.row} candidate={comparing.item.proposal.candidates[comparing.index]} mode="pick"
+            disabledReason={reasonFor(comparing.item.proposal.candidates[comparing.index])}
+            onPick={() => pick(comparing.item.row.id, comparing.index)} />
+        )}
       </SheetContent>
     </Sheet>
   );

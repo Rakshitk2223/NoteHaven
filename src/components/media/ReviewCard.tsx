@@ -26,6 +26,10 @@ interface ReviewCardProps {
   notListed?: boolean;
   /** Show covers (source candidates have them; NoteHaven rows in the import don't need them). */
   covers?: boolean;
+  /** One line on why this needs a pick (link queue). */
+  hint?: string | null;
+  /** Covers mode: a "Compare" button under each candidate opens a side-by-side look. */
+  onInspect?: (key: string) => void;
 }
 
 /**
@@ -33,7 +37,7 @@ interface ReviewCardProps {
  * pick, Skip, and (in the link queue) Not listed. Shared by the Tachimanga
  * import's "Needs a match" and "Link your library"'s review queue.
  */
-export function ReviewCard({ title, subtitle, cover, candidates, picked, onPick, onNotListed, notListed, covers = false }: ReviewCardProps) {
+export function ReviewCard({ title, subtitle, cover, candidates, picked, onPick, onNotListed, notListed, covers = false, hint, onInspect }: ReviewCardProps) {
   const chip = (on: boolean) => cn(
     'min-h-11 rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     on ? 'border-transparent bg-secondary text-foreground' : 'border-border text-muted-foreground hover:text-foreground',
@@ -46,27 +50,38 @@ export function ReviewCard({ title, subtitle, cover, candidates, picked, onPick,
             <CoverArt src={cover ?? null} title={title} initials={1} letterClassName="text-sm" />
           </span>
         )}
-        <p className="min-w-0 truncate text-sm font-medium text-foreground">
-          {title}
-          {subtitle && <span className="text-xs font-normal tabular-nums text-muted-foreground"> · {subtitle}</span>}
-        </p>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground">
+            {title}
+            {subtitle && <span className="text-xs font-normal tabular-nums text-muted-foreground"> · {subtitle}</span>}
+          </p>
+          {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+        </div>
       </div>
       <div role="radiogroup" aria-label={`Match for ${title}`} className={cn(covers ? 'grid grid-cols-3 gap-2' : 'flex flex-wrap gap-1.5')}>
         {candidates.map((c) => {
           const on = picked === c.key;
           return covers ? (
-            <button key={c.key} type="button" role="radio" aria-checked={on} onClick={() => onPick(c.key)}
+            <div key={c.key} className="flex min-w-0 flex-col gap-1">
+            <button type="button" role="radio" aria-checked={on} onClick={() => onPick(c.key)}
               disabled={!!c.disabledReason} title={c.disabledReason ?? undefined}
-              className={cn('flex min-h-11 min-w-0 flex-col gap-1 rounded-lg p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+              className={cn('flex min-h-11 min-w-0 flex-1 flex-col gap-1 rounded-lg p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
                 on ? 'bg-primary/15 ring-2 ring-primary' : 'ring-1 ring-border hover:bg-secondary/60')}>
               <span className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-muted">
                 <CoverArt src={c.cover ?? null} title={c.title} initials={1} lazy letterClassName="text-lg" />
               </span>
               <span className="line-clamp-2 text-xs font-medium leading-snug text-foreground">{c.title}</span>
-              {c.alt && <span className="line-clamp-1 text-[11px] text-muted-foreground">{c.alt}</span>}
+              {c.alt && <span className="line-clamp-2 text-[11px] text-muted-foreground">{c.alt}</span>}
               {c.line && <span className="line-clamp-1 text-[11px] font-medium text-foreground/80">{c.line}</span>}
               {c.disabledReason && <span className="line-clamp-2 text-[11px] font-medium text-warning">{c.disabledReason}</span>}
             </button>
+            {onInspect && (
+              <button type="button" onClick={() => onInspect(c.key)} aria-label={`Compare ${c.title}`}
+                className="min-h-11 rounded-lg text-xs font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                Compare
+              </button>
+            )}
+            </div>
           ) : (
             <button key={c.key} type="button" role="radio" aria-checked={on} onClick={() => onPick(c.key)}
               className={cn('min-h-11 max-w-full truncate rounded-full border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
