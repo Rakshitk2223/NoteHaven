@@ -941,15 +941,19 @@ const SOURCE_SPACING_MS: Record<string, number> = {
 };
 
 const lastCallAt: Record<string, number> = {};
+/** The next free start time per source. Reserved synchronously, so calls made at the
+ * same moment (a batch search) queue up `spacing` apart instead of firing together. */
+const nextSlotAt: Record<string, number> = {};
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Wait until this source's spacing has elapsed since its previous call. */
+/** Wait for this source's next free slot (each caller gets its own, `spacing` apart). */
 async function paceSource(source: string): Promise<void> {
   const spacing = SOURCE_SPACING_MS[source] ?? 200;
-  const prev = lastCallAt[source] ?? 0;
-  const wait = prev + spacing - Date.now();
-  if (wait > 0) await sleep(wait);
+  const now = Date.now();
+  const slot = Math.max(now, nextSlotAt[source] ?? 0, (lastCallAt[source] ?? 0) + spacing);
+  nextSlotAt[source] = slot + spacing;
+  if (slot > now) await sleep(slot - now);
   lastCallAt[source] = Date.now();
 }
 
@@ -970,6 +974,7 @@ async function pacedFetch(source: string, input: string, init?: RequestInit): Pr
     console.warn(`${source}: 429, retrying in ${backoff}ms`);
     await sleep(backoff);
     lastCallAt[source] = Date.now();
+    nextSlotAt[source] = Math.max(nextSlotAt[source] ?? 0, Date.now() + (SOURCE_SPACING_MS[source] ?? 200));
     res = await fetch(input, init);
     if (res.status === 429) console.warn(`${source}: still rate-limited after retry`);
   }

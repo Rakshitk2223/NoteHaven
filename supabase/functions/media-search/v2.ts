@@ -269,7 +269,8 @@ function muCandidate(r: Loose): Candidate {
   };
 }
 
-async function searchMangaUpdates(d: V2Deps, q: string, limit: number): Promise<Candidate[]> {
+/** enrich: how many top comic hits get a series lookup (status / latest / authors); batches use 1. */
+async function searchMangaUpdates(d: V2Deps, q: string, limit: number, enrich = 3): Promise<Candidate[]> {
   const res = await d.pacedFetch('mangaupdates', 'https://api.mangaupdates.com/v1/series/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...UA },
@@ -284,7 +285,7 @@ async function searchMangaUpdates(d: V2Deps, q: string, limit: number): Promise<
   // three comic hits from the series endpoint so the picker can show "Ch 140 · ongoing".
   let n = 0;
   for (const c of out) {
-    if (n >= 3 || c.medium !== 'comic') continue;
+    if (n >= enrich || c.medium !== 'comic') continue;
     n += 1;
     const full = await muDetailRaw(d, c.source_id).catch(() => null) as Loose;
     if (full && hasAdultGenre(full.genres)) { c.source_id = ''; continue; } // explicit at detail level: drop
@@ -451,10 +452,10 @@ async function searchTVmaze(d: V2Deps, q: string, limit: number): Promise<Candid
   return (Array.isArray(data) ? data : []).slice(0, limit).map((r) => tvmazeCandidate(r.show)).filter((c) => c.title);
 }
 
-async function searchOne(d: V2Deps, source: Source, q: string, type: TType, limit: number): Promise<Candidate[]> {
+async function searchOne(d: V2Deps, source: Source, q: string, type: TType, limit: number, opts: { muEnrich?: number } = {}): Promise<Candidate[]> {
   switch (source) {
     case 'anilist': return searchAniList(d, q, type, limit);
-    case 'mangaupdates': return searchMangaUpdates(d, q, limit);
+    case 'mangaupdates': return searchMangaUpdates(d, q, limit, opts.muEnrich);
     case 'mangadex': return searchMangaDex(d, q, limit);
     case 'jikan': return searchJikan(d, q, type, limit);
     case 'tmdb': return searchTMDB(d, q, type, limit);
@@ -478,6 +479,89 @@ export async function searchAll(d: V2Deps, q: string, type: TType, limit: number
     return { source, state, count: 0 };
   });
   return { candidates, sources: states };
+}
+
+// ---------------------------------------------------------------------------
+// Batch search (Link your library): many titles, ONE AniList request
+// ---------------------------------------------------------------------------
+// AniList's limit (30/min) counts requests, not searches, so up to 10 titles
+// share one GraphQL request (an alias per title). The other sources run one
+// search per title (paced per source by pacedFetch), all sources side by side.
+// If AniList rejects a batch as too big (query complexity), it is split in
+// half and retried, and the size that worked is remembered for this isolate.
+
+export const SEARCH_BATCH_MAX = 10;
+let anilistBatchMax = SEARCH_BATCH_MAX;
+/** Tests only: forget the learned AniList batch size. */
+export function resetAniListBatchSize(): void { anilistBatchMax = SEARCH_BATCH_MAX; }
+
+async function aniListMany(d: V2Deps, items: Array<{ q: string; type: TType }>, limit: number): Promise<Candidate[][]> {
+  if (items.length === 0) return [];
+  if (items.length > anilistBatchMax) {
+    const out: Candidate[][] = [];
+    for (let i = 0; i < items.length; i += anilistBatchMax) out.push(...await aniListMany(d, items.slice(i, i + anilistBatchMax), limit));
+    return out;
+  }
+  const vars: Record<string, unknown> = { n: limit };
+  const decl = ['$n: Int'];
+  const parts = items.map((it, i) => {
+    vars[`q${i}`] = it.q;
+    vars[`t${i}`] = it.type === 'anime' ? 'ANIME' : 'MANGA';
+    decl.push(`$q${i}: String`, `$t${i}: MediaType`);
+    return `a${i}: Page(perPage: $n) { media(search: $q${i}, type: $t${i}, isAdult: false) { ...F } }`;
+  });
+  const res = await d.pacedFetch('anilist', 'https://graphql.anilist.co', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ query: `query (${decl.join(', ')}) { ${parts.join(' ')} } fragment F on Media { ${ANILIST_FIELDS} }`, variables: vars }),
+  });
+  // Too big for AniList (400 / 413, typically "max query complexity"): halve and remember.
+  if ((res.status === 400 || res.status === 413) && items.length > 1) {
+    anilistBatchMax = Math.max(1, Math.floor(items.length / 2));
+    console.warn(`anilist: batch of ${items.length} rejected (${res.status}); using ${anilistBatchMax}`);
+    return aniListMany(d, items, limit);
+  }
+  const data = await ok(res, 'anilist') as Loose;
+  // Errors with no data is a failure, not "nothing found": the resolver retries 'error' titles.
+  if (data?.errors && !data?.data) throw new Error(`anilist: ${String(data.errors?.[0]?.message ?? 'error').slice(0, 120)}`);
+  return items.map((_, i) => ((data?.data?.[`a${i}`]?.media || []) as Json[]).map(anilistCandidate).filter((c) => c.title));
+}
+
+type Settled = { ok: true; value: Candidate[] } | { ok: false; error: unknown };
+const settle = (p: Promise<Candidate[]>): Promise<Settled> => p.then((value) => ({ ok: true as const, value }), (error) => ({ ok: false as const, error }));
+
+/** Per title, exactly what action=search returns: { candidates, sources }. */
+export async function searchBatch(d: V2Deps, items: Array<{ q: string; type: TType }>, limit: number) {
+  const bySource = new Map<Source, number[]>();
+  items.forEach((it, i) => { for (const s of SOURCES_FOR[it.type]) bySource.set(s, [...(bySource.get(s) ?? []), i]); });
+  const got = items.map(() => new Map<Source, Settled>());
+  await Promise.all([...bySource.entries()].map(async ([source, idx]) => {
+    if (source === 'anilist') {
+      try {
+        const all = await aniListMany(d, idx.map((i) => items[i]), limit);
+        idx.forEach((i, k) => got[i].set(source, { ok: true, value: all[k] ?? [] }));
+      } catch (error) {
+        idx.forEach((i) => got[i].set(source, { ok: false, error }));
+      }
+      return;
+    }
+    // One search per title, all at once: pacedFetch hands each call its own slot, `spacing` apart.
+    // MangaUpdates looks up only its top hit in a batch (2 calls a title, not 4).
+    await Promise.all(idx.map((i) =>
+      settle(searchOne(d, source, items[i].q, items[i].type, limit, { muEnrich: 1 })).then((r) => { got[i].set(source, r); })));
+  }));
+  return items.map((it, i) => {
+    const candidates: Candidate[] = [];
+    const sources = SOURCES_FOR[it.type].map((source) => {
+      const r = got[i].get(source);
+      if (r?.ok) { candidates.push(...r.value); return { source, state: (r.value.length ? 'ok' : 'empty') as SourceState, count: r.value.length }; }
+      const e = r?.error;
+      const state: SourceState = e instanceof RateLimited ? 'rate_limited' : e instanceof Unavailable ? 'unavailable' : 'error';
+      if (state === 'error') console.error(`search ${source} failed:`, e instanceof Error ? e.message : e);
+      return { source, state, count: 0 };
+    });
+    return { query: it.q, type: it.type, candidates, sources };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -767,6 +851,24 @@ export async function handleV2(
     const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '8', 10) || 8, 1), 10);
     const { candidates, sources } = await searchAll(d, q, type, limit);
     return json({ action, query: q, type, candidates, sources }, cors);
+  }
+
+  // GET ?action=search_batch&items=[{"q","type"},…]&limit — up to 10 titles, one AniList request.
+  if (action === 'search_batch') {
+    let raw: unknown;
+    try { raw = JSON.parse(url.searchParams.get('items') || '[]'); } catch { raw = null; }
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > SEARCH_BATCH_MAX) {
+      return json({ action, error: `items must be 1–${SEARCH_BATCH_MAX} { q, type }` }, cors, 400);
+    }
+    const items: Array<{ q: string; type: TType }> = [];
+    for (const it of raw as Array<{ q?: unknown; type?: unknown }>) {
+      const q = typeof it?.q === 'string' ? it.q.trim().slice(0, 200) : '';
+      const type = asType(typeof it?.type === 'string' ? it.type : null);
+      if (!q || !type) return json({ action, error: 'each item needs q and a valid type' }, cors, 400);
+      items.push({ q, type });
+    }
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '5', 10) || 5, 1), 10);
+    return json({ action, results: await searchBatch(d, items, limit) }, cors);
   }
 
   if (action === 'detail') {
