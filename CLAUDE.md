@@ -245,7 +245,10 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     user, globally and in bytes per day, with every fetch logged in `media_cover_copies` (written only by
     the service role). Never add a storage policy to `media-covers` (a SELECT policy makes it listable),
     and never loosen the guards or caps: sign-up is open to strangers.
-17. **Media v2 is live** (shipped 2026-09-29): `action=search|detail|cover_copy`, `adult.ts` and the
+17. **Media v2 is live** (shipped 2026-09-29): `action=search|search_batch|detail|cover_copy` (`search_batch`,
+    v5.41.0: up to 10 titles, ONE aliased AniList request, halved and remembered if AniList calls it too big;
+    the resolver falls back to single searches if the deployed edge lacks it; `pacedFetch` reserves per-source
+    slots so concurrent calls queue instead of bursting), `adult.ts` and the
     2100 ms AniList pacing are deployed. There is no batch `resolve` action (removed); Link your library
     loops `action=search` at a client pace. Redeploy with `./deploy-edge-function.sh` whenever
     `supabase/functions/media-search/` changes.

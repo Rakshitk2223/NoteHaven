@@ -215,7 +215,8 @@ items appended automatically.
     never lowered, and `latest_changed_at` is stamped only when a *known* latest grows (the first sighting
     is a baseline). It writes bookkeeping columns only, each guarded on what it read.
   - **Link your library** (U3; More → Link your library, needs 29): `lib/media-resolve.ts` walks every
-    **unlinked** title, one at a time, ≥ 2.5 s start to start (60 s back-off on a rate limit; it waits
+    **unlinked** title, 10 per edge call (`searchSourcesBatch` → `action=search_batch`, one AniList request;
+    one title per call if the edge can't batch), ≥ 2.5 s start to start (60 s back-off on a rate limit; it waits
     while offline; a tab hidden for 15 s **hands the run off**, letting go of the lock so a visible tab,
     or this one on return, picks it up through `useLinkRun`; **Link here** on the pill or in More takes over at
     once: a Web Lock steal plus a `notehaven-source-traffic` BroadcastChannel message, so other tabs stop), searches the type-correct sources and stores a proposal in
@@ -229,7 +230,9 @@ items appended automatically.
     `ReviewCard` per title, the same card the import uses) shows his cover and progress, why it's ambiguous
     (`whyAmbiguous`: versions, years, close names) and up to three candidates with format · year · source,
     each with Compare; a work already linked to another of his titles can't be picked, and duplicates are
-    flagged; a work linked to another of his titles offers **Move link here** in Compare (unlinks that title,
+    flagged (also a **lookalike**: a linked title of the same type whose name is one of the candidate's names,
+    i.e. probably the same work under another source; it never auto-links, `lookalikeOf` in `link-data.ts`);
+    a work linked to another of his titles offers **Move link here** in Compare (unlinks that title,
     reopens its proposal, picks the work here; Undo relinks). Approve (`useLinkApprove` → `link/apply-links.ts`) is behind the shared backup gate: one read
     of every row and of his linked works, then `linkEntry(…, { fromProposal, before, expect, keepCover })`
     five at a time (no source call: it links from the stored candidate), journals each chunk as
