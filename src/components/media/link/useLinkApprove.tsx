@@ -9,6 +9,7 @@ import { holdReload } from '@/lib/app-update';
 import { useBackupGate } from '../import/useBackupGate';
 import { applyLinks, type LinkApproval } from './apply-links';
 import type { LinkRun } from './useLinkRun';
+import { runUpdatePass } from '../update-pass';
 
 const TOUCHED = ['mediaItems', 'mediaRails', 'groupCounts', 'mediaTitleIndex', 'mediaBulkLatest', 'mediaStatsAll'];
 
@@ -35,9 +36,12 @@ export function useLinkApprove(run: LinkRun) {
     try {
       const r = await applyLinks(items, undefined, (done, total) => setProgress({ done, total }));
       await refreshAll();
+      // Details (synopsis, latest chapter, counts) come from the source by id, paced, once linking lets go.
+      if (r.linked) void runUpdatePass(queryClient, { wait: true });
       toast({
         title: r.stoppedEarly ? 'Linking stopped' : r.linked ? `Linked ${r.linked} title${r.linked === 1 ? '' : 's'}` : 'Nothing linked',
         description: [
+          r.linked && !r.stoppedEarly ? (wasRunning || run.progress?.runningElsewhere ? 'Details fill in once linking finishes' : 'Details fill in over the next few minutes') : '',
           r.skipped ? `${r.skipped} skipped (changed since)` : '',
           r.failed ? `${r.failed} failed` : '',
           r.stoppedEarly && !r.notPutBack ? 'the undo record couldn’t be saved, so the last batch was put back' : '',
@@ -62,7 +66,7 @@ export function useLinkApprove(run: LinkRun) {
       setProgress(null);
       if (wasRunning) run.resume();
     }
-  }, [busy, gate, refreshAll, toast, run]);
+  }, [busy, gate, refreshAll, toast, run, queryClient]);
 
   /** "Linking 3/40…" while approving. */
   const busyLabel = progress ? `Linking ${progress.done.toLocaleString()}/${progress.total.toLocaleString()}…` : 'Linking…';

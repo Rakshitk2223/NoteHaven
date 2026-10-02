@@ -36,10 +36,18 @@ describe('dueForUpdate (throttle + scope)', () => {
     const never = row();
     const out = dueForUpdate([
       fresh, stale, never,
-      row({ status: 'Completed' }), row({ status: 'Dropped' }), row({ status: 'On Hold' }), row({ status: 'Plan to Read' }),
-      row({ link_status: 'unlinked' }), row({ source_id: null }), row({ type: 'Movie', status: 'Watching' }),
+      ...[row({ status: 'Completed' }), row({ status: 'Dropped' }), row({ status: 'On Hold' }), row({ status: 'Plan to Read' }),
+        row({ type: 'Movie', status: 'Watching' })].map((r) => ({ ...r, latest_checked_at: stale.latest_checked_at })),
+      row({ link_status: 'unlinked' }), row({ source_id: null }),
     ], NOW_MS);
+    // A never-checked linked row gets its first look whatever its status (Approve links without details).
     expect(out.map((r) => r.id)).toEqual([never.id, stale.id]);
+    const firstLooks = dueForUpdate([row({ status: 'Completed' }), row({ status: 'Plan to Read' }), row({ type: 'Movie', status: 'Completed' })], NOW_MS);
+    expect(firstLooks).toHaveLength(3);
+    // Checked before it was (re)linked → a first look again; checked after → not.
+    const relinked = row({ status: 'Completed', latest_checked_at: new Date(NOW_MS - 120_000).toISOString(), linked_at: new Date(NOW_MS - 60_000).toISOString() });
+    const looked = row({ status: 'Completed', latest_checked_at: new Date(NOW_MS - 60_000).toISOString(), linked_at: new Date(NOW_MS - 120_000).toISOString() });
+    expect(dueForUpdate([relinked, looked], NOW_MS).map((r) => r.id)).toEqual([relinked.id]);
     expect(dueForUpdate([fresh, stale], NOW_MS, { force: true }).map((r) => r.id)).toEqual([stale.id, fresh.id]);
   });
 });

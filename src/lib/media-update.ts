@@ -4,7 +4,10 @@
 //
 //   · Scope: link_status 'linked', status Watching / Reading (never Completed,
 //     Dropped, On Hold or Plan to …), checked at most once per 6 h per title
-//     (latest_checked_at) unless forced (pull-to-refresh on Updates).
+//     (latest_checked_at) unless forced (pull-to-refresh on Updates). Plus,
+//     once, every title linked since its last check, whatever its status:
+//     Approve links from the search result alone, and this first look is what
+//     fills its details (media_source_meta) and its latest.
 //   · By id: action=detail through fetchSourceDetail, never a title search.
 //   · Reading: the source's latest chapter → last_known_latest_chapter.
 //     Watching: the latest AIRED season + episode (TMDB / TVmaze; AniList splits
@@ -50,6 +53,7 @@ export interface UpdateRow {
   last_known_latest_episode: number | null;
   latest_checked_at: string | null;
   release_date: string | null;
+  linked_at?: string | null;
 }
 
 /** An aired episode position. */
@@ -122,15 +126,23 @@ const IN_PROGRESS: ReadonlySet<string> = new Set(['Watching', 'Reading']);
 // Pure parts (Vitest-covered)
 // ---------------------------------------------------------------------------
 
-/** Rows this pass should check now: linked, in progress, and stale (or forced). Stalest first. */
+/** Linked since its last check (or never checked): its details haven't been fetched yet. */
+export const needsFirstLook = (r: Pick<UpdateRow, 'latest_checked_at' | 'linked_at'>): boolean =>
+  !r.latest_checked_at || (!!r.linked_at && Date.parse(r.linked_at) > Date.parse(r.latest_checked_at));
+
+/**
+ * Rows this pass should check now: linked, and either in progress and stale (or
+ * forced), or not looked at since they were linked (any status). Stalest first,
+ * so first looks (never checked) lead.
+ */
 export function dueForUpdate(rows: UpdateRow[], nowMs: number, opts: { maxAgeMs?: number; force?: boolean } = {}): UpdateRow[] {
   const maxAge = opts.maxAgeMs ?? UPDATE_MAX_AGE_MS;
   const checked = (r: UpdateRow) => (r.latest_checked_at ? Date.parse(r.latest_checked_at) || 0 : 0);
   return rows
     .filter((r) => r.link_status === 'linked' && r.source && r.source_id)
-    .filter((r) => IN_PROGRESS.has(r.status ?? ''))
-    .filter((r) => READING.has(r.type) || WATCHING.has(r.type))
-    .filter((r) => opts.force || nowMs - checked(r) >= maxAge)
+    .filter((r) => needsFirstLook(r) || (
+      IN_PROGRESS.has(r.status ?? '') && (READING.has(r.type) || WATCHING.has(r.type)) && (opts.force || nowMs - checked(r) >= maxAge)
+    ))
     .sort((a, b) => checked(a) - checked(b) || a.id - b.id);
 }
 
@@ -284,8 +296,8 @@ const defaultDeps: UpdateDeps = {
   loadRows: async () => {
     const uid = await sessionUserId();
     return fetchAllRows<UpdateRow>(() => supabase.from('media_tracker')
-      .select('id, type, status, link_status, source, source_id, last_known_latest_chapter, last_known_latest_season, last_known_latest_episode, latest_checked_at, release_date')
-      .eq('user_id', uid).eq('link_status', 'linked').in('status', ['Watching', 'Reading']).order('id') as never);
+      .select('id, type, status, link_status, source, source_id, last_known_latest_chapter, last_known_latest_season, last_known_latest_episode, latest_checked_at, release_date, linked_at')
+      .eq('user_id', uid).eq('link_status', 'linked').order('id') as never);
   },
   fetchDetail: (source, id, type) => fetchSourceDetail(source, id, type) as Promise<UpdateDetail | null>,
   writeRow: async (id, patch, expected) => {
@@ -318,8 +330,12 @@ export async function fetchUpdates(opts: { since: string; limit?: number }): Pro
 // ---------------------------------------------------------------------------
 
 export interface LibraryUpdater {
-  /** Run one pass (force = ignore the 6 h throttle: pull-to-refresh). Resolves when it ends. */
-  run(opts?: { force?: boolean }): Promise<UpdateProgress>;
+  /**
+   * Run one pass (force = ignore the 6 h throttle: pull-to-refresh). Resolves when it ends.
+   * wait = queue for the source lock instead of giving up (after an Approve: the
+   * first looks run as soon as linking lets go of the sources).
+   */
+  run(opts?: { force?: boolean; wait?: boolean }): Promise<UpdateProgress>;
   cancel(): void;
   getProgress(): UpdateProgress;
   subscribe(fn: (p: UpdateProgress) => void): () => void;
@@ -385,7 +401,7 @@ export function createUpdater(overrides: Partial<UpdateDeps> = {}, opts: { paceM
       const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
       if (!locks) await body();
       else {
-        await locks.request(SOURCE_TRAFFIC_LOCK, { ifAvailable: true }, async (lock) => {
+        await locks.request(SOURCE_TRAFFIC_LOCK, { ifAvailable: !runOpts.wait }, async (lock) => {
           if (!lock) {
             running = false;
             emit({ state: 'busy', message: 'Linking or another update is using the sources right now.' });

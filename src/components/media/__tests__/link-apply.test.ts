@@ -46,7 +46,8 @@ function builder(table: string) {
         if (q._op === 'update' && q._in) { for (const r of journal) if ((q._in[1] as number[]).includes(r.id as number)) Object.assign(r, q._patch); return Promise.resolve({ error: null }); }
         return Promise.resolve({ data: journal.filter((r) => q.matches(r)), error: null });
       }
-      const hit = [...tracker.values()].filter((r) => q.matches(r));
+      const hit = [...tracker.values()].filter((r) => q.matches(r) && (!q._in || q._in[1].includes(r[q._in[0]])));
+      if (q._op === 'select') return Promise.resolve({ data: hit.map((r) => ({ ...r })), error: null });
       for (const r of hit) if (q._op === 'update') tracker.set(r.id as number, { ...r, ...q._patch });
       return Promise.resolve({ data: hit.map((r) => ({ id: r.id })), error: null });
     },
@@ -56,7 +57,10 @@ function builder(table: string) {
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: { from: (t: string) => builder(t), auth: { getSession: async () => ({ data: { session: { user: { id: 'u' } } } }) } },
 }));
-vi.mock('@/lib/media-link', () => ({ linkEntry: vi.fn() }));
+vi.mock('@/lib/media-link', () => ({
+  linkEntry: vi.fn(),
+  readLinkRows: async (ids: number[]) => new Map(ids.filter((id) => tracker.has(id)).map((id) => [id, { ...tracker.get(id)! }])),
+}));
 
 const { applyLinks } = await import('../link/apply-links');
 const { undoBatch } = await import('@/lib/media-bulk');
@@ -70,8 +74,9 @@ const cand = { source: 'anilist', source_id: '7', title: 'Work', cover: 'https:/
 // A stand-in for linkEntry: writes the link fields (and the cover unless keepCover).
 const fakeLink = vi.fn(async (id: number, _c: unknown, opts: { keepCover?: boolean } = {}) => {
   const r = tracker.get(id)!;
-  tracker.set(id, { ...r, source: 'anilist', source_id: '7', alt_ids: { mal: 1 }, link_status: 'linked', linked_at: 'now', last_known_latest_chapter: 140, ...(opts.keepCover ? {} : { cover_image: 'https://src/c.jpg', cover_origin: 'source' }) });
-  return { ok: true as const, undo: async () => true, detail: null, coverChanged: !opts.keepCover };
+  const written = { source: 'anilist', source_id: '7', link_status: 'linked', linked_at: 'now', ...(opts.keepCover ? {} : { cover_image: 'https://src/c.jpg', cover_origin: 'source' }) };
+  tracker.set(id, { ...r, ...written });
+  return { ok: true as const, undo: async () => true, detail: null, coverChanged: !opts.keepCover, before: r, written };
 });
 const item = (id: number, over: Record<string, unknown> = {}) => ({ mediaId: id, candidate: cand, expect: { title: `[audit] ${id}`, type: 'Manhwa' }, ...over });
 
@@ -84,7 +89,8 @@ describe('applyLinks (Approve for Link your library)', () => {
     expect(r).toMatchObject({ linked: 1, skipped: 0, failed: 0, linkedIds: [1] });
     expect(journal[0]).toMatchObject({ kind: 'link', op: 'update' });
     // cover_pinned rides along whenever the cover changed (Undo respects a later pin).
-    expect(Object.keys(journal[0].after as Row).sort()).toEqual(['alt_ids', 'cover_image', 'cover_origin', 'cover_pinned', 'last_known_latest_chapter', 'link_status', 'linked_at', 'source', 'source_id']);
+    // Linked from the proposal: no source call, so no alt ids or latest (the update pass fills those).
+    expect(Object.keys(journal[0].after as Row).sort()).toEqual(['cover_image', 'cover_origin', 'cover_pinned', 'link_status', 'linked_at', 'source', 'source_id']);
     expect(journal[0]).toMatchObject({ before: { cover_origin: 'manual' }, after: { cover_origin: 'source' } });
     expect(tracker.get(1)!.current_chapter).toBe(12);
     expect(decided).toEqual([1]);
@@ -95,6 +101,7 @@ describe('applyLinks (Approve for Link your library)', () => {
     await applyLinks([item(1, { keepCover: true })], { link: fakeLink as never });
     expect(fakeLink).toHaveBeenCalledWith(1, cand, expect.objectContaining({
       keepCover: true,
+      fromProposal: true,
       // The row as read, for linkEntry's own compare-and-swap.
       expect: { title: '[audit] 1', type: 'Manhwa', link_status: 'unlinked', cover_pinned: false, cover_image: 'https://mine/c.jpg' },
     }));
@@ -165,7 +172,24 @@ describe('applyLinks (Approve for Link your library)', () => {
     tracker.set(1, base(1)); tracker.set(2, base(2));
     const seen: string[] = [];
     await applyLinks([item(1), { ...item(2), candidate: { source: 'anilist', source_id: '8', title: 'Work', cover: 'https://src/c.jpg' } as never }], { link: fakeLink as never }, (d, t) => seen.push(`${d}/${t}`));
-    expect(seen).toEqual(['0/2', '1/2', '2/2']);
+    expect(seen.slice(0, 1)).toEqual(['0/2']);
+    expect(seen.at(-1)).toBe('2/2');
+    expect(seen).toContain('1/2');
+  });
+
+  it('never links two titles in one batch to the same work (the second is skipped)', async () => {
+    tracker.set(1, base(1)); tracker.set(2, base(2));
+    const r = await applyLinks([item(1), item(2)], { link: fakeLink as never });
+    expect(r).toMatchObject({ linked: 1, skipped: 1 });
+    expect(fakeLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('links many in one go: one row read, chunks of 5 journaled', async () => {
+    for (let i = 1; i <= 12; i++) tracker.set(i, base(i));
+    const many = Array.from({ length: 12 }, (_, i) => ({ ...item(i + 1), candidate: { ...(cand as object), source_id: String(100 + i) } as never }));
+    const r = await applyLinks(many, { link: fakeLink as never });
+    expect(r).toMatchObject({ linked: 12, skipped: 0, failed: 0 });
+    expect(new Set(journal.map((j) => j.batch_id)).size).toBe(1);
   });
 
   it('U3-7: a row that changed mid-link comes back "changed" → counted as skipped, not failed, nothing journaled', async () => {

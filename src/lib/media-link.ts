@@ -57,7 +57,7 @@ export interface LinkFields {
 const LINK_COLS =
   'id, title, type, source, source_id, alt_ids, link_status, linked_at, cover_pinned, cover_image, cover_origin, last_known_latest_chapter, latest_checked_at, latest_changed_at';
 
-type TrackerLinkRow = LinkFields & { id: number; title: string; type: string | null };
+export type TrackerLinkRow = LinkFields & { id: number; title: string; type: string | null };
 
 /**
  * Bulk / guarded mode for linkEntry: the row as he saw it when he approved.
@@ -128,6 +128,17 @@ async function readLinkRow(trackerId: number): Promise<TrackerLinkRow | MediaLin
   return data as unknown as TrackerLinkRow;
 }
 
+/** Several rows' link slices in one read (bulk Approve): his rows only, by RLS. Missing ids are absent. */
+export async function readLinkRows(ids: number[]): Promise<Map<number, TrackerLinkRow>> {
+  const out = new Map<number, TrackerLinkRow>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data, error } = await supabase.from('media_tracker').select(LINK_COLS).in('id', ids.slice(i, i + 100));
+    if (error) throw error;
+    for (const r of (data ?? []) as unknown as TrackerLinkRow[]) out.set(r.id, r);
+  }
+  return out;
+}
+
 /** Write `patch`, and build an undo that restores `before`'s values for exactly those keys. */
 async function writeWithUndo(
   trackerId: number,
@@ -176,9 +187,16 @@ const coverOf = (detail: SourceDetail | null, candidate?: Candidate | null): str
 export async function linkEntry(
   trackerId: number,
   candidate: Candidate,
-  opts: { useNewCover?: boolean; isNew?: boolean; keepCover?: boolean; expect?: LinkExpect } = {},
-): Promise<LinkOutcome<{ detail: SourceDetail | null; coverChanged: boolean }>> {
-  const before = await readLinkRow(trackerId);
+  opts: {
+    useNewCover?: boolean; isNew?: boolean; keepCover?: boolean; expect?: LinkExpect;
+    /** Bulk Approve: link from the search result already in hand, with no source call. alt_ids and the
+     * latest mirror are left for the update pass (which fetches detail by id, paced, under the source lock). */
+    fromProposal?: boolean;
+    /** The row as just read (bulk Approve reads them in one query); skips the per-title read. */
+    before?: TrackerLinkRow;
+  } = {},
+): Promise<LinkOutcome<{ detail: SourceDetail | null; coverChanged: boolean; before: TrackerLinkRow; written: Partial<LinkFields> }>> {
+  const before = opts.before ?? await readLinkRow(trackerId);
   if (typeof before === 'string') return { ok: false, reason: before };
   const x = opts.expect;
   // Cheap early check (the UPDATE re-checks after the slow fetch).
@@ -187,20 +205,22 @@ export async function linkEntry(
   }
 
   const type = (before.type || 'Manga') as TrackerType;
-  const detail = await fetchSourceDetail(candidate.source, candidate.source_id, type);
+  const detail = opts.fromProposal ? null : await fetchSourceDetail(candidate.source, candidate.source_id, type);
 
   const now = new Date().toISOString();
   const patch: Partial<LinkFields> = {
     source: candidate.source,
     source_id: candidate.source_id,
-    alt_ids: ((detail?.alt_ids ?? {}) as Json),
     link_status: 'linked',
     linked_at: now,
   };
-  const latest = detail?.latest_chapter ?? candidate.latest_chapter ?? null;
-  if (latest != null) {
-    patch.last_known_latest_chapter = latest;
-    patch.latest_checked_at = now;
+  if (!opts.fromProposal) {
+    patch.alt_ids = (detail?.alt_ids ?? {}) as Json;
+    const latest = detail?.latest_chapter ?? candidate.latest_chapter ?? null;
+    if (latest != null) {
+      patch.last_known_latest_chapter = latest;
+      patch.latest_checked_at = now;
+    }
   }
 
   // Cover rules (see header), judged by the one judge (cover-medium coverVerdict).
@@ -234,19 +254,21 @@ export async function linkEntry(
   if (!x) {
     const res = await writeWithUndo(trackerId, before, patch);
     if (res.ok === false) return res;
-    return { ...res, detail, coverChanged };
+    return { ...res, detail, coverChanged, before, written: patch };
   }
 
   // Guarded write: title, type and link state as he saw them; the cover only
   // while unpinned and still the one he saw. If just the cover moved, link anyway.
+  let written = patch;
   let res = await writeGuarded(trackerId, before, patch, x);
   if (res.ok === false && res.reason === 'changed' && coverChanged) {
     const { cover_image: _c, cover_origin: _o, ...linkOnly } = patch;
+    written = linkOnly;
     res = await writeGuarded(trackerId, before, linkOnly, x);
     coverChanged = false;
   }
   if (res.ok === false) return res;
-  return { ...res, detail, coverChanged };
+  return { ...res, detail, coverChanged, before, written };
 }
 
 function linkStatusOk(current: string | null, x: LinkExpect): boolean {
