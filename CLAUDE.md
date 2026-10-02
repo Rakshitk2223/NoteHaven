@@ -63,6 +63,10 @@ caches (`EDGE_CACHE_WRITES=0`; opt in with `EDGE_DEV_CACHE_WRITES=1`). Writes ma
 Maintenance scripts (`backfill:*`, `backup:*`, `audit:*`, `smoke:apis`, and the synthetic Tachimanga
 fixture generator `npx tsx scripts/make-tachimanga-fixture.ts`) are described in `README.md`.
 
+**Version:** every push to `main` bumps `package.json` by one patch (`npm version patch --no-git-tag-version`,
+which updates the lockfile too). Settings → About shows it with the commit and build time (`vite.config.ts`
+`define`: `__APP_VERSION__`, `__APP_COMMIT__`, `__APP_BUILT_AT__`), so he can tell which build his phone runs.
+
 **Done means** `npm run build`, `npm run lint` (zero errors), `npm test` and `npm run test:insights` all pass —
 what CI runs (`.github/workflows/ci.yml`, GitHub Actions, on push to `main` and on PRs), plus an esbuild
 parse of the edge function.
@@ -276,7 +280,8 @@ deploy-edge-function.sh   links the project, deploys media-search, sets its secr
     Watching / Reading titles by id (each at most every 6 h) plus a first look at any title linked since
     its last check, writes bookkeeping columns only, never lowers a stored latest, and stamps
     `latest_changed_at` only when a known latest grows. The resolver writes `media_link_proposals` only,
-    and a tab hidden for 15 s hands the run to a visible one. Linking happens on Approve through
+    a tab hidden for 15 s hands the run to a visible one, and any start he taps ("Link here") takes over:
+    it steals the lock and broadcasts `take-over` so other tabs stop after their current title. Linking happens on Approve through
     `linkEntry(…, { fromProposal, expect })`: no source call (details come from the update pass), and a
     row that changed is skipped.
 23. **Removed in U4 / U5; don't bring them back:** Refresh Library (`RefreshLibraryDialog`),

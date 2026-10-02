@@ -217,7 +217,8 @@ items appended automatically.
   - **Link your library** (U3; More → Link your library, needs 29): `lib/media-resolve.ts` walks every
     **unlinked** title, one at a time, ≥ 2.5 s start to start (60 s back-off on a rate limit; it waits
     while offline; a tab hidden for 15 s **hands the run off**, letting go of the lock so a visible tab,
-    or this one on return, picks it up through `useLinkRun`), searches the type-correct sources and stores a proposal in
+    or this one on return, picks it up through `useLinkRun`; **Link here** on the pill or in More takes over at
+    once: a Web Lock steal plus a `notehaven-source-traffic` BroadcastChannel message, so other tabs stop), searches the type-correct sources and stores a proposal in
     `media_link_proposals` (bands auto / review / none / error; error rows are retried). It never writes
     `media_tracker`. The run is resumable from any device (the server is the cursor; the run / pause
     intent is kept per device). **Auto-matched · N** (`AutoMatched`) lists the confident links, all
@@ -228,7 +229,8 @@ items appended automatically.
     `ReviewCard` per title, the same card the import uses) shows his cover and progress, why it's ambiguous
     (`whyAmbiguous`: versions, years, close names) and up to three candidates with format · year · source,
     each with Compare; a work already linked to another of his titles can't be picked, and duplicates are
-    flagged. Approve (`useLinkApprove` → `link/apply-links.ts`) is behind the shared backup gate: one read
+    flagged; a work linked to another of his titles offers **Move link here** in Compare (unlinks that title,
+    reopens its proposal, picks the work here; Undo relinks). Approve (`useLinkApprove` → `link/apply-links.ts`) is behind the shared backup gate: one read
     of every row and of his linked works, then `linkEntry(…, { fromProposal, before, expect, keepCover })`
     five at a time (no source call: it links from the stored candidate), journals each chunk as
     `kind = 'link'`, toasts Undo, and queues the update pass for the details. Linking writes link fields and
