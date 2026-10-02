@@ -15,7 +15,11 @@ const READING = new Set(['Manga', 'Manhwa', 'Manhua']);
 
 type Decide =
   | { mode: 'auto'; included: boolean; onDecide: (include: boolean) => void; keepCover: boolean; onKeepCover: (on: boolean) => void }
-  | { mode: 'pick'; onPick: () => void; disabledReason?: string | null };
+  | {
+    mode: 'pick'; onPick: () => void; disabledReason?: string | null;
+    /** The work is linked to another of his titles: move that link here (unlinks it there). */
+    takenBy?: string | null; onMoveHere?: () => void;
+  };
 
 type MatchCompareProps = {
   open: boolean;
@@ -126,6 +130,13 @@ export function MatchCompare(props: MatchCompareProps) {
           )}
         </div>
 
+        {props.mode === 'pick' && props.takenBy && (
+          <p className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-foreground">
+            Already linked to your title “{props.takenBy}”. If that was a mistake, move the link here: “{props.takenBy}” is
+            unlinked (its progress and cover stay) and goes back to Needs a pick.
+          </p>
+        )}
+
         {props.mode === 'auto' && (
           <label className="flex items-start justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
             <span className="text-sm">
@@ -145,10 +156,14 @@ export function MatchCompare(props: MatchCompareProps) {
           ) : (
             <>
               <Button variant="outline" className="h-11" onClick={() => onOpenChange(false)}>Back</Button>
-              <Button className="h-11" disabled={!!props.disabledReason} title={props.disabledReason ?? undefined}
-                onClick={() => { props.onPick(); onOpenChange(false); }}>
-                Pick this
-              </Button>
+              {props.takenBy && props.onMoveHere ? (
+                <Button className="h-11" onClick={() => { props.onMoveHere!(); onOpenChange(false); }}>Move link here</Button>
+              ) : (
+                <Button className="h-11" disabled={!!props.disabledReason} title={props.disabledReason ?? undefined}
+                  onClick={() => { props.onPick(); onOpenChange(false); }}>
+                  Pick this
+                </Button>
+              )}
             </>
           )}
         </DialogFooter>

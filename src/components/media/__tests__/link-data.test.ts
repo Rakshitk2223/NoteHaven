@@ -46,6 +46,7 @@ describe('buildLinkView (the queue and the Auto-matched list)', () => {
       proposals: [prop(2, { band: 'auto', candidates: [{ source: 'anilist', source_id: '9', title: 't' } as never] })],
     });
     expect(v.takenWorks.has('anilist:9')).toBe(true);
+    expect(v.takenWorks.get('anilist:9')).toMatchObject({ id: expect.any(Number) });
     expect(v.autoMatched).toHaveLength(0);
     expect(v.duplicateIds.has(2)).toBe(true);
     expect(v.queue.map((x) => x.row.id)).toEqual([2]);

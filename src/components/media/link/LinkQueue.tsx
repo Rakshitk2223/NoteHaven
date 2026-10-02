@@ -1,13 +1,16 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { ToastAction } from '@/components/ui/toast';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
+import { unlinkEntry } from '@/lib/media-link';
 import type { TrackerType } from '@/lib/media-sources';
 import { ReviewCard } from '../ReviewCard';
 import { candidateFacts, candidateLine } from '../picker-utils';
-import { decide, workKey, type QueueItem } from './link-data';
+import { decide, reopenProposal, workKey, type QueueItem } from './link-data';
 import { MatchCompare } from './MatchCompare';
 import { whyAmbiguous } from './match-signals';
 import { BackupNote } from '../import/BackupNote';
@@ -51,8 +54,44 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
   });
   const [busy, setBusy] = useState<number | null>(null);
   const [comparing, setComparing] = useState<{ item: QueueItem; index: number } | null>(null);
-  const reasonFor = (c: { source: string; source_id: string }) => (run.takenWorks.has(workKey(c)) ? 'Already linked to another of your titles' : null);
+  const queryClient = useQueryClient();
+  const holderOf = (c: { source: string; source_id: string }) => run.takenWorks.get(workKey(c)) ?? null;
+  const reasonFor = (c: { source: string; source_id: string }) => {
+    const h = holderOf(c);
+    return h ? `Linked to “${h.title}”. Compare to move it` : null;
+  };
   const pick = (mediaId: number, index: number) => { const next = new Map(picks); next.set(mediaId, index); onPicks(next); };
+
+  // "Move link here": unlink the title holding this work (its progress and cover stay), reopen its
+  // proposal so it's back in Needs a pick, then pick the work for this title. Undo relinks it.
+  const moveHere = async (item: QueueItem, index: number) => {
+    const holder = holderOf(item.proposal.candidates[index]);
+    if (!holder) return;
+    setBusy(item.row.id);
+    try {
+      const res = await unlinkEntry(holder.id);
+      if (res.ok === false) { toast({ title: 'Couldn’t move the link', description: res.message ?? res.reason, variant: 'destructive' }); return; }
+      await reopenProposal(holder.id).catch(() => { /* no proposal (linked by hand): the resolver proposes it again */ });
+      await run.refresh();
+      void queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
+      pick(item.row.id, index);
+      toast({
+        title: `Unlinked “${holder.title}”`,
+        description: 'Picked for this title: tap Link to finish. The other title is back in Needs a pick.',
+        action: (
+          <ToastAction altText="Undo moving the link" onClick={() => {
+            void res.undo().then(async () => {
+              const next = new Map(picks); next.delete(item.row.id); onPicks(next);
+              await run.refresh();
+              void queryClient.invalidateQueries({ queryKey: ['mediaItems'] });
+            });
+          }}>Undo</ToastAction>
+        ),
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const record = async (mediaId: number, decision: 'skipped' | 'not_listed') => {
     setBusy(mediaId);
@@ -89,7 +128,11 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
               {run.queue.map(({ row, proposal }) => (
                 <div key={row.id} className={cn(busy === row.id && 'pointer-events-none opacity-60')}>
                   {run.duplicateIds.has(row.id) && (
-                    <p className="px-3 pt-3 text-xs font-medium text-warning">Another of your titles matches the same work: link one, skip the other.</p>
+                    <p className="px-3 pt-3 text-xs font-medium text-warning">
+                      {holderOf(proposal.candidates[0])
+                        ? `Its best match is linked to your “${holderOf(proposal.candidates[0])!.title}”. Compare it to move the link here, or pick another.`
+                        : 'Another of your titles matches the same work: link one, skip the other.'}
+                    </p>
                   )}
                   <ReviewCard
                     covers
@@ -139,6 +182,8 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
           <MatchCompare open onOpenChange={(o) => { if (!o) setComparing(null); }}
             row={comparing.item.row} candidate={comparing.item.proposal.candidates[comparing.index]} mode="pick"
             disabledReason={reasonFor(comparing.item.proposal.candidates[comparing.index])}
+            takenBy={holderOf(comparing.item.proposal.candidates[comparing.index])?.title ?? null}
+            onMoveHere={() => void moveHere(comparing.item, comparing.index)}
             onPick={() => pick(comparing.item.row.id, comparing.index)} />
         )}
       </SheetContent>

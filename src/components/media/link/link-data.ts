@@ -43,8 +43,8 @@ export interface LinkView {
   autoMatched: QueueItem[];
   /** Rows whose best candidate collides with another row's (or with a work already linked). */
   duplicateIds: Set<number>;
-  /** Works already linked to one of his titles: never offered for a second one. */
-  takenWorks: Set<string>;
+  /** Works already linked to one of his titles (source:source_id → that title): never linked twice; "Move link here" moves it. */
+  takenWorks: Map<string, { id: number; title: string }>;
 }
 
 /**
@@ -59,8 +59,8 @@ export function buildLinkView(
   findDuplicates: (p: ProposalRow[]) => Map<string, number[]>,
 ): LinkView {
   const byId = new Map(s.rows.map((r) => [r.id, r]));
-  const takenWorks = new Set(s.rows.filter((r) => r.link_status === 'linked' && r.source && r.source_id)
-    .map((r) => workKey({ source: r.source!, source_id: r.source_id! })));
+  const takenWorks = new Map(s.rows.filter((r) => r.link_status === 'linked' && r.source && r.source_id)
+    .map((r) => [workKey({ source: r.source!, source_id: r.source_id! }), { id: r.id, title: r.title }] as const));
   const open = s.proposals.filter((p) => {
     const row = byId.get(p.media_id);
     return !p.decision && p.candidates?.length && row && row.link_status !== 'linked' && isCurrent(p, row);
@@ -79,6 +79,13 @@ export function buildLinkView(
 
 /** Unlinked rows: "Link your library" is only offered while there are any. */
 export const unlinkedCount = (s: LinkState): number => s.rows.filter((r) => r.link_status !== 'linked').length;
+
+/** An unlinked title's proposal is open again (it shows in Needs a pick / Auto-matched). */
+export async function reopenProposal(mediaId: number): Promise<void> {
+  const { error } = await supabase.from('media_link_proposals' as never)
+    .update({ decision: null, decided_at: null } as never).eq('media_id', mediaId);
+  if (error) throw error;
+}
 
 /** Record Skip / Not listed on his own proposal (RLS: own rows). */
 export async function decide(mediaId: number, decision: 'skipped' | 'not_listed'): Promise<void> {
