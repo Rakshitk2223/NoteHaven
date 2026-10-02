@@ -1962,7 +1962,7 @@ const MediaTracker = () => {
     const c = linkRun.counts;
     const n = c ? `${c.done.toLocaleString()}/${c.total.toLocaleString()}` : '';
     if (!linkRun.ready) return { label: 'Link your library', hint: 'Checking…' };
-    if (p?.runningElsewhere) return { label: `Linking · ${n}`, hint: 'Running in another tab; it moves here when that tab is in the background' };
+    if (p?.runningElsewhere) return { label: `Linking · ${n}`, hint: 'Running in another tab. Tap to link here instead', onClick: linkRun.takeOver };
     if (p?.state === 'running' || p?.state === 'waiting') {
       return { label: `Linking · ${n}`, hint: 'Matching your titles to their sources. Tap to pause', onClick: linkRun.pause };
     }

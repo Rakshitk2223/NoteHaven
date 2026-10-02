@@ -86,8 +86,12 @@ export interface ResolverProgress {
 }
 
 export interface Resolver {
-  /** Start (or continue) the run. Resolves when it stops: done, paused-then-cancelled, cancelled or failed. */
-  start(): Promise<void>;
+  /**
+   * Start (or continue) the run. Resolves when it stops: done, paused-then-cancelled, cancelled or failed.
+   * takeOver (he tapped "Link here"): every other tab in this browser stops its run or update pass,
+   * and this one takes the source lock at once instead of waiting.
+   */
+  start(opts?: { takeOver?: boolean }): Promise<void>;
   /** Stop after the current title; resume() continues from the next one. */
   pause(): void;
   resume(): void;
@@ -264,6 +268,33 @@ const defaultDeps: ResolverDeps = {
  */
 export const SOURCE_TRAFFIC_LOCK = 'notehaven-source-traffic';
 
+/** Tabs tell each other to let go of the sources ("Link here" in another tab). */
+const CHANNEL = 'notehaven-source-traffic';
+type TrafficMessage = { type: 'take-over'; from: string };
+/** This tab (a channel delivers to every other channel object, this tab's own included). */
+const TAB_ID = Math.random().toString(36).slice(2);
+
+/** Ask every other tab to stop talking to the sources (they hand off after the current title). */
+export function announceTakeOver(): void {
+  try { const c = new BroadcastChannel(CHANNEL); c.postMessage({ type: 'take-over', from: TAB_ID } satisfies TrafficMessage); c.close(); } catch { /* no BroadcastChannel: the lock steal still works */ }
+}
+
+/**
+ * Run `fn` whenever a tab takes over. Returns an unsubscribe. includeSelf: also when it's
+ * this tab (the update pass stops for this tab's own "Link here"; the resolver doesn't).
+ */
+export function onTakeOver(fn: () => void, opts: { includeSelf?: boolean } = {}): () => void {
+  try {
+    const c = new BroadcastChannel(CHANNEL);
+    c.onmessage = (e: MessageEvent<TrafficMessage>) => {
+      if (e.data?.type === 'take-over' && (opts.includeSelf || e.data.from !== TAB_ID)) fn();
+    };
+    return () => c.close();
+  } catch {
+    return () => {};
+  }
+}
+
 export function createResolver(
   overrides: Partial<ResolverDeps> = {},
   opts: { paceMs?: number; backoffMs?: number; pollMs?: number; handoffMs?: number } = {},
@@ -297,6 +328,7 @@ export function createResolver(
     let hiddenSince: number | null = null;
     for (;;) {
       if (cancelled) return 'stop';
+      if (takenOver) return 'handoff';
       if (!paused && d.isHidden()) {
         hiddenSince ??= d.now();
         if (d.now() - hiddenSince >= handoffMs) return 'handoff';
@@ -315,6 +347,9 @@ export function createResolver(
   }
 
   let handedOff = false;
+  /** Another tab tapped "Link here": stop after the current title and let go. */
+  let takenOver = false;
+  if (typeof window !== 'undefined') onTakeOver(() => { if (running) { takenOver = true; wakeUp(); } });
 
   async function run(): Promise<void> {
     const [rows, proposals, mapped] = await Promise.all([d.loadRows(), d.loadProposals(), d.loadMappedIds()]);
@@ -363,18 +398,24 @@ export function createResolver(
   }
 
   const resolver: Resolver = {
-    async start() {
-      if (running) return;
+    async start(startOpts = {}) {
+      if (running) {
+        // Already here: "Link here" just carries on (a pause or a hidden wait ends).
+        if (startOpts.takeOver && paused) { paused = false; wakeUp(); }
+        return;
+      }
       running = true;
       cancelled = false;
       paused = false;
       handedOff = false;
+      takenOver = false;
       emit({ state: 'running', runningElsewhere: false, message: null, waitingFor: null });
       const body = async () => {
         try {
           await run();
           // Handed off: not finished, just not here. The intent stays "running" for whichever tab is visible.
-          emit(handedOff ? { state: 'waiting', waitingFor: 'hidden' } : { state: cancelled ? 'cancelled' : 'done', waitingFor: null });
+          emit(takenOver ? { state: 'idle', waitingFor: null, runningElsewhere: true }
+            : handedOff ? { state: 'waiting', waitingFor: 'hidden' } : { state: cancelled ? 'cancelled' : 'done', waitingFor: null });
         } catch (e) {
           const code = (e as { code?: string } | null)?.code;
           emit({
@@ -389,14 +430,21 @@ export function createResolver(
       };
       const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
       if (!locks) return body();
-      await locks.request(SOURCE_TRAFFIC_LOCK, { ifAvailable: true }, async (lock) => {
-        if (!lock) {
-          running = false;
-          emit({ state: 'idle', runningElsewhere: true });
-          return;
-        }
-        await body();
-      });
+      if (startOpts.takeOver) announceTakeOver();
+      try {
+        // takeOver steals the lock: the tab that held it hears the broadcast and stops after its current title.
+        await locks.request(SOURCE_TRAFFIC_LOCK, startOpts.takeOver ? { steal: true } : { ifAvailable: true }, async (lock) => {
+          if (!lock) {
+            running = false;
+            emit({ state: 'idle', runningElsewhere: true });
+            return;
+          }
+          await body();
+        });
+      } catch (e) {
+        // Our lock was stolen ("Link here" elsewhere): the run is handing off already.
+        if ((e as { name?: string } | null)?.name !== 'AbortError') throw e;
+      }
     },
     pause() { if (running) { paused = true; wakeUp(); } },
     resume() { if (running && paused) { paused = false; wakeUp(); } },

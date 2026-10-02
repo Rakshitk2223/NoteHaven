@@ -35,9 +35,11 @@ export interface LinkRun {
   autoMatched: QueueItem[];
   /** Rows whose best candidate is the same work as another of his rows, or one already linked. */
   duplicateIds: Set<number>;
-  /** Works already linked to one of his titles (source:source_id): can't be picked again. */
-  takenWorks: Set<string>;
+  /** Works already linked to one of his titles (source:source_id → that title). */
+  takenWorks: Map<string, { id: number; title: string }>;
   start: () => void;
+  /** "Link here": run in this tab now; any other tab stops. */
+  takeOver: () => void;
   pause: () => void;
   resume: () => void;
   cancel: () => void;
@@ -115,14 +117,16 @@ export function useLinkRun(enabled: boolean): LinkRun {
     return () => { document.removeEventListener('visibilitychange', take); window.clearInterval(t); };
   }, [mod, intent, refresh]);
 
-  const start = useCallback(() => { if (!mod) return; setIntent('running'); void mod.getResolver().start(); }, [mod, setIntent]);
+  // Every start he taps takes over: he never has to find the tab that has it.
+  const start = useCallback(() => { if (!mod) return; setIntent('running'); void mod.getResolver().start({ takeOver: true }); }, [mod, setIntent]);
+  const takeOver = start;
   const pause = useCallback(() => { if (!mod) return; setIntent('paused'); mod.getResolver().pause(); }, [mod, setIntent]);
   const resume = useCallback(() => {
     if (!mod) return;
     setIntent('running');
     const r = mod.getResolver();
     // Paused in this tab → resume; paused before a reload (engine idle) → start picks up where it stopped.
-    if (r.getProgress().state === 'paused') r.resume(); else void r.start();
+    if (r.getProgress().state === 'paused') r.resume(); else void r.start({ takeOver: true });
   }, [mod, setIntent]);
   const cancel = useCallback(() => { if (!mod) return; setIntent(null); mod.getResolver().cancel(); }, [mod, setIntent]);
 
@@ -141,7 +145,7 @@ export function useLinkRun(enabled: boolean): LinkRun {
     queue: view?.queue ?? [],
     autoMatched: view?.autoMatched ?? [],
     duplicateIds: view?.duplicateIds ?? new Set(),
-    takenWorks: view?.takenWorks ?? new Set(),
-    start, pause, resume, cancel, refresh,
+    takenWorks: view?.takenWorks ?? new Map(),
+    start, takeOver, pause, resume, cancel, refresh,
   };
 }

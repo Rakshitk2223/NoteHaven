@@ -34,7 +34,7 @@ import { fetchSourceDetail, type MediaSource, type SourceDetail, type TrackerTyp
 import { behindCount, latestOf } from '@/components/media/progress-view';
 import type { MediaItem } from '@/components/media/types';
 import type { MediaMeta } from '@/lib/media-metadata';
-import { SOURCE_TRAFFIC_LOCK } from '@/lib/media-resolve';
+import { SOURCE_TRAFFIC_LOCK, onTakeOver } from '@/lib/media-resolve';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -353,6 +353,8 @@ export function createUpdater(overrides: Partial<UpdateDeps> = {}, opts: { paceM
   };
   let running = false;
   let cancelled = false;
+  // "Link here" in another tab: this pass stops (it runs again on the next Media open).
+  if (typeof window !== 'undefined') onTakeOver(() => { if (running) cancelled = true; }, { includeSelf: true });
 
   async function pass(force: boolean): Promise<void> {
     const rows = dueForUpdate(await d.loadRows(), d.now(), { force });
@@ -401,14 +403,19 @@ export function createUpdater(overrides: Partial<UpdateDeps> = {}, opts: { paceM
       const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
       if (!locks) await body();
       else {
-        await locks.request(SOURCE_TRAFFIC_LOCK, { ifAvailable: !runOpts.wait }, async (lock) => {
-          if (!lock) {
-            running = false;
-            emit({ state: 'busy', message: 'Linking or another update is using the sources right now.' });
-            return;
-          }
-          await body();
-        });
+        try {
+          await locks.request(SOURCE_TRAFFIC_LOCK, { ifAvailable: !runOpts.wait }, async (lock) => {
+            if (!lock) {
+              running = false;
+              emit({ state: 'busy', message: 'Linking or another update is using the sources right now.' });
+              return;
+            }
+            await body();
+          });
+        } catch (e) {
+          // Stolen by "Link here": the pass was told to stop; it runs again next time.
+          if ((e as { name?: string } | null)?.name !== 'AbortError') throw e;
+        }
       }
       return progress;
     },

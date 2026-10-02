@@ -40,6 +40,9 @@ export function LinkBar({ run, onOpenQueue, onOpenAuto }: { run: LinkRun; onOpen
         )}>
           {live && <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />}
           <span className="tabular-nums">{label}</span>
+          {p?.runningElsewhere && (
+            <Button size="sm" variant="ghost" className="h-9" onClick={run.takeOver}>Link here</Button>
+          )}
           {!p?.runningElsewhere && (
             live ? (
               <Button size="sm" variant="ghost" className="h-9" onClick={run.pause}>Pause</Button>
