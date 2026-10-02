@@ -253,6 +253,38 @@ describe('createResolver', () => {
     expect(h.resolver.getProgress().state).toBe('done');
   });
 
+  it('batches: 25 titles take 3 calls of ≤ 10, paced per call; every title gets its proposal', async () => {
+    const rows = Array.from({ length: 25 }, (_, i) => row(`[audit] B${i}`));
+    const batches: number[] = [];
+    const h = harness(rows, {
+      searchBatch: async (items) => { batches.push(items.length); return items.map((it) => ok([cand(it.q)])); },
+    });
+    await h.resolver.start();
+    expect(batches).toEqual([10, 10, 5]);
+    expect(h.searched).toHaveLength(0);
+    expect(h.saved).toHaveLength(25);
+    expect(h.saved.every((p) => p.band === 'auto')).toBe(true);
+    expect(h.sleeps).toEqual([2500, 2500, 2500]);
+  });
+
+  it('an edge without batch search (null) falls back to one title per call, nothing lost', async () => {
+    const rows = Array.from({ length: 4 }, (_, i) => row(`[audit] F${i}`));
+    let tried = 0;
+    const h = harness(rows, { searchBatch: async () => { tried += 1; return null; } });
+    await h.resolver.start();
+    expect(tried).toBe(1);
+    expect(h.searched).toHaveLength(4);
+    expect(h.saved).toHaveLength(4);
+  });
+
+  it('a rate-limited batch backs off 60 s', async () => {
+    const h = harness([row('[audit] R1'), row('[audit] R2')], {
+      searchBatch: async (items) => items.map(() => ok([], [{ source: 'anilist', state: 'rate_limited', count: 0 }])),
+    });
+    await h.resolver.start();
+    expect(h.sleeps).toContain(60_000);
+  });
+
   it('a save that fails (migration 29 missing) fails loudly, with no title in the message', async () => {
     const h = harness([row('[audit] Secret Title')], {
       saveProposal: async () => { throw { code: 'PGRST205', message: 'no table' }; },

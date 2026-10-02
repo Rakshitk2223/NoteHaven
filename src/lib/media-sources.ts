@@ -170,6 +170,31 @@ export async function searchSources(
 }
 
 /**
+ * Up to 10 titles in one edge call (action=search_batch: one AniList request for
+ * all of them). Results line up with `items`. Null when the edge doesn't have
+ * the action yet (not redeployed) or the call failed: callers search one by one.
+ */
+export async function searchSourcesBatch(
+  items: Array<{ q: string; type: TrackerType }>,
+  opts: { limit?: number; signal?: AbortSignal } = {},
+): Promise<SearchResult[] | null> {
+  if (!items.length) return [];
+  const data = await mediaSearchGet(
+    {
+      action: 'search_batch',
+      items: JSON.stringify(items.map((it) => ({ q: it.q.trim().slice(0, 200), type: it.type.toLowerCase() }))),
+      limit: opts.limit ?? 5,
+    },
+    opts.signal,
+  ) as { action?: string; results?: EdgeSearch[] } | null;
+  if (!data || data.action !== 'search_batch' || !Array.isArray(data.results) || data.results.length !== items.length) return null;
+  return data.results.map((r, i) => ({
+    candidates: Array.isArray(r.candidates) ? r.candidates.map((c) => ({ ...c, fit: typeFit(c, items[i].type) })) : [],
+    sources: Array.isArray(r.sources) ? r.sources : unavailable(items[i].type).sources,
+  }));
+}
+
+/**
  * Everything the source knows about one work, by id. The edge side also upserts
  * it into media_source_meta. Null when unavailable or not found.
  */

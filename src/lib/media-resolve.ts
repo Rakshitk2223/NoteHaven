@@ -2,8 +2,11 @@
 // media_tracker row, one title at a time, and stores each proposal in
 // media_link_proposals (migration 29) as soon as it's computed.
 //
-//   · Client-paced: ≥ 2.5 s from start to start (AniList allows 30/min), one
-//     title in flight, auto-waits while offline, and backs off 60 s on a rate
+//   · Batched: 10 titles per edge call (action=search_batch, ONE AniList request
+//     for all ten; AniList's 30/min counts requests). If the edge doesn't have
+//     the action yet, it falls back to one title per call for the rest of the run.
+//   · Client-paced: ≥ 2.5 s from start to start per call (AniList allows 30/min),
+//     one call in flight, auto-waits while offline, and backs off 60 s on a rate
 //     limit. A tab hidden for 15 s hands the run off: it lets go of the source
 //     lock, and whichever of his tabs is visible picks it up (useLinkRun).
 //   · Resumable anywhere: the server is the cursor. A restart (another tab, the
@@ -25,7 +28,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { pickLink, sameWork } from '@/lib/media-match';
-import { searchSources, typeFit, type Candidate, type SearchResult, type TrackerType } from '@/lib/media-sources';
+import { searchSources, searchSourcesBatch, typeFit, type Candidate, type SearchResult, type TrackerType } from '@/lib/media-sources';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,6 +110,8 @@ export interface Resolver {
 /** Everything the engine touches, injectable for tests. */
 export interface ResolverDeps {
   search: (q: string, type: TrackerType, opts: { limit: number; signal?: AbortSignal }) => Promise<SearchResult>;
+  /** Many titles in one call (results line up with items), or null = not available: search one by one. */
+  searchBatch?: (items: Array<{ q: string; type: TrackerType }>, opts: { limit: number }) => Promise<SearchResult[] | null>;
   loadRows: () => Promise<ResolveRow[]>;
   loadProposals: () => Promise<ProposalRow[]>;
   /** media_ids that have a Tachimanga import-map entry (they go later in the queue). */
@@ -124,6 +129,8 @@ export const RESOLVE_PACE_MS = 2500;
 export const HANDOFF_MS = 15_000;
 export const RATE_LIMIT_BACKOFF_MS = 60_000;
 const CANDIDATE_LIMIT = 5;
+/** Titles per batch call (the edge's SEARCH_BATCH_MAX). */
+export const RESOLVE_BATCH = 10;
 const READING: ReadonlySet<string> = new Set(['Manga', 'Manhwa', 'Manhua']);
 
 // ---------------------------------------------------------------------------
@@ -231,6 +238,7 @@ async function sessionUserId(): Promise<string> {
 
 const defaultDeps: ResolverDeps = {
   search: (q, type, opts) => searchSources(q, type, opts),
+  searchBatch: (items, opts) => searchSourcesBatch(items, opts),
   loadRows: async () => {
     const uid = await sessionUserId();
     return fetchAllRows<ResolveRow>(() => supabase.from('media_tracker')
@@ -300,6 +308,8 @@ export function createResolver(
   opts: { paceMs?: number; backoffMs?: number; pollMs?: number; handoffMs?: number } = {},
 ): Resolver {
   const d: ResolverDeps = { ...defaultDeps, ...overrides };
+  // A test (or caller) that brings its own single search and no batch search gets single calls only.
+  if (overrides.search && !overrides.searchBatch) d.searchBatch = undefined;
   const paceMs = opts.paceMs ?? RESOLVE_PACE_MS;
   const backoffMs = opts.backoffMs ?? RATE_LIMIT_BACKOFF_MS;
   const pollMs = opts.pollMs ?? 2000;
@@ -359,17 +369,8 @@ export function createResolver(
 
     const queue = orderQueue(pendingRows(rows, proposals), mapped, proposals);
     const retry: ResolveRow[] = [];
-    const attempt = async (row: ResolveRow, isRetry: boolean): Promise<boolean> => {
-      const g = await gate();
-      if (g === 'handoff') handedOff = true;
-      if (g !== 'go') return false;
-      const started = d.now();
-      let result: SearchResult;
-      try {
-        result = await d.search(row.title.slice(0, 200), row.type, { limit: CANDIDATE_LIMIT });
-      } catch {
-        result = { candidates: [], sources: [] };
-      }
+    /** One title's search result → its proposal, saved. */
+    const record = async (row: ResolveRow, result: SearchResult, isRetry: boolean) => {
       const classified = classify(row, result);
       const { candidates } = classified;
       // No sources and no candidates means the call itself failed: retry, don't settle.
@@ -381,19 +382,69 @@ export function createResolver(
       };
       await d.saveProposal(proposal); // throws → the run fails loudly (e.g. migration 29 missing)
       byId.set(row.id, proposal);
-      refresh();
       if (band === 'error' && !isRetry) retry.push(row);
-      if (result.sources.some((s) => s.state === 'rate_limited')) {
+    };
+    /** After a call: back off on a rate limit, else keep ≥ paceMs from start to start. */
+    const pace = async (results: SearchResult[], started: number) => {
+      if (results.some((r) => r.sources.some((x) => x.state === 'rate_limited'))) {
         emit({ state: 'waiting', waitingFor: 'rate_limited' });
         await nap(backoffMs);
       } else {
         const left = paceMs - (d.now() - started);
         if (left > 0) await nap(left);
       }
+    };
+    const gateOk = async (): Promise<boolean> => {
+      const g = await gate();
+      if (g === 'handoff') handedOff = true;
+      return g === 'go';
+    };
+
+    const attempt = async (row: ResolveRow, isRetry: boolean): Promise<boolean> => {
+      if (!(await gateOk())) return false;
+      const started = d.now();
+      let result: SearchResult;
+      try {
+        result = await d.search(row.title.slice(0, 200), row.type, { limit: CANDIDATE_LIMIT });
+      } catch {
+        result = { candidates: [], sources: [] };
+      }
+      await record(row, result, isRetry);
+      refresh();
+      await pace([result], started);
       return true;
     };
 
-    for (const row of queue) if (!(await attempt(row, false))) return;
+    /** Up to RESOLVE_BATCH titles in one call. 'unsupported' = the edge can't batch: go one by one. */
+    const attemptBatch = async (rows: ResolveRow[]): Promise<'ok' | 'stop' | 'unsupported'> => {
+      if (!(await gateOk())) return 'stop';
+      const started = d.now();
+      let results: SearchResult[] | null = null;
+      try {
+        results = await d.searchBatch!(rows.map((r) => ({ q: r.title.slice(0, 200), type: r.type })), { limit: CANDIDATE_LIMIT });
+      } catch {
+        results = null;
+      }
+      if (!results || results.length !== rows.length) return 'unsupported';
+      for (let k = 0; k < rows.length; k++) await record(rows[k], results[k], false);
+      refresh();
+      await pace(results, started);
+      return 'ok';
+    };
+
+    let batching = !!d.searchBatch;
+    for (let i = 0; i < queue.length;) {
+      if (batching) {
+        const rows = queue.slice(i, i + RESOLVE_BATCH);
+        const r = await attemptBatch(rows);
+        if (r === 'stop') return;
+        if (r === 'unsupported') { batching = false; continue; }
+        i += rows.length;
+      } else {
+        if (!(await attempt(queue[i], false))) return;
+        i += 1;
+      }
+    }
     for (const row of retry) if (!(await attempt(row, true))) return;
   }
 
