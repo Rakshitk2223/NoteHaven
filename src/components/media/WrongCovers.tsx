@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Image as ImageIcon, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { ToastAction } from '@/components/ui/toast';
@@ -14,7 +14,7 @@ import { useBackupGate } from './import/useBackupGate';
 import { BackupNote } from './import/BackupNote';
 import { CoverArt } from './CoverArt';
 import { fixInChunks } from './cover-row';
-import { copyFailedRecently, rememberCopyFailures } from './copy-failures';
+import { copyFailedRecently, imageLoads, rememberCopyFailures } from './copy-failures';
 
 const PROBLEM: Record<WrongCover['problem'], string> = {
   'wrong-medium': 'Wrong kind of art',
@@ -30,7 +30,8 @@ const TOUCHED = ['mediaItems', 'mediaRails', 'mediaWrongCovers', 'mediaBulkLates
  * missing while a good one is known. One tap per row, or Fix all (one Undo).
  * Rows with no good suggestion open "Change cover…". Pinned covers never show.
  * A suggestion whose copy already failed for good (the site refuses our server)
- * isn't offered again: that row says so and opens "Change cover…" instead.
+ * isn't offered again, and a reader-app thumbnail that won't even load in the
+ * browser (scan sites refuse both) is never offered: those rows get "Pick cover".
  */
 export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }: {
   open: boolean;
@@ -49,12 +50,36 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
   useEffect(() => { holdReload('media-cover-fix', !!busy); return () => holdReload('media-cover-fix', false); }, [busy]);
   const q = useQuery({ queryKey: ['mediaWrongCovers'], queryFn: loadWrongCovers, enabled: open, staleTime: 60 * 1000 });
   const [failures, setFailures] = useState(0); // bumps when a copy fails, so the list re-reads what's remembered
+  // Reader-app suggestions are checked in the browser first (url → loads?); unchecked ones wait.
+  const [probed, setProbed] = useState<Map<string, boolean>>(() => new Map());
+  useEffect(() => {
+    if (!open || !q.data) return;
+    const todo = [...new Set(q.data.filter((w) => w.suggestion?.origin === 'reader').map((w) => w.suggestion!.url))]
+      .filter((u) => !probed.has(u) && !copyFailedRecently(u));
+    if (!todo.length) return;
+    let cancelled = false;
+    void (async () => {
+      for (let i = 0; i < todo.length && !cancelled; i += 6) {
+        const batch = todo.slice(i, i + 6);
+        const ok = await Promise.all(batch.map((u) => imageLoads(u)));
+        if (cancelled) return;
+        // Remembered like a failed copy, so the next open doesn't re-check it.
+        rememberCopyFailures(batch.filter((_, k) => !ok[k]).map((url) => ({ url, reason: 'fetch_failed' as CopyFailure })));
+        setProbed((m) => { const n = new Map(m); batch.forEach((u, k) => n.set(u, ok[k])); return n; });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- probe once per load, not per probe result
+  }, [open, q.data]);
   const items = useMemo(() => (q.data ?? []).map((w) => {
-    const failed = w.suggestion ? copyFailedRecently(w.suggestion.url) : null;
-    return failed ? { ...w, suggestion: null, copyFailed: failed } : { ...w, copyFailed: null as CopyFailure | null };
+    const url = w.suggestion?.url;
+    const failed = url ? copyFailedRecently(url) ?? (probed.get(url) === false ? 'fetch_failed' as CopyFailure : null) : null;
+    const checking = !!url && w.suggestion!.origin === 'reader' && !failed && !probed.has(url);
+    return failed ? { ...w, suggestion: null, copyFailed: failed, checking: false } : { ...w, copyFailed: null as CopyFailure | null, checking };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- failures: re-read localStorage after a failed copy
-  }), [q.data, failures]);
-  const fixable = items.filter((w) => w.suggestion);
+  }), [q.data, failures, probed]);
+  const fixable = items.filter((w) => w.suggestion && !w.checking);
+  const checking = items.filter((w) => w.checking).length;
 
   const report = (res: CoverWriteResult, asked: WrongCover[]) => {
     for (const key of TOUCHED) void queryClient.invalidateQueries({ queryKey: [key] });
@@ -70,7 +95,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
     toast({
       title: res.written.length ? `Fixed ${res.written.length} cover${res.written.length === 1 ? '' : 's'}` : 'Nothing changed',
       description: [
-        copyFails.length ? `${copyFails.length} couldn’t be copied (${firstWhy.replace(/\.$/, '').toLowerCase()}). Use Change cover… for those` : '',
+        copyFails.length ? `${copyFails.length} couldn’t be copied (${firstWhy.replace(/\.$/, '').toLowerCase()}). Tap Pick cover on those rows` : '',
         other > 0 ? `${other} skipped (pinned or changed since)` : '',
       ].filter(Boolean).join(' · ') || undefined,
       variant: !res.written.length && copyFails.length ? 'destructive' : undefined,
@@ -119,7 +144,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
           <div className="min-w-0 flex-1">
             <SheetTitle className="text-lg font-semibold text-foreground">Wrong covers</SheetTitle>
             <SheetDescription className="text-sm text-muted-foreground">
-              Covers that are the wrong kind of art, won’t load, or are missing. Pinned covers are left alone.
+              {fixable.length ? `${fixable.length.toLocaleString()} can be fixed in one tap. ` : ''}The rest need you to pick a cover, or get theirs when you link them.
             </SheetDescription>
           </div>
           <Button size="icon" variant="ghost" className="h-10 w-10 flex-shrink-0" onClick={() => onOpenChange(false)} aria-label="Close" disabled={!!busy}>
@@ -144,7 +169,7 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
                     <CoverArt src={w.row.cover_image} title={w.row.title} initials={1} letterClassName="text-sm" />
                   </span>
                   {/* The → preview only when there's something to change to. */}
-                  {w.suggestion && (
+                  {w.suggestion && !w.checking && (
                     <>
                       <span aria-hidden="true" className="-mx-1 text-muted-foreground">→</span>
                       <span className="relative h-14 w-10 flex-shrink-0 overflow-hidden rounded-md ring-1 ring-border" title="Suggested">
@@ -155,17 +180,17 @@ export default function WrongCovers({ open, onOpenChange, phone, onChangeCover }
                   <span className="min-w-0 flex-1">
                     <span className="line-clamp-2 break-words text-sm font-medium leading-snug text-foreground">{w.row.title}</span>
                     <span className="block truncate text-xs text-warning">{PROBLEM[w.problem]}</span>
-                    {w.copyFailed && <span className="block truncate text-xs text-muted-foreground">The suggested cover can’t be copied. Pick one</span>}
+                    {w.checking && <span className="block truncate text-xs text-muted-foreground">Checking the suggested cover…</span>}
                   </span>
-                  {w.suggestion ? (
+                  {w.checking ? null : w.suggestion ? (
                     <Button variant="outline" className="h-11 flex-shrink-0 px-3" disabled={!!busy}
                       onClick={() => void run(w.row.id, () => applySuggestion(w), [w])}>
                       Use this
                     </Button>
                   ) : (
-                    <Button variant="ghost" size="icon" className="h-11 w-11 flex-shrink-0" disabled={!!busy}
-                      onClick={() => onChangeCover(w.row.id)} aria-label={`Change cover for ${w.row.title}`} title="Change cover…">
-                      <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                    <Button variant="outline" className="h-11 flex-shrink-0 px-3" disabled={!!busy}
+                      onClick={() => onChangeCover(w.row.id)} aria-label={`Pick a cover for ${w.row.title}`}>
+                      Pick cover
                     </Button>
                   )}
                 </li>

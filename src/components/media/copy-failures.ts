@@ -38,3 +38,20 @@ export function rememberCopyFailures(failed: Array<{ url: string; reason: CopyFa
 export function copyFailedRecently(url: string): CopyFailure | null {
   return read()[url]?.reason ?? null;
 }
+
+/**
+ * Does `url` load as an image in this browser (no referrer, like CoverArt)?
+ * Scan-site thumbnails from the reader app usually refuse both the browser and
+ * our server, so a reader suggestion that can't even load here isn't offered.
+ */
+export function imageLoads(url: string, timeoutMs = 8000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const done = (ok: boolean) => { window.clearTimeout(t); img.onload = null; img.onerror = null; resolve(ok); };
+    const t = window.setTimeout(() => done(false), timeoutMs);
+    img.onload = () => done(img.naturalWidth > 1);
+    img.onerror = () => done(false);
+    img.referrerPolicy = 'no-referrer';
+    img.src = url;
+  });
+}

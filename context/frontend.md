@@ -190,8 +190,10 @@ items appended automatically.
     with a fix to the default (source art for linked titles, the reader thumbnail otherwise). "Fix all"
     is a bulk write behind the shared backup gate, journaled every 5. A copy that fails (`copy:<reason>`
     in `skipped`) is named in the toast; lasting failures (the site refuses our server, not an image…)
-    are remembered on the device for 7 days (`media/copy-failures.ts`), so that row offers Change cover…
-    instead of the same failing one-tap fix.
+    are remembered on the device for 7 days (`media/copy-failures.ts`), so that row offers **Pick cover**
+    (Change cover…) instead of the same failing one-tap fix. Reader-app suggestions are loaded in the
+    browser first (`imageLoads`); one that won't load (scan sites refuse hotlinks and our server alike) is
+    never offered, and Fix all counts only fixes that can land.
     **Pin / Unpin** and **Remove cover** (a pinned null cover) stay in the ⋮ menu. Every change goes
     through `setCover(s)` and is journaled. A one-row cover batch (a single pick or fix) keeps its own
     toast Undo and never takes over "Undo last bulk change" (`isSingleCoverChange`).
