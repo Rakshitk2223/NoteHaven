@@ -58,6 +58,17 @@ export function onRouteChange(): void {
   if (pendingReload && holds.size === 0) reloadNow();
 }
 
+/**
+ * "Check for updates" (Settings → About): ask the server now. 'updating' = a new
+ * version was found and the app reloads into it (onNeedReload); 'latest' = this is it;
+ * 'unavailable' = no service worker here (dev, or a browser without one).
+ */
+export async function checkForUpdateNow(): Promise<'updating' | 'latest' | 'unavailable'> {
+  if (!registration) return 'unavailable';
+  try { await registration.update(); } catch { return 'unavailable'; }
+  return registration.installing || registration.waiting ? 'updating' : 'latest';
+}
+
 /** True once after an automatic update reload (for the toast). */
 export function consumeUpdatedFlag(): boolean {
   try {

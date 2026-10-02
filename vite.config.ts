@@ -3,9 +3,25 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from 'vite-plugin-pwa';
+import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
+
+// Settings → About shows exactly which build is running: package.json's version
+// (bumped on every push to main), the commit (Netlify's COMMIT_REF, else local git)
+// and when it was built.
+const APP_VERSION = (JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }).version;
+const APP_COMMIT = (() => {
+  if (process.env.COMMIT_REF) return process.env.COMMIT_REF.slice(0, 7);
+  try { return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return 'unknown'; }
+})();
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __APP_COMMIT__: JSON.stringify(APP_COMMIT),
+    __APP_BUILT_AT__: JSON.stringify(new Date().toISOString()),
+  },
   server: {
     host: "::",
     port: 8080,
