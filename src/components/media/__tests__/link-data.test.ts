@@ -54,4 +54,25 @@ describe('buildLinkView (the queue and the Auto-matched list)', () => {
   it('counts unlinked rows for the More entry', () => {
     expect(unlinkedCount({ rows: [row(1), row(2, { link_status: 'linked' }), row(3, { link_status: null })], proposals: [] })).toBe(2);
   });
+
+  it('the same work under ANOTHER source (same name, same type, already linked) never auto-links', () => {
+    const v = view({
+      rows: [
+        row(1, { title: '[audit] Solo Climber', link_status: 'linked', source: 'mangaupdates', source_id: '77' } as never),
+        row(2, { title: '[audit] Solo Climber (copy)' }),
+        row(3, { title: '[audit] Different One' }),
+        row(4, { title: '[audit] Manga Twin', type: 'Manga' }),
+      ],
+      proposals: [
+        prop(2, { input_title: '[audit] Solo Climber (copy)', band: 'auto', candidates: [{ source: 'anilist', source_id: '9', title: 'Something Else', alt_titles: ['[audit] Solo Climbers'] } as never] }),
+        prop(3, { input_title: '[audit] Different One', band: 'auto', candidates: [{ source: 'anilist', source_id: '10', title: '[audit] Different One', alt_titles: [] } as never] }),
+        // Same name but another type: not the same work.
+        prop(4, { input_title: '[audit] Manga Twin', input_type: 'Manga', band: 'auto', candidates: [{ source: 'anilist', source_id: '11', title: '[audit] Solo Climber', alt_titles: [] } as never] }),
+      ],
+    });
+    expect(v.autoMatched.map((i) => i.row.id).sort()).toEqual([3, 4]);
+    expect(v.queue.map((i) => i.row.id)).toEqual([2]);
+    expect(v.duplicateIds.has(2)).toBe(true);
+  });
 });
+

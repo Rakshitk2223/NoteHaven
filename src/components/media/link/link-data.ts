@@ -3,6 +3,7 @@
 // module only reads rows + proposals and decides what needs a pick.
 import { supabase } from '@/integrations/supabase/client';
 import { fetchAllRows } from '@/lib/fetch-all';
+import { normalizeTitle } from '@/lib/title-match';
 import type { ProposalRow, ResolveRow } from '@/lib/media-resolve';
 
 /** His rows as the resolver sees them, plus the link (to spot works already linked elsewhere). */
@@ -45,6 +46,34 @@ export interface LinkView {
   duplicateIds: Set<number>;
   /** Works already linked to one of his titles (source:source_id → that title): never linked twice; "Move link here" moves it. */
   takenWorks: Map<string, { id: number; title: string }>;
+  /**
+   * The same work under ANOTHER source: a linked title of the same type whose name is one of the
+   * candidate's names ("type::normalised name" → that title). Never auto-linked; he decides.
+   */
+  linkedNames: Map<string, { id: number; title: string }>;
+}
+
+const nameKeys = (t: string | null | undefined): string[] => {
+  const n = normalizeTitle(t);
+  if (!n) return [];
+  const singular = n.split(' ').map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)).join(' ');
+  return [...new Set([n, singular])];
+};
+
+/** A linked title (not `selfId`) that's probably this candidate under another source, or null. */
+export function lookalikeOf(
+  linkedNames: LinkView['linkedNames'],
+  type: string,
+  c: { title: string; alt_titles?: string[] | null },
+  selfId: number,
+): { id: number; title: string } | null {
+  for (const t of [c.title, ...(c.alt_titles ?? [])]) {
+    for (const k of nameKeys(t)) {
+      const hit = linkedNames.get(`${type}::${k}`);
+      if (hit && hit.id !== selfId) return hit;
+    }
+  }
+  return null;
 }
 
 /**
@@ -65,8 +94,18 @@ export function buildLinkView(
     const row = byId.get(p.media_id);
     return !p.decision && p.candidates?.length && row && row.link_status !== 'linked' && isCurrent(p, row);
   });
+  const linkedNames = new Map<string, { id: number; title: string }>();
+  for (const r of s.rows) {
+    if (r.link_status !== 'linked' || !r.source) continue;
+    for (const k of nameKeys(r.title)) if (!linkedNames.has(`${r.type}::${k}`)) linkedNames.set(`${r.type}::${k}`, { id: r.id, title: r.title });
+  }
   const duplicateIds = new Set<number>([...findDuplicates(open).values()].flat());
-  for (const p of open) if ((p.band === 'auto' || p.band === 'review') && takenWorks.has(workKey(p.candidates[0]))) duplicateIds.add(p.media_id);
+  for (const p of open) {
+    if (p.band !== 'auto' && p.band !== 'review') continue;
+    const c = p.candidates[0];
+    // The same work already linked: exactly (same source id), or under another source (same name, same type).
+    if (takenWorks.has(workKey(c)) || lookalikeOf(linkedNames, byId.get(p.media_id)!.type, c, p.media_id)) duplicateIds.add(p.media_id);
+  }
   const queue: QueueItem[] = [];
   const autoMatched: QueueItem[] = [];
   for (const p of open) {
@@ -74,7 +113,7 @@ export function buildLinkView(
     if (p.band === 'auto' && !duplicateIds.has(p.media_id)) autoMatched.push(item);
     else if (p.band === 'review' || p.band === 'duplicate' || p.band === 'auto') queue.push(item);
   }
-  return { queue, autoMatched, duplicateIds, takenWorks };
+  return { queue, autoMatched, duplicateIds, takenWorks, linkedNames };
 }
 
 /** Unlinked rows: "Link your library" is only offered while there are any. */

@@ -10,7 +10,7 @@ import { unlinkEntry } from '@/lib/media-link';
 import type { TrackerType } from '@/lib/media-sources';
 import { ReviewCard } from '../ReviewCard';
 import { candidateFacts, candidateLine } from '../picker-utils';
-import { decide, reopenProposal, workKey, type QueueItem } from './link-data';
+import { decide, lookalikeOf, reopenProposal, workKey, type QueueItem } from './link-data';
 import { MatchCompare } from './MatchCompare';
 import { whyAmbiguous } from './match-signals';
 import { BackupNote } from '../import/BackupNote';
@@ -55,17 +55,25 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
   const [busy, setBusy] = useState<number | null>(null);
   const [comparing, setComparing] = useState<{ item: QueueItem; index: number } | null>(null);
   const queryClient = useQueryClient();
-  const holderOf = (c: { source: string; source_id: string }) => run.takenWorks.get(workKey(c)) ?? null;
-  const reasonFor = (c: { source: string; source_id: string }) => {
-    const h = holderOf(c);
-    return h ? `Linked to “${h.title}”. Compare to move it` : null;
+  type Cand = QueueItem['proposal']['candidates'][number];
+  /** Who already holds this work: exactly (same source id), or probably (same name under another source). */
+  const holderOf = (row: QueueItem['row'], c: Cand): { id: number; title: string; exact: boolean } | null => {
+    const exact = run.takenWorks.get(workKey(c));
+    if (exact) return { ...exact, exact: true };
+    const like = lookalikeOf(run.linkedNames, row.type, c, row.id);
+    return like ? { ...like, exact: false } : null;
+  };
+  // Only an exact hold blocks a pick; a lookalike may really be a different work.
+  const reasonFor = (row: QueueItem['row'], c: Cand) => {
+    const h = holderOf(row, c);
+    return h?.exact ? `Linked to “${h.title}”. Compare to move it` : null;
   };
   const pick = (mediaId: number, index: number) => { const next = new Map(picks); next.set(mediaId, index); onPicks(next); };
 
   // "Move link here": unlink the title holding this work (its progress and cover stay), reopen its
   // proposal so it's back in Needs a pick, then pick the work for this title. Undo relinks it.
   const moveHere = async (item: QueueItem, index: number) => {
-    const holder = holderOf(item.proposal.candidates[index]);
+    const holder = holderOf(item.row, item.proposal.candidates[index]);
     if (!holder) return;
     setBusy(item.row.id);
     try {
@@ -129,9 +137,13 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
                 <div key={row.id} className={cn(busy === row.id && 'pointer-events-none opacity-60')}>
                   {run.duplicateIds.has(row.id) && (
                     <p className="px-3 pt-3 text-xs font-medium text-warning">
-                      {holderOf(proposal.candidates[0])
-                        ? `Its best match is linked to your “${holderOf(proposal.candidates[0])!.title}”. Compare it to move the link here, or pick another.`
-                        : 'Another of your titles matches the same work: link one, skip the other.'}
+                      {(() => {
+                        const h = holderOf(row, proposal.candidates[0]);
+                        if (!h) return 'Another of your titles matches the same work: link one, skip the other.';
+                        return h.exact
+                          ? `Its best match is linked to your “${h.title}”. Compare it to move the link here, or pick another.`
+                          : `Looks like the same series as your “${h.title}”, already linked. Compare to move the link here, or pick it anyway if they’re different.`;
+                      })()}
                     </p>
                   )}
                   <ReviewCard
@@ -148,7 +160,7 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
                       line: candidateLine(c, row.type as TrackerType) || null,
                       cover: c.cover,
                       // One work, one title: a work already linked to another of his titles can't be picked.
-                      disabledReason: reasonFor(c),
+                      disabledReason: reasonFor(row, c),
                     }))}
                     picked={picks.has(row.id) ? String(picks.get(row.id)) : undefined}
                     onPick={(key) => {
@@ -181,8 +193,9 @@ export default function LinkQueue({ open, onOpenChange, run, phone, picks, onPic
         {comparing && (
           <MatchCompare open onOpenChange={(o) => { if (!o) setComparing(null); }}
             row={comparing.item.row} candidate={comparing.item.proposal.candidates[comparing.index]} mode="pick"
-            disabledReason={reasonFor(comparing.item.proposal.candidates[comparing.index])}
-            takenBy={holderOf(comparing.item.proposal.candidates[comparing.index])?.title ?? null}
+            disabledReason={reasonFor(comparing.item.row, comparing.item.proposal.candidates[comparing.index])}
+            takenBy={holderOf(comparing.item.row, comparing.item.proposal.candidates[comparing.index])?.title ?? null}
+            takenExact={holderOf(comparing.item.row, comparing.item.proposal.candidates[comparing.index])?.exact ?? false}
             onMoveHere={() => void moveHere(comparing.item, comparing.index)}
             onPick={() => pick(comparing.item.row.id, comparing.index)} />
         )}

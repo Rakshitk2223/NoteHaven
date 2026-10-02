@@ -19,6 +19,8 @@ type Decide =
     mode: 'pick'; onPick: () => void; disabledReason?: string | null;
     /** The work is linked to another of his titles: move that link here (unlinks it there). */
     takenBy?: string | null; onMoveHere?: () => void;
+    /** true: that title holds this exact entry (only Move); false: it probably is the same work under another source. */
+    takenExact?: boolean;
   };
 
 type MatchCompareProps = {
@@ -132,8 +134,11 @@ export function MatchCompare(props: MatchCompareProps) {
 
         {props.mode === 'pick' && props.takenBy && (
           <p className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-foreground">
-            Already linked to your title “{props.takenBy}”. If that was a mistake, move the link here: “{props.takenBy}” is
-            unlinked (its progress and cover stay) and goes back to Needs a pick.
+            {props.takenExact
+              ? <>Already linked to your title “{props.takenBy}”.</>
+              : <>Looks like the same series as your “{props.takenBy}”, which is already linked (maybe through another site).</>}
+            {' '}If that was a mistake, move the link here: “{props.takenBy}” is unlinked (its progress and cover stay) and goes
+            back to Needs a pick.{!props.takenExact && ' If they’re different works, just pick this.'}
           </p>
         )}
 
@@ -157,7 +162,12 @@ export function MatchCompare(props: MatchCompareProps) {
             <>
               <Button variant="outline" className="h-11" onClick={() => onOpenChange(false)}>Back</Button>
               {props.takenBy && props.onMoveHere ? (
-                <Button className="h-11" onClick={() => { props.onMoveHere!(); onOpenChange(false); }}>Move link here</Button>
+                <>
+                  {!props.takenExact && (
+                    <Button variant="outline" className="h-11" onClick={() => { props.onPick(); onOpenChange(false); }}>Pick this</Button>
+                  )}
+                  <Button className="h-11" onClick={() => { props.onMoveHere!(); onOpenChange(false); }}>Move link here</Button>
+                </>
               ) : (
                 <Button className="h-11" disabled={!!props.disabledReason} title={props.disabledReason ?? undefined}
                   onClick={() => { props.onPick(); onOpenChange(false); }}>

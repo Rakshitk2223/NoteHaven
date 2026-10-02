@@ -37,6 +37,8 @@ export interface LinkRun {
   duplicateIds: Set<number>;
   /** Works already linked to one of his titles (source:source_id → that title). */
   takenWorks: Map<string, { id: number; title: string }>;
+  /** Linked titles by "type::normalised name": spots the same work linked under another source. */
+  linkedNames: Map<string, { id: number; title: string }>;
   start: () => void;
   /** "Link here": run in this tab now; any other tab stops. */
   takeOver: () => void;
@@ -146,6 +148,7 @@ export function useLinkRun(enabled: boolean): LinkRun {
     autoMatched: view?.autoMatched ?? [],
     duplicateIds: view?.duplicateIds ?? new Set(),
     takenWorks: view?.takenWorks ?? new Map(),
+    linkedNames: view?.linkedNames ?? new Map(),
     start, takeOver, pause, resume, cancel, refresh,
   };
 }
