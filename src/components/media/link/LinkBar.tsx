@@ -18,7 +18,7 @@ export function LinkBar({ run, onOpenQueue, onOpenAuto }: { run: LinkRun; onOpen
   const counts = run.counts ? `${n(run.counts.done)}/${n(run.counts.total)}` : '';
 
   let label: string | null = null;
-  if (p?.runningElsewhere) label = 'Linking in another tab';
+  if (p?.runningElsewhere) label = counts ? `Linking in another tab · ${counts}` : 'Linking in another tab';
   else if (state === 'failed') label = p?.message ?? 'Linking stopped';
   else if (state === 'waiting') {
     label = p?.waitingFor === 'offline' ? `Waiting for a connection · ${counts}`

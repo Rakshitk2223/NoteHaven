@@ -3,8 +3,12 @@
 // the pill and the "Needs a pick" chip show.
 //
 // It survives a tab close: the intent ("running" / "paused") is kept on this
-// device, and the resolver resumes from the proposals it already saved.
+// device, and the resolver resumes from the proposals it already saved. It
+// follows his eyes: a tab hidden for a while lets go (lib/media-resolve), and
+// any visible tab with the intent "running" picks the run up.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { runUpdatePass } from '../update-pass';
 import type { ResolverProgress } from '@/lib/media-resolve';
 import { type LinkState, buildLinkView, loadLinkState, unlinkedCount, type QueueItem } from './link-data';
 
@@ -49,6 +53,8 @@ export function useLinkRun(enabled: boolean): LinkRun {
   const [state, setState] = useState<LinkState | null>(null);
   const [intent, setIntentState] = useState<Intent>(readIntent);
   const lastDone = useRef(-1);
+  const lastState = useRef<string | null>(null);
+  const queryClient = useQueryClient();
 
   const setIntent = useCallback((v: Intent) => { writeIntent(v); setIntentState(v); }, []);
   const refresh = useCallback(async () => {
@@ -71,10 +77,16 @@ export function useLinkRun(enabled: boolean): LinkRun {
     setProgress(r.getProgress());
     return r.subscribe((p) => {
       setProgress(p);
-      if (p.done - lastDone.current >= 10 || !ACTIVE.has(p.state)) { lastDone.current = p.done; void refresh(); }
-      if (p.state === 'done' || p.state === 'cancelled') setIntent(null);
+      const moved = p.state !== lastState.current;
+      lastState.current = p.state;
+      if (p.done - lastDone.current >= 10 || (moved && !ACTIVE.has(p.state))) { lastDone.current = p.done; void refresh(); }
+      if (moved && (p.state === 'done' || p.state === 'cancelled')) {
+        setIntent(null);
+        // Linking let go of the sources: give what he approved meanwhile its details.
+        void runUpdatePass(queryClient, { wait: true });
+      }
     });
-  }, [mod, refresh, setIntent]);
+  }, [mod, refresh, setIntent, queryClient]);
 
   // Resume after a tab close (not when he'd paused it).
   const resumed = useRef(false);
@@ -83,6 +95,25 @@ export function useLinkRun(enabled: boolean): LinkRun {
     resumed.current = true;
     if (intent === 'running' && !ACTIVE.has(mod.getResolver().getProgress().state)) void mod.getResolver().start();
   }, [mod, intent]);
+
+  // Pick the run up in whichever tab he's looking at: on becoming visible, and every
+  // few seconds while another tab holds it (it lets go 15 s after being hidden).
+  useEffect(() => {
+    if (!mod || intent !== 'running') return;
+    const r = mod.getResolver();
+    const take = () => {
+      if (document.visibilityState === 'visible' && !r.isRunning()) void r.start();
+    };
+    document.addEventListener('visibilitychange', take);
+    // While another tab runs it, re-read the counts every 30 s so the pill still moves here.
+    let ticks = 0;
+    const t = window.setInterval(() => {
+      if (!r.getProgress().runningElsewhere) return;
+      take();
+      if (++ticks % 6 === 0) void refresh();
+    }, 5000);
+    return () => { document.removeEventListener('visibilitychange', take); window.clearInterval(t); };
+  }, [mod, intent, refresh]);
 
   const start = useCallback(() => { if (!mod) return; setIntent('running'); void mod.getResolver().start(); }, [mod, setIntent]);
   const pause = useCallback(() => { if (!mod) return; setIntent('paused'); mod.getResolver().pause(); }, [mod, setIntent]);

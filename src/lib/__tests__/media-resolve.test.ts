@@ -239,6 +239,20 @@ describe('createResolver', () => {
     expect(off.states.some((s) => s.waitingFor === 'offline')).toBe(true);
   });
 
+  it('hidden for 15 s, it lets go (a visible tab carries on); started again, it continues where it stopped', async () => {
+    let hidden = true;
+    const rows = [row('[audit] Left'), row('[audit] Right')];
+    const h = harness(rows, { isHidden: () => hidden });
+    await h.resolver.start(); // hidden from the start: 2 s polls until 15 s, then hand off
+    expect(h.searched).toHaveLength(0);
+    expect(h.resolver.isRunning()).toBe(false);
+    expect(h.resolver.getProgress()).toMatchObject({ state: 'waiting', waitingFor: 'hidden' });
+    hidden = false;
+    await h.resolver.start();
+    expect(h.searched).toHaveLength(2);
+    expect(h.resolver.getProgress().state).toBe('done');
+  });
+
   it('a save that fails (migration 29 missing) fails loudly, with no title in the message', async () => {
     const h = harness([row('[audit] Secret Title')], {
       saveProposal: async () => { throw { code: 'PGRST205', message: 'no table' }; },

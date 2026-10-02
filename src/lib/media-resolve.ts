@@ -3,8 +3,9 @@
 // media_link_proposals (migration 29) as soon as it's computed.
 //
 //   · Client-paced: ≥ 2.5 s from start to start (AniList allows 30/min), one
-//     title in flight, auto-waits while the tab is hidden or offline, and backs
-//     off 60 s on a rate limit.
+//     title in flight, auto-waits while offline, and backs off 60 s on a rate
+//     limit. A tab hidden for 15 s hands the run off: it lets go of the source
+//     lock, and whichever of his tabs is visible picks it up (useLinkRun).
 //   · Resumable anywhere: the server is the cursor. A restart (another tab, the
 //     phone) continues from the first row without a current proposal.
 //   · Idempotent: a linked row, or one whose proposal still matches its title and
@@ -93,6 +94,8 @@ export interface Resolver {
   /** Stop for good (proposals already saved stay). */
   cancel(): void;
   getProgress(): ResolverProgress;
+  /** This tab holds the run (it may be paused or waiting). */
+  isRunning(): boolean;
   /** Called on every change; returns an unsubscribe. */
   subscribe(fn: (p: ResolverProgress) => void): () => void;
 }
@@ -113,6 +116,8 @@ export interface ResolverDeps {
 }
 
 export const RESOLVE_PACE_MS = 2500;
+/** Hidden this long, the run lets go so a visible tab (or this one, on return) can carry on. */
+export const HANDOFF_MS = 15_000;
 export const RATE_LIMIT_BACKOFF_MS = 60_000;
 const CANDIDATE_LIMIT = 5;
 const READING: ReadonlySet<string> = new Set(['Manga', 'Manhwa', 'Manhua']);
@@ -261,12 +266,13 @@ export const SOURCE_TRAFFIC_LOCK = 'notehaven-source-traffic';
 
 export function createResolver(
   overrides: Partial<ResolverDeps> = {},
-  opts: { paceMs?: number; backoffMs?: number; pollMs?: number } = {},
+  opts: { paceMs?: number; backoffMs?: number; pollMs?: number; handoffMs?: number } = {},
 ): Resolver {
   const d: ResolverDeps = { ...defaultDeps, ...overrides };
   const paceMs = opts.paceMs ?? RESOLVE_PACE_MS;
   const backoffMs = opts.backoffMs ?? RATE_LIMIT_BACKOFF_MS;
   const pollMs = opts.pollMs ?? 2000;
+  const handoffMs = opts.handoffMs ?? HANDOFF_MS;
 
   let progress: ResolverProgress = {
     state: 'idle', done: 0, total: 0, auto: 0, review: 0, unlinked: 0, errors: 0,
@@ -286,10 +292,15 @@ export function createResolver(
   /** Sleep, but return early on pause/cancel/resume. */
   const nap = (ms: number) => Promise.race([d.sleep(ms), new Promise<void>((r) => { wake = r; })]);
 
-  /** Block while paused, hidden or offline; false = cancelled. */
-  async function gate(): Promise<boolean> {
+  /** Block while paused, hidden or offline. 'stop' = cancelled; 'handoff' = hidden too long, let go. */
+  async function gate(): Promise<'go' | 'stop' | 'handoff'> {
+    let hiddenSince: number | null = null;
     for (;;) {
-      if (cancelled) return false;
+      if (cancelled) return 'stop';
+      if (!paused && d.isHidden()) {
+        hiddenSince ??= d.now();
+        if (d.now() - hiddenSince >= handoffMs) return 'handoff';
+      } else hiddenSince = null;
       const wait: Pick<ResolverProgress, 'state' | 'waitingFor'> | null = paused ? { state: 'paused', waitingFor: null }
         : d.isOffline() ? { state: 'waiting', waitingFor: 'offline' }
         : d.isHidden() ? { state: 'waiting', waitingFor: 'hidden' } : null;
@@ -299,9 +310,11 @@ export function createResolver(
         continue;
       }
       if (progress.state !== 'running') emit({ state: 'running', waitingFor: null });
-      return true;
+      return 'go';
     }
   }
+
+  let handedOff = false;
 
   async function run(): Promise<void> {
     const [rows, proposals, mapped] = await Promise.all([d.loadRows(), d.loadProposals(), d.loadMappedIds()]);
@@ -312,7 +325,9 @@ export function createResolver(
     const queue = orderQueue(pendingRows(rows, proposals), mapped, proposals);
     const retry: ResolveRow[] = [];
     const attempt = async (row: ResolveRow, isRetry: boolean): Promise<boolean> => {
-      if (!(await gate())) return false;
+      const g = await gate();
+      if (g === 'handoff') handedOff = true;
+      if (g !== 'go') return false;
       const started = d.now();
       let result: SearchResult;
       try {
@@ -353,11 +368,13 @@ export function createResolver(
       running = true;
       cancelled = false;
       paused = false;
+      handedOff = false;
       emit({ state: 'running', runningElsewhere: false, message: null, waitingFor: null });
       const body = async () => {
         try {
           await run();
-          emit({ state: cancelled ? 'cancelled' : 'done', waitingFor: null });
+          // Handed off: not finished, just not here. The intent stays "running" for whichever tab is visible.
+          emit(handedOff ? { state: 'waiting', waitingFor: 'hidden' } : { state: cancelled ? 'cancelled' : 'done', waitingFor: null });
         } catch (e) {
           const code = (e as { code?: string } | null)?.code;
           emit({
@@ -385,6 +402,7 @@ export function createResolver(
     resume() { if (running && paused) { paused = false; wakeUp(); } },
     cancel() { cancelled = true; paused = false; wakeUp(); },
     getProgress: () => progress,
+    isRunning: () => running,
     subscribe(fn) { subs.add(fn); fn(progress); return () => { subs.delete(fn); }; },
   };
   return resolver;
